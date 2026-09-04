@@ -280,6 +280,51 @@ h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold
 .amount-income{color:var(--color-income)}
 .amount-expense{color:var(--color-risk)}
 .demo-tip{font-size:var(--font-size-12);color:var(--color-text-tertiary);padding:0 var(--space-4) var(--space-4)}
+.demo-tabs{display:flex;gap:var(--space-2);padding:var(--space-4) var(--space-4) 0;flex-wrap:wrap}
+.demo-tab{border:1px solid var(--raw-gray-300);background:transparent;border-radius:var(--radius-pill);
+  font-size:var(--font-size-13);font-weight:var(--weight-medium);padding:6px 14px;color:var(--color-text-secondary);
+  cursor:pointer;transition:all var(--dur-fast) var(--ease-out)}
+.demo-tab:hover{border-color:var(--color-brand);color:var(--color-brand);background:var(--color-brand-bg)}
+.demo-tab.active{background:var(--color-brand);border-color:var(--color-brand);color:var(--color-on-brand)}
+.demo-scene{display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) var(--space-6) 0;
+  font-size:var(--font-size-13);color:var(--color-text-secondary);line-height:1.5}
+.demo-scene .role{font-weight:var(--weight-semibold);color:var(--color-text);white-space:nowrap;
+  background:var(--color-brand-bg);color:var(--color-brand);padding:2px 10px;border-radius:var(--radius-pill);font-size:var(--font-size-12)}
+/* ═══ 三种场景 · 大板块（WHO 区）═══ */
+.scene-block{background:var(--color-bg-elevated);border:1px solid var(--card-border);border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-sm);padding:var(--space-8);margin-bottom:var(--space-8)}
+.scene-block-head{display:flex;align-items:flex-start;gap:var(--space-4);flex-wrap:wrap;
+  margin-bottom:var(--space-6);padding-bottom:var(--space-5);border-bottom:1px solid var(--color-surface-border)}
+.scene-no{font-family:var(--font-mono);font-size:var(--font-size-12);color:var(--color-brand);background:var(--color-brand-bg);
+  padding:6px 12px;border-radius:var(--radius-pill);font-weight:var(--weight-semibold);margin-top:2px}
+.scene-block-head h3{font-size:clamp(20px,2.4vw,26px);font-weight:var(--weight-bold);letter-spacing:-.01em}
+.scene-block-head h3 .ask{color:var(--color-text-secondary);font-weight:var(--weight-medium);font-size:.72em;display:block;margin-top:4px}
+.scene-tag{font-size:var(--font-size-14);color:var(--color-text-secondary);margin-top:2px;flex-basis:100%}
+.scene-pill{margin-left:auto;font-size:var(--font-size-12);font-weight:var(--weight-semibold);padding:5px 14px;border-radius:var(--radius-pill);white-space:nowrap}
+.scene-pill.core{background:var(--color-brand-bg);color:var(--color-brand)}
+.scene-pill.paid{background:var(--color-income-bg);color:var(--color-income)}
+.scene-pill.lite{background:var(--color-warning-bg);color:var(--color-warning)}
+.scene-block-body{display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:var(--space-8)}
+.scene-col h4{font-size:var(--font-size-12);letter-spacing:.08em;color:var(--color-text-secondary);font-weight:var(--weight-semibold);
+  margin-bottom:var(--space-4);padding-bottom:var(--space-2);border-bottom:1px solid var(--color-surface-border)}
+.pain-list{list-style:none}
+.pain-list li{position:relative;padding:0 0 var(--space-3) var(--space-5);font-size:var(--font-size-14);color:var(--color-text);line-height:1.55}
+.pain-list li::before{content:"";position:absolute;left:2px;top:9px;width:6px;height:6px;border-radius:50%;background:var(--raw-gray-300)}
+.solve-item{display:flex;gap:var(--space-3);padding:var(--space-3) 0;border-bottom:1px dashed var(--color-surface-border)}
+.solve-item:last-child{border-bottom:none}
+.solve-item .s-tag{flex-shrink:0;font-size:var(--font-size-11);font-weight:var(--weight-semibold);color:var(--color-brand);
+  background:var(--color-brand-bg);padding:2px 8px;border-radius:var(--radius-pill);height:fit-content;margin-top:2px}
+.solve-item p{font-size:var(--font-size-14);color:var(--color-text);line-height:1.5}
+.solve-item p small{display:block;color:var(--color-text-secondary);font-size:var(--font-size-12);margin-top:2px}
+.scene-sample{background:var(--color-bg);border:1px solid var(--color-surface-border);border-radius:var(--radius-md);padding:var(--space-4)}
+.scene-sample .ss-title{font-size:var(--font-size-12);font-weight:var(--weight-semibold);color:var(--color-text-secondary);
+  margin-bottom:var(--space-3);letter-spacing:.04em}
+.scene-sample .ss-cap{font-size:var(--font-size-11);color:var(--color-text-tertiary);margin-top:var(--space-3)}
+.scene-block-foot{margin-top:var(--space-6);display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center}
+.scene-block-foot .foot-note{font-size:var(--font-size-12);color:var(--color-text-tertiary)}
+@media (max-width:900px){.scene-block-body{grid-template-columns:1fr 1fr}.scene-block-body .scene-col:nth-child(3){grid-column:1/-1}}
+@media (max-width:600px){.scene-block-body{grid-template-columns:1fr}.scene-block{padding:var(--space-6)}}
+
 .appear{animation:appear var(--dur-base) var(--ease-out) both}
 @keyframes appear{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
@@ -456,25 +501,149 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section id="users" style="border-bottom:1px solid var(--color-surface-border)">
   <div class="container">
     <div class="sec-eyebrow">WHO · 三种人</div>
-    <h2>同一种「没人管钱」，三种不同的问法</h2>
-    <p class="sec-intro">CashLens 把同一套内核，翻译成三种人每天都要做的决策——决策层的语言，按角色自动切换。</p>
-    <div class="grid grid-3">
-      <div class="card">
-        <div class="card-num">独立开发者 · OPC 一人公司</div>
-        <h3>「这单接不接、报多少？」</h3>
-        <p>接单报价决策：现金垫底够不够、该客户历史回款周期、时间成本——给报价区间与理由，不再拍脑袋。</p>
+    <h2>同一种「没人管钱」，三种完全不同的账</h2>
+    <p class="sec-intro">CashLens 不做「通用记账」——它把同一套内核（事件账本 + 财务状态引擎 + 决策引擎），按三种人的钱、三种人的问题，分别翻译成他们每天要做的决策。</p>
+
+    <!-- ══ 板块 01：OPC 一人公司 ══ -->
+    <div class="scene-block">
+      <div class="scene-block-head">
+        <span class="scene-no">01</span>
+        <div>
+          <h3>独立开发者 · OPC 一人公司<span class="ask">每天真正在问的是：「这单接不接？报多少？」</span></h3>
+          <div class="scene-tag">一个人就是一家公司：设计师、开发者、顾问、插画师、文案——收入靠一个个项目，钱和「公司」是同一个账户。</div>
+        </div>
+        <span class="scene-pill core">产品最核心受众</span>
       </div>
-      <div class="card edge-income">
-        <div class="card-num">小微经营者 · 小店工作室</div>
-        <h3>「这批货进不进、工钱怎么算？」</h3>
-        <p>进货决策 + 报销发票归集 + 工时工资汇总——月底一张报表，进销存与人情账都不糊涂。</p>
+      <div class="scene-block-body">
+        <div class="scene-col">
+          <h4>他们的钱，长这样</h4>
+          <ul class="pain-list">
+            <li>收入是脉冲式：一单几万、一歇几周——进账没有节奏，月初不知道自己月底有多少。</li>
+            <li>支出公私不分：设备、软件订阅、社保、日常开销混在一个账户里，成本永远算不清。</li>
+            <li>客户欠款没人催：谁的钱拖了多久、哪家总逾期，靠脑子记，报价时全凭感觉。</li>
+            <li>报税季手忙脚乱：季度末才临时翻流水，收入归集靠 Excel 手工拼。</li>
+          </ul>
+        </div>
+        <div class="scene-col">
+          <h4>CashLens 怎么解决</h4>
+          <div class="solve-item"><span class="s-tag">接单报价</span><p><b>接单报价决策</b>——接单前自动查三件事：未来 30 天现金垫底够不够、这个客户历史回款周期多长、这单要占用多少档期；然后给一个报价区间和理由。<small>把「拍脑袋定价」变成「有依据的定价」——这是 CashLens 最强的代差能力。</small></p></div>
+          <div class="solve-item"><span class="s-tag">CashPulse</span><p><b>现金流预测</b>——按你的收入节奏预测未来 30/90 天区间（带置信带），缺口提前预警：变「怕断粮」为「提前备粮」。</p></div>
+          <div class="solve-item"><span class="s-tag">记忆体</span><p><b>假设检验闭环</b>——报价时说「3 天回款」，账本发现该客户实际要 3 周？自动标记偏差，下次报价自动参考。</p></div>
+          <div class="solve-item"><span class="s-tag">报税</span><p><b>报税节点提醒</b>——收入自动按季度归集，到点提醒，不再临时翻流水。</p></div>
+        </div>
+        <div class="scene-col">
+          <h4>产品里的一次真实决策</h4>
+          <div class="scene-sample">
+            <div class="ss-title">「有个设计单 ¥5,000 / 2 周，接不接？」</div>
+            <div class="card-mini">
+              <div class="row"><span class="k">垫底检查</span><span class="v" style="color:var(--color-warning)">30 天后缺口约 ¥2,400</span></div>
+              <div class="row"><span class="k">回款认知</span><span class="v">该客户历史 3 周，非 3 天（已纠偏）</span></div>
+              <div class="row"><span class="k">档期占用</span><span class="v">14 天</span></div>
+              <div class="row"><span class="k">报价建议</span><span class="v"><b class="num">¥5,500 – ¥7,000</b> · 建议首付 50%</span></div>
+            </div>
+            <div class="ss-cap">示意：由财务状态引擎 + 决策引擎生成</div>
+          </div>
+        </div>
       </div>
-      <div class="card edge-warning">
-        <div class="card-num">家庭 · 多平台消费者</div>
-        <h3>「这个月会不会超支？」</h3>
-        <p>微信/支付宝/拼多多/抖音账单聚合 + AI 自动分类 + 预算红线——超支提前预警，钱花在哪一目了然。</p>
+      <div class="scene-block-foot">
+        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="opc">到下方演示区，体验「接不接这单」→</a>
+        <span class="foot-note">对应 MVP SKILL：接单报价决策 · 现金流预测 · 智能分类 · 报税提醒</span>
       </div>
     </div>
+
+    <!-- ══ 板块 02：小微经营者 ══ -->
+    <div class="scene-block">
+      <div class="scene-block-head">
+        <span class="scene-no">02</span>
+        <div>
+          <h3>小微经营者 · 小店 / 工作室<span class="ask">每天真正在问的是：「这批货进不进？工钱、报销、发票怎么算？」</span></h3>
+          <div class="scene-tag">夫妻店、工作室、小批发、美业餐饮：有 2–20 个员工或合作者，有票有账有客户，却雇不起会计。</div>
+        </div>
+        <span class="scene-pill paid">B 端付费潜力</span>
+      </div>
+      <div class="scene-block-body">
+        <div class="scene-col">
+          <h4>他们的钱，长这样</h4>
+          <ul class="pain-list">
+            <li>一摊多角色账：员工工时工分、报销发票、进货款、日营收，混在一起手工算。</li>
+            <li>发票是硬刚需：客户要开票、自己报销要票、季度报税要归集——一票都不能丢。</li>
+            <li>月底结算靠 Excel 来回传：工时 × 单价 × 加班，人情账和账本永远分不清。</li>
+          </ul>
+        </div>
+        <div class="scene-col">
+          <h4>CashLens 怎么解决</h4>
+          <div class="solve-item"><span class="s-tag">工时工资</span><p><b>工时 / 工分自动汇总</b>——说一句「阿明 40 小时、小周 36 小时」或导入整张工时 Excel，月底自动出工资表。</p></div>
+          <div class="solve-item"><span class="s-tag">票据报销</span><p><b>报销票据归集</b>——发票拍照或 PDF 上传，豆包大模型视觉识别金额/日期/商户，你确认后入账（证据 0.85）。<small>识别结果必须人工确认——机器 + 人，才计 0.85。</small></p></div>
+          <div class="solve-item"><span class="s-tag">开票</span><p><b>开票信息生成</b>——按客户开票资料备好税目、金额、价税合计，开票记录与报销一一可追溯。</p></div>
+          <div class="solve-item"><span class="s-tag">进货 / 报税</span><p><b>进货决策 + 报税节点提醒</b>——进货翻译为接单决策的「进货版」；季度增值税收入自动归集。</p></div>
+        </div>
+        <div class="scene-col">
+          <h4>产品里的一次月底结算</h4>
+          <div class="scene-sample">
+            <div class="ss-title">月底 · 工资 + 报销 + 发票一起算</div>
+            <div class="card-mini">
+              <div class="row"><span class="k">阿明 40h × ¥30</span><span class="v num">¥1,200.00</span></div>
+              <div class="row"><span class="k">小周 36h × ¥25</span><span class="v num">¥900.00</span></div>
+              <div class="row"><span class="k">报销（4 笔已核对）</span><span class="v num">¥428.00</span></div>
+              <div class="row"><span class="k">待开票</span><span class="v" style="color:var(--color-warning)">服务费 ¥5,000</span></div>
+              <div class="row"><span class="k">报税</span><span class="v">季度申报临近 · 已自动归集</span></div>
+            </div>
+            <div class="ss-cap">示意：一张表说清工钱、报销、发票三件事</div>
+          </div>
+        </div>
+      </div>
+      <div class="scene-block-foot">
+        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="smallbiz">到下方演示区，体验「月底一张表」→</a>
+        <span class="foot-note">对应 MVP SKILL：票据采集（表格导入 + 拍照）· 智能分类 · 报税提醒</span>
+      </div>
+    </div>
+
+    <!-- ══ 板块 03：家庭 / 多平台消费者 ══ -->
+    <div class="scene-block">
+      <div class="scene-block-head">
+        <span class="scene-no">03</span>
+        <div>
+          <h3>家庭 · 多平台消费者<span class="ask">每天真正在问的是：「这个月花哪了？会不会超支？」</span></h3>
+          <div class="scene-tag">网购 + 生活消费分布在微信、支付宝、拼多多、抖音、银行卡——月底对上账就是胜利的家庭。</div>
+        </div>
+        <span class="scene-pill lite">高频 · 轻量</span>
+      </div>
+      <div class="scene-block-body">
+        <div class="scene-col">
+          <h4>他们的钱，长这样</h4>
+          <ul class="pain-list">
+            <li>账单散落五处：微信、支付宝、拼多多、抖音、银行卡——同一笔消费可能在两边出现。</li>
+            <li>超支总是最后知道：冲动消费的月底惊觉，是「这个月怎么又超了」。</li>
+            <li>两个人花的、一个人记：家庭共管账目，靠口头对账。</li>
+          </ul>
+        </div>
+        <div class="scene-col">
+          <h4>CashLens 怎么解决</h4>
+          <div class="solve-item"><span class="s-tag">账单聚合</span><p><b>多渠道账单一键导入 + 对账去重</b>——官方 CSV 导入（微信 128 笔 + 支付宝 96 笔），跨平台重复自动合并，账本留痕可查。</p></div>
+          <div class="solve-item"><span class="s-tag">AI 分类</span><p><b>自动分类 + 一句话改类</b>——分错的说一句就改，分类规则你自己定。</p></div>
+          <div class="solve-item"><span class="s-tag">预算红线</span><p><b>预算红线 + 缺口预警</b>——进度 96% 时提前 9 天告诉你，而不是月底才知道。</p></div>
+          <div class="solve-item"><span class="s-tag">语音</span><p><b>语音记账</b>——买菜路上说一句「超市买了 85」就记上了，连 App 都不用打开。</p></div>
+        </div>
+        <div class="scene-col">
+          <h4>产品里的一次超支拦截</h4>
+          <div class="scene-sample">
+            <div class="ss-title">「我这个月是不是要超支了？」</div>
+            <div class="card-mini">
+              <div class="row"><span class="k">本月预算</span><span class="v num">¥9,000</span></div>
+              <div class="row"><span class="k">已用进度</span><span class="v num" style="color:var(--color-warning)">96% · 今天 9/25</span></div>
+              <div class="row"><span class="k">预计</span><span class="v num" style="color:var(--color-warning)">月底超支约 ¥600</span></div>
+              <div class="row"><span class="k">建议</span><span class="v">未来一周可缓：购物类 ¥340</span></div>
+            </div>
+            <div class="ss-cap">示意：提前 9 天预警，而不是月底才知道</div>
+          </div>
+        </div>
+      </div>
+      <div class="scene-block-foot">
+        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="family">到下方演示区，体验「超支拦截」→</a>
+        <span class="foot-note">对应 MVP SKILL：账单导入 · 智能分类 · 预算红线 · 语音记账</span>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -596,29 +765,26 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <!-- ═══════════ 现场试一句 ═══════════ -->
 <section id="demo">
   <div class="container">
-    <div class="sec-eyebrow">LIVE · 现场试一句</div>
-    <h2>对话，就是入口</h2>
-    <p class="sec-intro">在 CashLens 里，记账不是一个表单，而是一句话。下面是产品交互形态的浏览器内演示——真实链路（引擎 + 账本）接入中。</p>
-    <div class="demo-shell" role="region" aria-label="CashLens 对话演示">
-      <div class="demo-chat" id="chatLog" aria-live="polite">
-        <div class="bubble ai">你好，我是你的 AI 财务团队。说一句试试——比如「昨天收了 3000 尾款」；或点下面的「问现金流」。</div>
+    <div class="sec-eyebrow">LIVE · 场景演示</div>
+    <h2>三种场景，各走一遍</h2>
+    <p class="sec-intro">上面对应的三种人，在这里各有一段可点的剧本——跟着走一遍，看 CashLens 如何应答每一步。也可以自己输入，或用麦克风说一句（本地语音识别，不保存）。</p>
+    <div class="demo-shell" role="region" aria-label="CashLens 三种场景演示">
+      <div class="demo-tabs" role="tablist" aria-label="选择使用场景">
+        <button class="demo-tab active" type="button" role="tab" aria-selected="true" data-scene="opc">OPC 一人公司</button>
+        <button class="demo-tab" type="button" role="tab" aria-selected="false" data-scene="smallbiz">小微经营者</button>
+        <button class="demo-tab" type="button" role="tab" aria-selected="false" data-scene="family">家庭日常</button>
       </div>
-      <div class="chips" id="chips">
-        <button type="button">昨天微信收了 3000 尾款</button>
-        <button type="button">中午买了杯咖啡 45</button>
-        <button type="button">拼多多退货退了 89</button>
-      </div>
-      <div class="demo-actions">
-        <button class="btn btn-ghost" type="button" id="btnAskCashflow">问下月现金流</button>
-      </div>
+      <div class="demo-scene"><span class="role" id="sceneRole"></span><span id="sceneText"></span></div>
+      <div class="demo-chat" id="chatLog" aria-live="polite"></div>
+      <div class="chips" id="sceneSteps" aria-label="剧本步骤"></div>
       <div class="demo-input">
-        <button class="btn btn-ghost" type="button" id="btnMic" title="语音输入（需麦克风授权）" aria-label="按住说话" style="display:none;padding:var(--space-3)">
+        <button class="btn btn-ghost" type="button" id="btnMic" title="语音输入（需麦克风授权）" aria-label="语音输入" style="display:none;padding:var(--space-3)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
         </button>
-        <input type="text" id="inputText" placeholder="说一句记一笔，如：打车花了 28" aria-label="输入一句话记账">
+        <input type="text" id="inputText" placeholder="也可以自己说一句记账，如：打车花了 28" aria-label="输入一句话记账">
         <button class="btn btn-primary" type="button" id="btnSend">记一笔</button>
       </div>
-      <div class="demo-tip">支持语音：点左边麦克风，说「昨天收了 3000 尾款」试试。演示在浏览器本地完成（语音识别用系统能力，不保存）；真实版本由本地账本 + LLM API 驱动。</div>
+      <div class="demo-tip">三种人，三种用法：点上方切换场景，再点剧本里的句子一步步体验；也可以自己输入，或用麦克风说一句（本地语音识别）。演示不保存任何数据。</div>
     </div>
   </div>
 </section>
@@ -648,8 +814,10 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   var chatLog = document.getElementById("chatLog");
   var inputText = document.getElementById("inputText");
   var btnSend = document.getElementById("btnSend");
-  var btnAsk = document.getElementById("btnAskCashflow");
-  var chips = document.getElementById("chips");
+  var stepBox = document.getElementById("sceneSteps");
+  var sceneRole = document.getElementById("sceneRole");
+  var sceneText = document.getElementById("sceneText");
+  var tabs = document.querySelectorAll(".demo-tab");
 
   var INCOME_WORDS = ["收", "尾款", "工资", "入账", "进账", "退款", "红包", "报酬", "项目款", "货款", "结算"];
   var EXPENSE_WORDS = ["买", "花", "付", "充值", "打车", "咖啡", "奶茶", "餐", "吃", "超市", "房租", "水电", "电影", "机票", "酒店"];
@@ -676,6 +844,179 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
   function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
+  // 卡片工具：rows = [{k, v}] → card-mini html（v 可含内联 html）
+  function mkCard(rows) {
+    var h = '<div class="card-mini">';
+    rows.forEach(function (r) { h += '<div class="row"><span class="k">' + r.k + '</span><span class="v">' + r.v + '</span></div>'; });
+    return h + '</div>';
+  }
+  var C_INC = 'style="color:var(--color-income)"';
+  var C_RISK = 'style="color:var(--color-risk)"';
+  var C_WARN = 'style="color:var(--color-warning)"';
+
+  // ═══════════ 三个使用场景 · 剧本（场景边界分明）═══════════
+  var SCENES = {
+    opc: {
+      role: "OPC 一人公司 · 独立开发者",
+      desc: "收入靠接单、报价靠感觉、最怕下月断粮——看 CashLens 怎么把「接单报价」变成有依据的决策。",
+      steps: [
+        { u: "昨天微信收了 3000 尾款",
+          a: "好的，已记收入（微信 · 接单尾款 · 主动记录）：<br><br>" + mkCard([
+            { k: "类型 / 金额", v: '收入 <span class="num" ' + C_INC + '>+¥3,000.00</span>' },
+            { k: "分类 / 渠道", v: "接单尾款 · 微信" },
+            { k: "证据", v: "0.75 主动记录 → 事件账本" }]) +
+          "<br>已标记为「该客户尾款」，回款周期开始自动跟踪。" },
+        { u: "我下个月现金流怎么样？",
+          a: "基于过去 3 个月收入节奏，未来 30 天<b>预计</b>现金流：<br><br>" + mkCard([
+            { k: "期末预计余额", v: '<span class="num" ' + C_INC + '>+¥3,200</span>' },
+            { k: "预计区间（90%）", v: '<span class="num">-¥800 ~ +¥7,400</span>' },
+            { k: "最近缺口点", v: '<span class="num" ' + C_WARN + '>第 18 天 约 -¥2,400</span>' },
+            { k: "依据", v: "历史 3 个月收入节奏 + 未来固定支出" }]) +
+          "<br>CashPulse 区间预测——可信度低时如实标「现金流不明」，绝不假装精确。" },
+        { u: "来了个设计单，5000 块，2 周交付，接不接？",
+          a: "接单决策引擎先做前置检查，再给建议：<br><br>" + mkCard([
+            { k: "前置① 现金垫底", v: '未来 30 天预计缺口 <b class="num" ' + C_WARN + '>¥2,400</b> → uncertain，需先确认垫底' },
+            { k: "前置② 回款认知", v: "该客户历史回款 <b>3 周</b>，你按 3 天预估 → 已纠偏" },
+            { k: "时间成本", v: "2 周交付 ≈ 占用 14 天档期" },
+            { k: "报价建议", v: '<b class="num">¥5,500 – ¥7,000</b> · 中位 ¥6,200' }]) +
+          "<br>理由：缺口要覆盖进报价；建议首付 50% 或缩短账期，把 3 周回款风险摊薄。" },
+        { u: "好，就报 6200，谈成后按 3 周回款算",
+          a: "已记录本次决策与假设：<br><br>" + mkCard([
+            { k: "决策", v: "接单 · 报价 ¥6,200" },
+            { k: "当初假设", v: "回款周期 3 周" },
+            { k: "假设检验", v: "到账后自动比对——偏差会标记，影响下次报价参考" }]) +
+          "<br>这是「财务记忆体」：一次分析，持续陪伴。" }
+      ]
+    },
+    smallbiz: {
+      role: "小微经营者 · 小店 / 工作室",
+      desc: "开票、报销、工时工分——员工的钱和发票不能糊涂，月底要能一张表说清。",
+      steps: [
+        { u: "这周工时：阿明 40 小时、小周 36 小时",
+          a: "已记录本周工时：<br><br>" + mkCard([
+            { k: "阿明", v: '<span class="num">40h</span> · 待月底结算' },
+            { k: "小周", v: '<span class="num">36h</span> · 待月底结算' },
+            { k: "合计", v: '<span class="num">76h</span> · 自动并入工资表' },
+            { k: "备选", v: "整张工时 Excel 也可一键导入" }]) },
+        { u: "我这儿有张打车发票，报销一下",
+          a: "票据已识别（豆包大模型视觉）：<br><br>" + mkCard([
+            { k: "类型", v: "支出 · 报销" },
+            { k: "金额", v: '<span class="num" ' + C_RISK + '>¥28.00</span>' },
+            { k: "商户 / 日期", v: "滴滴出行 · 2026-09-02" },
+            { k: "证据", v: "机器识别 0.85 — 请你确认后入账" }]) +
+          "<br>证据纪律：机器识别 + 人确认才计 0.85；未确认只算「接触」（0.00）。" },
+        { u: "月底了，工资和报销一起算一下",
+          a: "月度结算单：<br><br>" + mkCard([
+            { k: "阿明 · 40h × ¥30", v: '<span class="num">¥1,200.00</span>' },
+            { k: "小周 · 36h × ¥25", v: '<span class="num">¥900.00</span>' },
+            { k: "报销合计", v: '<span class="num">¥428.00</span> · 4 笔已核对无重复' },
+            { k: "待办提醒", v: "本月累计需开票 ¥5,000" }]) },
+        { u: "那就按 5000 开张服务费发票",
+          a: "开票信息已备好：<br><br>" + mkCard([
+            { k: "税目", v: "*信息技术服务* 服务费" },
+            { k: "金额", v: '<span class="num">¥5,000</span> + 6% 税 → 价税合计 ¥5,300' },
+            { k: "抬头", v: "按客户开票资料（请核对）" },
+            { k: "去向", v: "开票记录入账本 · 报税节点自动提醒" }]) +
+          "<br>报税提醒已挂上：季度增值税申报临近，收入已自动归集。" }
+      ]
+    },
+    family: {
+      role: "家庭 · 多平台消费者",
+      desc: "钱散在微信、支付宝、拼多多、抖音——月底对上账就是胜利。看它怎么把账单变成明白账。",
+      steps: [
+        { u: "我把这个月的账单都导进来了",
+          a: "已导入并对账：<br><br>" + mkCard([
+            { k: "微信账单", v: '<span class="num">128</span> 笔' },
+            { k: "支付宝账单", v: '<span class="num">96</span> 笔' },
+            { k: "对账去重", v: "合并 3 笔跨平台重复（账本留痕）" },
+            { k: "本月合计", v: '支出 <b class="num">¥8,642</b> · 收入 <b class="num">¥12,300</b>' }]) },
+        { u: "我这个月钱都花哪了？",
+          a: "AI 自动分类：<br><br>" + mkCard([
+            { k: "餐饮", v: '<span class="num">32%</span> · ¥2,765' },
+            { k: "购物", v: '<span class="num">28%</span> · ¥2,420' },
+            { k: "交通 / 日用", v: '<span class="num">18%</span> · ¥1,556' },
+            { k: "其它", v: '<span class="num">22%</span> · ¥1,901' }]) +
+          "<br>分类规则可自定：哪笔分错了，说一句就改。" },
+        { u: "我这个月是不是要超支了？",
+          a: "预算红线检查：<br><br>" + mkCard([
+            { k: "本月预算", v: '<span class="num">¥9,000</span>' },
+            { k: "已用进度", v: '<span class="num">96%</span> · ¥8,642（今天 9/25）' },
+            { k: "预计", v: '按目前节奏月底将超支约 <b class="num" ' + C_WARN + '>¥600</b>' },
+            { k: "建议", v: "未来一周可缓的支出：购物类约 ¥340" }]) +
+          "<br>提前 9 天预警，而不是月底才知道——这是缺口预警的价值。" },
+        { u: "拼多多那条裤子退了 89",
+          a: "好的，已记一笔退款：<br><br>" + mkCard([
+            { k: "类型 / 金额", v: '收入（退款）<span class="num" ' + C_INC + '>+¥89.00</span>' },
+            { k: "分类", v: "购物 · 冲正" },
+            { k: "预算联动", v: "本月超支缺口同步缩小 ¥89" }]) }
+      ]
+    }
+  };
+
+  // ═══════════ 场景引擎 ═══════════
+  var curScene = null, playIndex = 0;
+
+  function renderScene() {
+    var s = SCENES[curScene];
+    sceneRole.textContent = s.role;
+    sceneText.textContent = s.desc;
+    chatLog.innerHTML = "";
+    playIndex = 0;
+    addBubble("你好，我是 CashLens 在你这个场景里的 AI 财务团队。点下方剧本里的句子，一步步看我陪你走完这个月的关键几件事。", "ai");
+    renderSteps();
+  }
+
+  function renderSteps() {
+    var s = SCENES[curScene];
+    stepBox.innerHTML = "";
+    s.steps.forEach(function (st, i) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = st.u; b.dataset.i = i;
+      if (i < playIndex) { b.className = "done"; b.disabled = true; }
+      stepBox.appendChild(b);
+    });
+    if (playIndex >= s.steps.length) {
+      var c = document.createElement("button");
+      c.type = "button"; c.disabled = true;
+      c.textContent = "✓ 场景演示完成 — 换个场景，或自己输入 / 用语音试试";
+      stepBox.appendChild(c);
+    }
+  }
+
+  function playStep(i) {
+    var s = SCENES[curScene];
+    if (!s || i !== playIndex || i >= s.steps.length) { return; }
+    var st = s.steps[i];
+    addBubble(esc(st.u), "user");
+    setTimeout(function () { addBubble(st.a, "ai"); }, 500);
+    playIndex = i + 1;
+    renderSteps();
+  }
+
+  tabs.forEach(function (t) {
+    t.addEventListener("click", function () {
+      tabs.forEach(function (x) { x.classList.remove("active"); x.setAttribute("aria-selected", "false"); });
+      t.classList.add("active"); t.setAttribute("aria-selected", "true");
+      curScene = t.dataset.scene;
+      renderScene();
+    });
+  });
+  stepBox.addEventListener("click", function (e) {
+    if (e.target.tagName === "BUTTON" && e.target.dataset.i !== undefined) {
+      playStep(parseInt(e.target.dataset.i, 10));
+    }
+  });
+
+  // WHO 大板块 → 演示区联动：点板块按钮自动切到对应场景 Tab
+  document.querySelectorAll(".jump-demo").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var key = b.dataset.scene;
+      var t = document.querySelector('.demo-tab[data-scene="' + key + '"]');
+      if (t) { t.click(); }
+    });
+  });
+
+  // ── 自由输入兜底：任何场景下都能自己说一句记账 ──
   function parse(text) {
     var amount = 0;
     var m = text.match(/(\d+(?:\.\d+)?)/);
@@ -690,7 +1031,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       }
     }
     var rules = isIncome ? IN_CAT_RULES : CAT_RULES;
-    var cat = isIncome ? "其他" : "其他";
+    var cat = "其他";
     for (var k = 0; k < rules.length; k++) {
       for (var w = 0; w < rules[k].words.length; w++) {
         if (text.indexOf(rules[k].words[w]) > -1) { cat = rules[k].cat; k = rules.length; break; }
@@ -706,17 +1047,14 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
   function cardHTML(r) {
     var sign = r.income ? "+" : "-";
-    var cls = r.income ? "amount-income" : "amount-expense";
+    var cls = r.income ? C_INC : C_RISK;
     var typeTxt = r.income ? "收入" : "支出";
-    var note = r.income ? "主动记录 · 证据权重 0.75" : "主动记录 · 证据权重 0.75";
-    return '<div class="card-mini">' +
-      '<div class="row"><span class="k">类型</span><span class="v">' + typeTxt + '</span></div>' +
-      '<div class="row"><span class="k">金额</span><span class="v num ' + cls + '">' + sign + '¥' + r.amount.toFixed(2) + '</span></div>' +
-      '<div class="row"><span class="k">分类</span><span class="v">' + esc(r.cat) + '</span></div>' +
-      (r.channel ? '<div class="row"><span class="k">渠道</span><span class="v">' + esc(r.channel) + '</span></div>' : "") +
-      '<div class="row"><span class="k">证据</span><span class="v" style="font-size:var(--font-size-12);color:var(--color-text-secondary)">' + note + '</span></div>' +
-      '<div class="row"><span class="k">去向</span><span class="v" style="font-size:var(--font-size-12);color:var(--color-text-secondary)">已确认 → 事件账本（演示）</span></div>' +
-      '</div>';
+    return mkCard([
+      { k: "类型", v: typeTxt },
+      { k: "金额", v: '<span class="num" ' + cls + '>' + sign + '¥' + r.amount.toFixed(2) + '</span>' },
+      { k: "分类", v: esc(r.cat) + (r.channel ? " · " + esc(r.channel) : "") },
+      { k: "证据", v: "0.75 主动记录 → 事件账本（演示）" }
+    ]);
   }
 
   function doRecord(text) {
@@ -728,39 +1066,95 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       return;
     }
     var label = r.income ? "已记收入" : "已记支出";
-    setTimeout(function () {
-      addBubble("好的，" + label + "，确认一下：<br><br>" + cardHTML(r), "ai");
-    }, 450);
-  }
-
-  function askCashflow() {
-    addBubble("我下个月会不会缺钱？", "user");
-    setTimeout(function () {
-      addBubble(
-        "基于过去 3 个月的收入节奏，未来 30 天<b>预计</b>现金流：<br><br>" +
-        '<div class="card-mini">' +
-        '<div class="row"><span class="k">30 天期末预计余额</span><span class="v num amount-income">+¥3,200</span></div>' +
-        '<div class="row"><span class="k">预计区间（90%）</span><span class="v num">-¥800 ~ +¥7,400</span></div>' +
-        '<div class="row"><span class="k">最近一个缺口点</span><span class="v num" style="color:var(--color-warning)">第 18 天 约 -¥2,400</span></div>' +
-        '<div class="row"><span class="k">依据</span><span class="v" style="font-size:var(--font-size-12)">历史 3 个月收入节奏 + 未来固定支出</span></div>' +
-        '<div class="row"><span class="k">建议动作</span><span class="v" style="font-size:var(--font-size-12)">提前 2 周安排追应收 / 缓一笔非紧急支出</span></div>' +
-        "</div><br>以上为演示估算——区间随你的现金流可信度收放，低可信时会如实标注「现金流不明」。",
-        "ai");
-    }, 500);
+    setTimeout(function () { addBubble("好的，" + label + "，确认一下：<br><br>" + cardHTML(r), "ai"); }, 450);
   }
 
   btnSend.addEventListener("click", function () { doRecord(inputText.value); inputText.value = ""; });
   inputText.addEventListener("keydown", function (e) { if (e.key === "Enter") { doRecord(inputText.value); inputText.value = ""; } });
-  btnAsk.addEventListener("click", askCashflow);
-  chips.addEventListener("click", function (e) {
-    if (e.target.tagName === "BUTTON") { doRecord(e.target.textContent); }
-  });
 
-  // ── 语音输入（主打功能演示）：系统语音识别，渐进增强 ──
+  // 默认进入第一个场景
+  curScene = "opc";
+  renderScene();
+
+  // ── 语音输入（主打功能）：本地 ASR 真链路（localhost）／系统语音兜底（线上）──
   var btnMic = document.getElementById("btnMic");
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var isFile = location.protocol === "file:";
+  var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
   var rec = null;
-  if (SR) {
+
+  // 工具：Float32Array(任意采样率) → 16kHz mono WAV(16bit) Blob
+  function toWavBlob(all, sr) {
+    var ratio = sr / 16000;
+    var n = Math.floor(all.length / ratio);
+    var out = new Float32Array(n);
+    for (var i = 0; i < n; i++) { out[i] = all[Math.floor(i * ratio)]; }
+    var buf = new ArrayBuffer(44 + n * 2);
+    var v = new DataView(buf);
+    function ws(o, s) { for (var j = 0; j < s.length; j++) { v.setUint8(o + j, s.charCodeAt(j)); } }
+    ws(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); ws(8, "WAVE"); ws(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    ws(36, "data"); v.setUint32(40, n * 2, true);
+    var o = 44;
+    for (i = 0; i < n; i++) { var s2 = Math.max(-1, Math.min(1, out[i])); v.setInt16(o, s2 < 0 ? s2 * 0x8000 : s2 * 0x7FFF, true); o += 2; }
+    return new Blob([buf], { type: "audio/wav" });
+  }
+
+  function sendToAsr(blob) {
+    fetch("/api/asr", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: blob })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.ok && j.text) {
+          inputText.value = j.text;          // 识别文字填入输入框，等用户确认
+          inputText.focus();
+          addBubble("本地识别结果：「" + esc(j.text) + "」——确认无误就点「记一笔」发送。", "ai");
+        } else {
+          addBubble("本地语音识别没出结果" + (j.error ? "（" + j.error + "）" : "") + "——直接打字也可以。", "ai");
+        }
+      })
+      .catch(function () { addBubble("连不上本地识别服务——请确认已启动：python3 backend/asr_server.py。", "ai"); });
+  }
+
+  var recording = false, aCtx = null, aStream = null, aSrc = null, aProc = null, aChunks = [];
+  function stopRec() {
+    recording = false;
+    try { aSrc.disconnect(); aProc.disconnect(); } catch (e) {}
+    if (aStream) { aStream.getTracks().forEach(function (t) { t.stop(); }); }
+    var total = 0;
+    aChunks.forEach(function (c) { total += c.length; });
+    var all = new Float32Array(total), off = 0;
+    aChunks.forEach(function (c) { all.set(c, off); off += c.length; });
+    var sr = aCtx ? aCtx.sampleRate : 48000;
+    if (aCtx) { aCtx.close(); }
+    if (total < 1600) { addBubble("录音太短，没听清——请再试一次，说完稍停半秒。", "ai"); return; }
+    addBubble("录音完成，正在本地识别…", "ai");
+    sendToAsr(toWavBlob(all, sr));
+  }
+
+  if (isLocal) {
+    // ── 本地演示 = 产品真实语音链路：录音 → /api/asr → 本地 Qwen3-ASR ──
+    btnMic.style.display = "";
+    btnMic.addEventListener("click", function () {
+      if (recording) { stopRec(); return; }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        addBubble("当前浏览器不支持录音——建议用 Chrome/Safari 打开。", "ai"); return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
+        aStream = s; aChunks = [];
+        aCtx = new (window.AudioContext || window.webkitAudioContext)();
+        aSrc = aCtx.createMediaStreamSource(s);
+        aProc = aCtx.createScriptProcessor(4096, 1, 1);
+        aProc.onaudioprocess = function (e) { aChunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+        aSrc.connect(aProc); aProc.connect(aCtx.destination);
+        recording = true;
+        addBubble("正在录音…请说一句记账（如「昨天微信收了 3000 尾款」），说完再点一次麦克风结束。", "ai");
+      }).catch(function () {
+        addBubble("无法访问麦克风——请在地址栏左侧允许麦克风后重试；直接打字也可以。", "ai");
+      });
+    });
+  } else if (SR && !isFile) {
+    // ── 线上（GitHub Pages）：系统语音识别兜底 ──
     btnMic.style.display = "";
     rec = new SR();
     rec.lang = "zh-CN";
@@ -770,21 +1164,33 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     btnMic.addEventListener("click", function () {
       if (listening) { rec.stop(); return; }
       try { rec.start(); listening = true; btnMic.disabled = true; }
-      catch (e) { return; }
-      addBubble("正在听，请说一句记账（再点一次麦克风可停止）…", "ai");
+      catch (e) { addBubble("无法启动语音识别：" + (e.name || "未知错误") + "——直接打字也可以。", "ai"); return; }
+      addBubble("正在听…请说一句记账（说完会自动停下识别）。", "ai");
     });
     rec.onresult = function (e) {
       var t = e.results[0][0].transcript;
-      inputText.value = t;
-      doRecord(t);
+      inputText.value = t;                 // 识别文字先填入输入框，等用户确认
+      inputText.focus();
+      addBubble("听清了：「" + esc(t) + "」。确认无误就点「记一笔」发送。", "ai");
     };
     rec.onend = function () { listening = false; btnMic.disabled = false; };
     rec.onerror = function (ev) {
       listening = false; btnMic.disabled = false;
-      if (ev.error !== "aborted" && ev.error !== "no-speech") {
-        addBubble("语音识别未授权或不可用——直接打字也完全可以。", "ai");
+      if (ev.error === "aborted") { return; }
+      if (ev.error === "no-speech") {
+        addBubble("没有听到声音——请靠近麦克风、说完稍等片刻。", "ai");
+        return;
       }
+      addBubble("语音识别失败（" + ev.error + "）——直接打字也可以。", "ai");
     };
+  } else if (isFile) {
+    // file:// 下无法用真实语音链路：指引本地服务
+    btnMic.style.display = "";
+    btnMic.addEventListener("click", function () {
+      addBubble("当前是 file:// 方式打开，语音不可用。请启动本地服务体验语音记账：<br><span style='font-family:var(--font-mono);font-size:var(--font-size-12);background:var(--color-bg);padding:2px 6px;border-radius:4px'>cd 09-代码 && python3 backend/asr_server.py</span><br>再用浏览器打开 <span style='font-family:var(--font-mono);font-size:var(--font-size-12)'>http://localhost:8000/</span>，点麦克风说话就能记账。", "ai");
+    });
+  } else {
+    btnMic.style.display = "none";
   }
 })();
 </script>
