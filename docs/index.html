@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CashLens · 给一个人就是一家公司的人，一个懂钱的 AI 财务团队</title>
+<meta name="description" content="CashLens——一人公司与小微经营者的多智能体财务系统：归拢散落的收支、照见现金流、在接单报价的决策点给有依据的话。2026 北大金融 AI 大赛参赛作品。">
+<style>
+/* ═══════════ Design Tokens v2.0（自 07-设计系统/CashLens-tokens.css 内联）═══════ */
+:root{
+  /* Primitive */
+  --raw-indigo-400:#7b6cf0; --raw-indigo-500:#635bff; --raw-indigo-600:#5147e8;
+  --raw-cyan-400:#00d4ff;   --raw-cyan-500:#00b8d9;
+  --raw-navy-700:#1f3a5f;   --raw-navy-800:#14304f; --raw-navy-900:#0a2540;
+  --raw-white:#ffffff;
+  --raw-gray-50:#f7f9fc;  --raw-gray-100:#eef1f6;  --raw-gray-200:#e6ebf2;
+  --raw-gray-300:#c9d4e3; --raw-gray-500:#5a6b82;  --raw-gray-600:#3f4a5c;
+  --raw-gray-800:#2a3444; --raw-gray-900:#1a202c;
+  --raw-green-500:#1a8768; --raw-green-600:#147a5c;
+  --raw-amber-500:#d1920b; --raw-amber-600:#b87b07;
+  --raw-red-500:#e0364b;   --raw-red-600:#c22b3e;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+  --font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;
+  --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px; --radius-pill:999px;
+  --space-1:4px;  --space-2:8px;  --space-3:12px; --space-4:16px; --space-5:20px;
+  --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px; --space-16:64px;
+  --shadow-sm:0 1px 2px rgba(10,37,64,.06);
+  --shadow-md:0 4px 16px rgba(10,37,64,.08);
+  --shadow-lifted:0 12px 40px rgba(10,37,64,.10);
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --dur-fast:150ms; --dur-base:250ms; --dur-slow:400ms;
+  /* Semantic */
+  --color-bg:var(--raw-gray-50);
+  --color-bg-elevated:var(--raw-white);
+  --color-surface-border:var(--raw-gray-200);
+  --color-text:var(--raw-navy-900);
+  --color-text-secondary:var(--raw-gray-500);
+  --color-text-tertiary:var(--raw-gray-300);
+  --color-brand:var(--raw-indigo-500);
+  --color-brand-dark:var(--raw-indigo-600);
+  --color-brand-bg:rgba(99,91,255,.10);
+  --color-brand-grad:linear-gradient(135deg,var(--raw-indigo-500),var(--raw-cyan-400));
+  --color-income:var(--raw-green-500);
+  --color-income-bg:rgba(26,135,104,.10);
+  --color-warning:var(--raw-amber-500);
+  --color-warning-bg:rgba(209,146,11,.12);
+  --color-risk:var(--raw-red-500);
+  --color-risk-bg:rgba(224,54,75,.10);
+  --color-on-brand:#ffffff;
+  --chart-line:var(--raw-indigo-500);
+  --chart-grid:var(--raw-gray-100);
+  --chart-area:rgba(99,91,255,.14);
+  /* Component */
+  --btn-primary-bg:var(--color-brand);
+  --btn-primary-text:var(--color-on-brand);
+  --btn-primary-hover:var(--color-brand-dark);
+  --card-bg:var(--color-bg-elevated);
+  --card-border:var(--color-surface-border);
+  --card-shadow:var(--shadow-md);
+  --chat-ai-bubble:var(--color-bg-elevated);
+  --chat-ai-border:var(--color-surface-border);
+  --input-bg:var(--color-bg-elevated);
+  --input-border:var(--color-surface-border);
+  /* Type */
+  --font-size-10:10px; --font-size-12:12px; --font-size-14:14px; --font-size-16:16px;
+  --font-size-18:18px; --font-size-20:20px; --font-size-24:24px; --font-size-32:32px;
+  --weight-regular:400; --weight-medium:500; --weight-semibold:600; --weight-bold:700;
+  --line-tight:1.2; --line-body:1.5;
+}
+
+/* ═══════════ 基础 ═══════════ */
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font-sans);
+  font-size:var(--font-size-16);
+  line-height:var(--line-body);
+  color:var(--color-text);
+  background:var(--color-bg);
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--color-brand);text-decoration:none}
+a:hover{color:var(--color-brand-dark)}
+a:focus-visible,button:focus-visible,input:focus-visible{
+  outline:2px solid var(--color-brand);outline-offset:2px;border-radius:var(--radius-sm);
+}
+img,svg{display:block;max-width:100%}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.container{max-width:1120px;margin:0 auto;padding:0 var(--space-6)}
+section{padding:var(--space-16) 0}
+
+/* ═══════════ 顶栏 ═══════════ */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(247,249,252,.9);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--color-surface-border);
+}
+.topbar-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:var(--space-2);font-weight:var(--weight-semibold);color:var(--color-text)}
+.brand-mark{width:28px;height:28px;border-radius:var(--radius-sm);
+  background:var(--color-brand-grad);display:grid;place-items:center}
+.brand-mark svg{width:16px;height:16px}
+.brand-name{font-size:var(--font-size-18);letter-spacing:.01em}
+nav{display:flex;gap:var(--space-5)}
+nav a{color:var(--color-text-secondary);font-size:var(--font-size-14);font-weight:var(--weight-medium);padding:var(--space-2) 0;border-bottom:2px solid transparent}
+nav a:hover{color:var(--color-text)}
+.nav-cta{color:var(--color-brand)!important;border-color:var(--color-brand)!important}
+
+/* ═══════════ Hero ═══════════ */
+.hero{padding:var(--space-16) 0 var(--space-12)}
+.hero-inner{display:grid;grid-template-columns:1.05fr .95fr;gap:var(--space-12);align-items:center}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:var(--space-2);
+  font-size:var(--font-size-12);font-weight:var(--weight-medium);
+  color:var(--color-brand);background:var(--color-brand-bg);
+  padding:var(--space-2) var(--space-3);border-radius:var(--radius-pill);
+  letter-spacing:.04em;
+}
+h1{
+  font-size:clamp(30px,4.4vw,46px);line-height:1.22;letter-spacing:-.01em;
+  font-weight:var(--weight-bold);margin:var(--space-6) 0 var(--space-4);
+}
+h1 .grad{background:var(--color-brand-grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero-sub{font-size:var(--font-size-18);color:var(--color-text-secondary);max-width:34em}
+.hero-facts{
+  display:flex;flex-wrap:wrap;gap:var(--space-8);margin-top:var(--space-8);
+}
+.fact .num{font-size:var(--font-size-24);font-weight:var(--weight-semibold);color:var(--color-text);display:block}
+.fact .lbl{font-size:var(--font-size-12);color:var(--color-text-secondary)}
+.hero-cta{display:flex;gap:var(--space-3);margin-top:var(--space-8);flex-wrap:wrap}
+
+/* 按钮 */
+.btn{
+  display:inline-flex;align-items:center;gap:var(--space-2);
+  font-size:var(--font-size-16);font-weight:var(--weight-medium);
+  padding:var(--space-3) var(--space-6);border-radius:var(--radius-md);
+  transition:background var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out);
+}
+.btn-primary{background:var(--btn-primary-bg);color:var(--btn-primary-text);border:none}
+.btn-primary:hover{background:var(--btn-primary-hover);color:#fff;transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.btn-ghost{background:transparent;color:var(--color-text);border:1px solid var(--raw-gray-300)}
+.btn-ghost:hover{border-color:var(--color-brand);color:var(--color-brand);background:var(--color-brand-bg)}
+
+/* 透镜卡（hero 签名视觉） */
+.lens-card{
+  background:var(--card-bg);border:1px solid var(--card-border);
+  border-radius:var(--radius-xl);box-shadow:var(--shadow-lifted);
+  padding:var(--space-6);position:relative;overflow:hidden;
+}
+.lens-card .lens-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4)}
+.lens-title{font-size:var(--font-size-14);font-weight:var(--weight-semibold)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:var(--font-size-12);font-weight:var(--weight-medium);
+  padding:4px 10px;border-radius:var(--radius-pill)}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.chip-learning{color:var(--color-warning);background:var(--color-warning-bg)}
+.chip-stable{color:var(--color-income);background:var(--color-income-bg)}
+.lens-chart{width:100%;height:auto;overflow:visible}
+.lens-foot{display:flex;justify-content:space-between;align-items:flex-end;margin-top:var(--space-4);
+  padding-top:var(--space-4);border-top:1px solid var(--color-surface-border)}
+.lens-kpis{display:flex;gap:var(--space-6)}
+.lens-kpi .num{font-size:var(--font-size-20);font-weight:var(--weight-semibold)}
+.lens-kpi .k-lbl{font-size:var(--font-size-10);color:var(--color-text-secondary);letter-spacing:.05em}
+.lens-note{font-size:var(--font-size-10);color:var(--color-text-tertiary)}
+
+/* ═══════════ 区块通用 ═══════════ */
+.sec-eyebrow{font-size:var(--font-size-12);font-weight:var(--weight-semibold);letter-spacing:.1em;color:var(--color-brand);text-transform:uppercase}
+h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold);margin:var(--space-3) 0 var(--space-4);letter-spacing:-.01em}
+.sec-intro{color:var(--color-text-secondary);font-size:var(--font-size-16);max-width:52em;margin-bottom:var(--space-10)}
+
+/* 白卡 */
+.grid{display:grid;gap:var(--space-6)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+.card{
+  background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius-lg);
+  padding:var(--space-6);box-shadow:var(--shadow-sm);position:relative;
+  border-top:4px solid var(--color-brand);
+}
+.card .card-num{font-family:var(--font-mono);font-size:var(--font-size-12);color:var(--color-text-tertiary);letter-spacing:.08em}
+.card h3{font-size:var(--font-size-18);font-weight:var(--weight-semibold);margin:var(--space-2) 0 var(--space-3)}
+.card p{font-size:var(--font-size-14);color:var(--color-text-secondary)}
+.card.edge-income{border-top-color:var(--color-income)}
+.card.edge-warning{border-top-color:var(--color-warning)}
+.card.edge-risk{border-top-color:var(--color-risk)}
+.card.edge-cyan{border-top-color:var(--raw-cyan-500)}
+
+/* 状态条 / 对比行 */
+.gap-row{
+  display:flex;flex-wrap:wrap;gap:var(--space-3) var(--space-8);
+  background:var(--color-bg-elevated);border:1px solid var(--card-border);
+  border-radius:var(--radius-lg);padding:var(--space-5) var(--space-6);
+}
+.gap-row .gap-item{display:flex;align-items:center;gap:var(--space-2);font-size:var(--font-size-14);color:var(--color-text-secondary)}
+.gap-item .x{color:var(--color-text-tertiary);font-weight:var(--weight-semibold)}
+
+/* ═══════════ 创新区：证据分级条 ═══════════ */
+.innovation{background:var(--color-bg-elevated);border-top:1px solid var(--color-surface-border);border-bottom:1px solid var(--color-surface-border)}
+.evidence-bar{display:flex;border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--card-border);margin:var(--space-5) 0}
+.ev-seg{flex:1;padding:var(--space-4);min-width:0}
+.ev-seg .w{font-family:var(--font-mono);font-size:var(--font-size-18);font-weight:var(--weight-semibold)}
+.ev-seg .src{font-size:var(--font-size-12);line-height:1.35;display:block;margin-top:2px}
+.ev-1{background:var(--color-income-bg);color:var(--color-income)}
+.ev-2{background:var(--color-brand-bg);color:var(--color-brand)}
+.ev-3{background:var(--color-warning-bg);color:var(--color-warning)}
+.ev-4{background:var(--color-risk-bg);color:var(--color-risk)}
+.ev-seg .src{color:var(--color-text-secondary)}
+.quote{
+  font-size:var(--font-size-18);font-weight:var(--weight-medium);
+  border-left:4px solid var(--color-brand);
+  padding:var(--space-2) 0 var(--space-2) var(--space-4);margin:var(--space-6) 0;
+  color:var(--color-text);
+}
+
+/* ═══════════ 闭环流程 ═══════════ */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4);margin-bottom:var(--space-8)}
+.flow-step{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius-md);padding:var(--space-5);position:relative}
+.flow-step .step-no{font-family:var(--font-mono);font-size:var(--font-size-12);color:var(--color-text-tertiary)}
+.flow-step h4{font-size:var(--font-size-16);margin:var(--space-2) 0 var(--space-2)}
+.flow-step p{font-size:var(--font-size-13);color:var(--color-text-secondary);line-height:1.5}
+.flow-arrow{position:absolute;right:-18px;top:50%;transform:translateY(-50%);color:var(--raw-gray-300);font-size:var(--font-size-14)}
+.decision-sample{
+  background:var(--color-brand-bg);border:1px dashed var(--color-brand);
+  border-radius:var(--radius-md);padding:var(--space-4) var(--space-5);
+  font-size:var(--font-size-14);color:var(--color-text);
+}
+.decision-sample b{color:var(--color-brand)}
+
+/* ═══════════ 架构 ═══════════ */
+.arch-quote{font-size:var(--font-size-16);font-weight:var(--weight-medium);margin-bottom:var(--space-6)}
+.agents{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4)}
+.agent{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius-md);
+  padding:var(--space-5);text-align:center}
+.agent .a-icon{width:40px;height:40px;margin:0 auto var(--space-3);border-radius:var(--radius-md);
+  background:var(--color-brand-bg);display:grid;place-items:center;color:var(--color-brand)}
+.agent h4{font-size:var(--font-size-15)}
+.agent p{font-size:var(--font-size-12);color:var(--color-text-secondary);margin-top:var(--space-2)}
+.engine-core{
+  background:var(--color-text);color:var(--raw-white);border-radius:var(--radius-lg);
+  padding:var(--space-4) var(--space-6);text-align:center;font-weight:var(--weight-semibold);
+  font-size:var(--font-size-16);margin-bottom:var(--space-4);
+}
+
+/* ═══════════ 实弹证据 ═══════════ */
+.proof{background:var(--color-bg-elevated);border-top:1px solid var(--color-surface-border);border-bottom:1px solid var(--color-surface-border)}
+.proof-tbl{width:100%;border-collapse:collapse;font-size:var(--font-size-14);background:var(--card-bg);
+  border:1px solid var(--card-border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}
+.proof-tbl th{background:var(--raw-gray-100);color:var(--color-text);text-align:left;padding:var(--space-3) var(--space-4);font-weight:var(--weight-semibold);font-size:var(--font-size-13)}
+.proof-tbl td{padding:var(--space-3) var(--space-4);border-top:1px solid var(--color-surface-border);color:var(--color-text-secondary)}
+.proof-tbl .ok{color:var(--color-income);font-weight:var(--weight-semibold)}
+.proof-tbl .warn{color:var(--color-warning);font-weight:var(--weight-semibold)}
+.proof-note{font-size:var(--font-size-12);color:var(--color-text-secondary);margin-top:var(--space-3)}
+.tag{display:inline-block;font-size:var(--font-size-12);font-weight:var(--weight-semibold);
+  padding:2px 10px;border-radius:var(--radius-pill);margin-left:var(--space-2)}
+.tag-ok{background:var(--color-income-bg);color:var(--color-income)}
+.tag-fix{background:var(--color-warning-bg);color:var(--color-warning)}
+
+/* ═══════════ 演示区 ═══════════ */
+.demo-shell{
+  background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-md);max-width:640px;overflow:hidden;
+}
+.demo-chat{padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-4);min-height:120px}
+.bubble{max-width:85%;padding:var(--space-3) var(--space-4);border-radius:var(--radius-lg);font-size:var(--font-size-14);line-height:1.55}
+.bubble.user{align-self:flex-end;background:var(--color-brand-bg);color:var(--color-text);border-bottom-right-radius:4px}
+.bubble.ai{align-self:flex-start;background:var(--chat-ai-bubble);border:1px solid var(--chat-ai-border);box-shadow:var(--shadow-sm);border-bottom-left-radius:4px}
+.demo-input{display:flex;gap:var(--space-3);padding:var(--space-4);border-top:1px solid var(--color-surface-border)}
+.demo-input input{flex:1;border:1px solid var(--input-border);background:var(--input-bg);border-radius:var(--radius-md);
+  padding:var(--space-3) var(--space-4);font-size:var(--font-size-15);font-family:var(--font-sans);color:var(--color-text)}
+.demo-input input:focus{border-color:var(--color-brand);outline:none;box-shadow:0 0 0 3px var(--color-brand-bg)}
+.chips{display:flex;gap:var(--space-2);flex-wrap:wrap;padding:0 var(--space-4) var(--space-3)}
+.chips button{border:1px solid var(--raw-gray-300);background:transparent;border-radius:var(--radius-pill);
+  font-size:var(--font-size-12);padding:4px 12px;color:var(--color-text-secondary);cursor:pointer;transition:all var(--dur-fast) var(--ease-out)}
+.chips button:hover{border-color:var(--color-brand);color:var(--color-brand);background:var(--color-brand-bg)}
+.demo-actions{display:flex;gap:var(--space-3);padding:var(--space-4);border-top:1px solid var(--color-surface-border);flex-wrap:wrap}
+.card-mini{font-size:var(--font-size-13)}
+.card-mini .row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed var(--color-surface-border)}
+.card-mini .row:last-child{border-bottom:none}
+.card-mini .k{color:var(--color-text-secondary)}
+.card-mini .v{font-weight:var(--weight-medium)}
+.amount-income{color:var(--color-income)}
+.amount-expense{color:var(--color-risk)}
+.demo-tip{font-size:var(--font-size-12);color:var(--color-text-tertiary);padding:0 var(--space-4) var(--space-4)}
+.appear{animation:appear var(--dur-base) var(--ease-out) both}
+@keyframes appear{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ═══════════ Footer ═══════════ */
+footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 0 var(--space-12);
+  background:var(--color-bg-elevated)}
+.foot-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-6)}
+.foot-slogan{font-size:var(--font-size-18);font-weight:var(--weight-semibold)}
+.foot-meta{font-size:var(--font-size-12);color:var(--color-text-secondary);text-align:right;line-height:1.8}
+
+/* ═══════════ 响应式 ═══════════ */
+@media (max-width:900px){
+  .hero-inner{grid-template-columns:1fr;gap:var(--space-10)}
+  .grid-3,.grid-2,.flow,.agents{grid-template-columns:1fr 1fr}
+  .flow-arrow{display:none}
+}
+@media (max-width:600px){
+  .grid-3,.grid-2,.flow,.agents{grid-template-columns:1fr}
+  nav{display:none}
+  section{padding:var(--space-12) 0}
+  .evidence-bar{flex-direction:column}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ 顶栏 ═══════════ -->
+<header class="topbar">
+  <div class="container topbar-inner">
+    <a class="brand" href="#top" aria-label="CashLens 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      </span>
+      <span class="brand-name">CashLens</span>
+    </a>
+    <nav aria-label="页面导航">
+      <a href="#why">为什么</a>
+      <a href="#what">是什么</a>
+      <a href="#innovation">创新</a>
+      <a href="#proof">实弹证据</a>
+      <a class="nav-cta" href="#demo">现场试一句</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ═══════════ Hero ═══════════ -->
+<section class="hero">
+  <div class="container hero-inner">
+    <div>
+      <span class="eyebrow">2026 · 北大金融 AI 智能体创新大赛</span>
+      <h1>一个人就是一家公司。<br>CashLens 给你一个<span class="grad">懂钱的 AI 财务团队</span>。</h1>
+      <p class="hero-sub">散在微信、支付宝、票据、账单里的钱，被自动归拢成一束光——照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
+      <div class="hero-facts">
+        <div class="fact"><span class="num">1</span><span class="lbl">个编排引擎（大脑）</span></div>
+        <div class="fact"><span class="num">33</span><span class="lbl">个财务 SKILL（方法论）</span></div>
+        <div class="fact"><span class="num">8</span><span class="lbl">个 MVP 实弹（其余 Phase 2/3）</span></div>
+        <div class="fact"><span class="num">本地</span><span class="lbl">账本与决策数据留在磁盘</span></div>
+      </div>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#demo">现场试一句 →</a>
+        <a class="btn btn-ghost" href="#innovation">看三个核心创新</a>
+      </div>
+    </div>
+
+    <!-- 透镜卡（示意）：照见未来 30 天现金流 -->
+    <div class="lens-card" role="img" aria-label="现金流透镜示意：未来 30 天现金流区间带，第 18 天出现预计缺口预警">
+      <div class="lens-head">
+        <span class="lens-title">现金流透镜 · 未来 30 天</span>
+        <span class="chip chip-learning"><span class="dot"></span>learning · 正在学习你的节奏</span>
+      </div>
+      <svg class="lens-chart" viewBox="0 0 460 190" aria-hidden="true">
+        <defs>
+          <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(99,91,255,.28)"/>
+            <stop offset="100%" stop-color="rgba(99,91,255,.02)"/>
+          </linearGradient>
+        </defs>
+        <!-- 网格 -->
+        <g stroke="#eef1f6">
+          <line x1="0" y1="30" x2="460" y2="30"/>
+          <line x1="0" y1="80" x2="460" y2="80"/>
+          <line x1="0" y1="130" x2="460" y2="130"/>
+          <line x1="0" y1="180" x2="460" y2="180"/>
+        </g>
+        <!-- 区间带（90% 置信带） -->
+        <path d="M0,92 C50,84 90,78 140,82 C190,86 230,60 280,52 C330,44 380,48 430,38 L430,116 C380,126 330,122 280,128 C230,134 190,132 140,124 C90,116 50,120 0,124 Z" fill="url(#band)"/>
+        <!-- 主曲线：历史（实）→ 未来（预计，虚） -->
+        <path d="M0,95 L60,88 L120,90 L180,60" fill="none" stroke="#0a2540" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M180,60 C230,84 280,52 330,66 C370,77 400,52 430,44" fill="none" stroke="#635bff" stroke-width="2.5" stroke-dasharray="5 5" stroke-linecap="round" opacity=".85"/>
+        <!-- 预计缺口标记：第 18 天 -->
+        <line x1="255" y1="14" x2="255" y2="186" stroke="#d1920b" stroke-width="1" stroke-dasharray="2 4" opacity=".6"/>
+        <circle cx="300" cy="62" r="5" fill="#d1920b"/>
+        <text x="300" y="46" text-anchor="middle" font-size="11" fill="#b87b07" font-family="ui-monospace,Menlo,monospace">预计缺口</text>
+        <!-- 标签 -->
+        <text x="0" y="206" font-size="11" fill="#5a6b82">今天</text>
+        <text x="430" y="206" text-anchor="end" font-size="11" fill="#5a6b82">第 30 天（预计）</text>
+      </svg>
+      <div class="lens-foot">
+        <div class="lens-kpis">
+          <div class="lens-kpi"><span class="num" style="color:var(--color-warning)">¥-2.4k</span><div class="k-lbl">18 天后预计缺口</div></div>
+          <div class="lens-kpi"><span class="num" style="color:var(--color-income)">¥+4.1k</span><div class="k-lbl">30 天期末预计余额</div></div>
+        </div>
+      </div>
+      <div class="lens-note" style="margin-top:var(--space-3)">示意数据 · 真实版本基于你的事件账本推算，区间随现金流可信度收放</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 为什么 ═══════════ -->
+<section id="why">
+  <div class="container">
+    <div class="sec-eyebrow">WHY · 问题</div>
+    <h2>「一个人就是一家公司」的人，钱没人管</h2>
+    <p class="sec-intro">独立开发者、设计师、小微经营者——收入像天气，账本散落各处，但没有一个工具管到「决策」这一层。</p>
+    <div class="grid grid-3">
+      <div class="card edge-risk">
+        <div class="card-num">01</div>
+        <h3>收入像过山车</h3>
+        <p>这个月 3 万、下个月归零——却没人告诉你「下个月能不能撑住」、什么时候该备粮。</p>
+      </div>
+      <div class="card edge-warning">
+        <div class="card-num">02</div>
+        <h3>钱散在五个地方</h3>
+        <p>微信、支付宝、银行、商户后台、一抽屉发票——月底对不上账，是常态。</p>
+      </div>
+      <div class="card edge-cyan">
+        <div class="card-num">03</div>
+        <h3>报价靠感觉</h3>
+        <p>「这单接不接、报多少」拍脑袋定了价，回头发现连房租都没覆盖。</p>
+      </div>
+    </div>
+    <div class="gap-row" style="margin-top:var(--space-8)">
+      <div class="gap-item"><span class="x">✕</span>记账 App 只出报表，不管你的现金流</div>
+      <div class="gap-item"><span class="x">✕</span>企业级财务软件，一个人用不起</div>
+      <div class="gap-item"><span class="x">✕</span>通用 AI 拿不到你的真实流水，只会泛泛而谈</div>
+    </div>
+    <p style="font-size:var(--font-size-12);color:var(--color-text-tertiary);margin-top:var(--space-6)">目标人群口径：灵活就业人员约 2.8 亿、个体工商户约 7,800 万（据公开统计口径，人口规模 ≠ 可达市场）。</p>
+  </div>
+</section>
+
+<!-- ═══════════ 产品是什么 ═══════════ -->
+<section id="what" style="background:var(--color-bg-elevated);border-top:1px solid var(--color-surface-border);border-bottom:1px solid var(--color-surface-border)">
+  <div class="container">
+    <div class="sec-eyebrow">WHAT · 产品</div>
+    <h2>一层内核，三层能力</h2>
+    <p class="sec-intro">对话是唯一入口：说一句记一笔、拍一张票据、导一份账单。背后是三件事——归拢、照见、建议。</p>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-num">归拢 · 采集</div>
+        <h3>三通道，把「记」的成本趋近于零</h3>
+        <p>说一句自然语言、拍一张票据/截图（VLM 识别）、或官方账单一键导入（微信/支付宝 CSV）——所有收支汇入一本不可变的「事件账本」。官方导出才是正道，不做不稳定的平台自动同步。</p>
+      </div>
+      <div class="card edge-income">
+        <div class="card-num">照见 · 理解</div>
+        <h3>财务状态引擎，不是记了多少账</h3>
+        <p>把流水变成财务画像 + 30/90 天现金流区间预测 + 待唤醒动作。状态可升可降、会过期、能从账本重建——「记了一笔」不等于「现金流健康」。</p>
+      </div>
+      <div class="card edge-warning">
+        <div class="card-num">建议 · 决策</div>
+        <h3>在决策点，给有依据的话</h3>
+        <p>「这单接不接、报多少」——结合现金垫底、历史回款周期、时间成本给出报价区间与理由；缺口提前 30 天预警，变「怕断粮」为「提前备粮」。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 核心创新 ═══════════ -->
+<section id="innovation" class="innovation">
+  <div class="container">
+    <div class="sec-eyebrow">INNOVATION · 核心创新</div>
+    <h2>三个创新，指向同一个差异：<br>财务决策层的「可信」</h2>
+    <p class="sec-intro">不是又一个记账工具——是把你散落的钱变成能支撑决策的证据。</p>
+
+    <div class="grid grid-3" style="margin-bottom:var(--space-6)">
+      <div class="card">
+        <h3>① 财务状态引擎<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">证据驱动 · 防幻觉</span></h3>
+        <p style="margin-bottom:var(--space-3)">每次收支按证据强度分级入账，只有真实证据才能改变财务状态——系统不猜测你的健康度。</p>
+        <div class="card-mini">
+          <div class="row"><span class="k">流水自动到账</span><span class="v num">1.00</span></div>
+          <div class="row"><span class="k">票据识别 + 人工确认</span><span class="v num">0.85</span></div>
+          <div class="row"><span class="k">自然语言主动记账</span><span class="v num">0.75</span></div>
+          <div class="row"><span class="k">用户自报「没问题」</span><span class="v num">0.10</span></div>
+          <div class="row"><span class="k">系统推测</span><span class="v num" style="color:var(--color-risk)">0.00</span></div>
+        </div>
+      </div>
+      <div class="card edge-income">
+        <h3>② CashPulse 预测<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">区间预测 · 绝不玄学</span></h3>
+        <p style="margin-bottom:var(--space-3)">基于你的历史收入节奏，输出未来 30/90 天现金流<b>区间</b>（90% 置信带），可信度低时明示「现金流不明」——而不是给一个假装精确的数字。</p>
+        <div class="card-mini">
+          <div class="row"><span class="k">下月预计余额</span><span class="v num">¥3,200 ± 4,600</span></div>
+          <div class="row"><span class="k">缺口预警</span><span class="v num" style="color:var(--color-warning)">第 18 天 预计 ¥-2,400</span></div>
+          <div class="row"><span class="k">依据</span><span class="v" style="font-size:var(--font-size-12)">过去 3 个月收入节奏</span></div>
+        </div>
+      </div>
+      <div class="card edge-warning">
+        <h3>③ 假设检验闭环<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">记忆体 · 越用越准</span></h3>
+        <p style="margin-bottom:var(--space-3)">每次决策记录「当初假设」，账本自动检验偏差——报价时以为 3 天回款、实际 3 周，偏差会被标记，下次报价自动参考。</p>
+        <div class="card-mini">
+          <div class="row"><span class="k">当初假设</span><span class="v">回款 3 天</span></div>
+          <div class="row"><span class="k">实际检验</span><span class="v num" style="color:var(--color-warning)">3 周</span></div>
+          <div class="row"><span class="k">下次报价</span><span class="v">回款周期已计入现金垫底</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="quote">一次分析，持续陪伴——这是「财务记忆体」的复利，也是与记账工具的分水岭。</p>
+  </div>
+</section>
+
+<!-- ═══════════ 核心闭环 ═══════════ -->
+<section id="flow">
+  <div class="container">
+    <div class="sec-eyebrow">HOW IT WORKS · 核心闭环</div>
+    <h2>采集 → 理解 → 建议 → 反馈</h2>
+    <p class="sec-intro">四个动作循环往复，结果回灌下一步——闭环跑起来，系统才越来越懂你的钱。</p>
+    <div class="flow">
+      <div class="flow-step"><div class="step-no">STEP 1</div><h4>采集</h4><p>说一句 / 拍一张 / 导一份，三通道任选，成本趋近于零。</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="step-no">STEP 2</div><h4>理解</h4><p>事件账本 → 财务状态引擎：画像、区间、可信度。</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="step-no">STEP 3</div><h4>建议</h4><p>决策点给依据：接单报价、缺口预警、报税提醒。</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="step-no">STEP 4</div><h4>反馈</h4><p>周报 + 假设检验回灌账本，修正下一次建议。</p></div>
+    </div>
+    <div class="decision-sample">💡 一个真实决策点：「这单 ¥5,000、2 周交付，接不接？」——先查 <b>未来 30 天现金垫底够不够</b>，再结合该客户<b>历史回款周期</b>给出报价区间与理由。</div>
+  </div>
+</section>
+
+<!-- ═══════════ 架构 ═══════════ -->
+<section id="arch" style="background:var(--color-bg-elevated);border-top:1px solid var(--color-surface-border);border-bottom:1px solid var(--color-surface-border)">
+  <div class="container">
+    <div class="sec-eyebrow">ARCHITECTURE · 多智能体</div>
+    <h2>1 个引擎 + 33 个 SKILL = 一个财务团队</h2>
+    <p class="sec-intro">不是 33 个机器人常驻——那是堆 Agent。而是一个编排引擎（大脑）按需激活 33 本「员工手册」（SKILL）：记一笔只激活几个，复杂决策才让多位专家并行审议。</p>
+    <div class="engine-core">编排引擎 · opencode 范式（1 个大脑，思考 → 选 SKILL → 调工具 → 观察 → 再思考）</div>
+    <div class="agents" style="margin-bottom:var(--space-6)">
+      <div class="agent"><div class="a-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/></svg></div><h4>记账员</h4><p>采集 · 分类 · 入账</p></div>
+      <div class="agent"><div class="a-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 17l5-6 4 3 6-8"/><path d="M3 21h18"/></svg></div><h4>分析师</h4><p>CashPulse · 区间预测</p></div>
+      <div class="agent"><div class="a-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12h6M9 16h6M9 8h6"/><rect x="4" y="3" width="16" height="18" rx="3"/></svg></div><h4>决策顾问</h4><p>接单报价 · 多视角审议</p></div>
+      <div class="agent"><div class="a-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="9" r="6"/><path d="M8 15l-2 6h12l-2-6"/></svg></div><h4>风控官</h4><p>缺口预警 · 预算红线</p></div>
+    </div>
+    <div class="gap-row">
+      <div class="gap-item">SKILL = Markdown，可自加（开放可复用）</div>
+      <div class="gap-item">多模型可插拔（LLM API 统一网关）</div>
+      <div class="gap-item">MVP 实弹 8 个 SKILL，其余 Phase 2/3 标注</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 实弹证据 ═══════════ -->
+<section id="proof" class="proof">
+  <div class="container">
+    <div class="sec-eyebrow">PROOF · 实弹证据（R38：AI 自报不可信）</div>
+    <h2>用真实票据验证，而不是嘴上说说</h2>
+    <p class="sec-intro">每一个能力都用真实数据跑过——以下是最近的两次实弹记录，如实呈现，包括发现的问题。</p>
+    <div class="grid grid-2">
+      <div>
+        <h3 style="font-size:var(--font-size-18)">① VLM 识别真实数电发票 <span class="tag tag-ok">2026-09-04 实弹</span></h3>
+        <table class="proof-tbl">
+          <tr><th>字段</th><th>识别结果</th><th>判定</th></tr>
+          <tr><td>金额（价税合计 ¥530.00）</td><td class="num">530.0</td><td class="ok">正确</td></tr>
+          <tr><td>开票日期 2026-08-26</td><td class="num">2026-08-26</td><td class="ok">正确</td></tr>
+          <tr><td>商户（销售方）</td><td>上海韵品餐饮管理有限公司</td><td class="ok">正确</td></tr>
+          <tr><td>分类 / 明细</td><td>餐饮 · 餐饮费 ¥500 + 6% 税</td><td class="ok">正确</td></tr>
+          <tr><td>发票号码（20 位）</td><td class="num">漏读 1 位</td><td class="warn">已列入修复</td></tr>
+        </table>
+        <p class="proof-note">真实电子发票端到端识别：核心字段全对；长数字串漏位问题已定位，修复方案 = 号码格式校验 + 低置信局部重识别。缺陷如实公开，才是可信的起点。</p>
+      </div>
+      <div>
+        <h3 style="font-size:var(--font-size-18)">② 引擎五项能力实测 <span class="tag tag-ok">2026-08-28 实弹</span></h3>
+        <table class="proof-tbl">
+          <tr><th>判定项</th><th>结果</th></tr>
+          <tr><td>SKILL 注入（财务 SKILL 自动触发）</td><td class="ok">通过</td></tr>
+          <tr><td>MCP 工具注册（查现金流状态）</td><td class="ok">通过</td></tr>
+          <tr><td>中文财务指令路由</td><td class="ok">通过</td></tr>
+          <tr><td>FastAPI 后端直连引擎</td><td class="ok">通过</td></tr>
+          <tr><td>子代理并行审议（记账/现金流/风控）</td><td class="ok">通过</td></tr>
+        </table>
+        <p class="proof-note">「多智能体」不是纸面叙事：复杂决策时引擎按需并行实例化多位专家子代理并汇总联合审议——工程层已实证。</p>
+      </div>
+    </div>
+    <p class="quote" style="margin-top:var(--space-8)">纪律：AI 自报不可信。每个 SKILL 都要配 golden case 与真实数据实弹验证——这条纪律从第一天就写在开发规范里。</p>
+  </div>
+</section>
+
+<!-- ═══════════ 现场试一句 ═══════════ -->
+<section id="demo">
+  <div class="container">
+    <div class="sec-eyebrow">LIVE · 现场试一句</div>
+    <h2>对话，就是入口</h2>
+    <p class="sec-intro">在 CashLens 里，记账不是一个表单，而是一句话。下面是产品交互形态的浏览器内演示——真实链路（引擎 + 账本）接入中。</p>
+    <div class="demo-shell" role="region" aria-label="CashLens 对话演示">
+      <div class="demo-chat" id="chatLog" aria-live="polite">
+        <div class="bubble ai">你好，我是你的 AI 财务团队。说一句试试——比如「昨天收了 3000 尾款」；或点下面的「问现金流」。</div>
+      </div>
+      <div class="chips" id="chips">
+        <button type="button">昨天微信收了 3000 尾款</button>
+        <button type="button">中午买了杯咖啡 45</button>
+        <button type="button">拼多多退货退了 89</button>
+      </div>
+      <div class="demo-actions">
+        <button class="btn btn-ghost" type="button" id="btnAskCashflow">问下月现金流</button>
+      </div>
+      <div class="demo-input">
+        <input type="text" id="inputText" placeholder="说一句记一笔，如：打车花了 28" aria-label="输入一句话记账">
+        <button class="btn btn-primary" type="button" id="btnSend">记一笔</button>
+      </div>
+      <div class="demo-tip">演示在浏览器本地完成，不联网、不保存。真实版本由本地账本 + LLM API 驱动。</div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ═══════════ Footer ═══════════ -->
+<footer>
+  <div class="container foot-inner">
+    <div>
+      <div class="foot-slogan">把散落的钱，聚成一束光。</div>
+      <div style="font-size:var(--font-size-14);color:var(--color-text-secondary);margin-top:var(--space-2)">CashLens · 多智能体财务系统 · 面向一人公司与小微经营者</div>
+    </div>
+    <div class="foot-meta">
+      2026 北大金融 AI 智能体创新大赛 · 参赛作品<br>
+      财务状态引擎 / CashPulse 预测 / 假设检验闭环<br>
+      本地优先 · 证据驱动 · 可复现
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var chatLog = document.getElementById("chatLog");
+  var inputText = document.getElementById("inputText");
+  var btnSend = document.getElementById("btnSend");
+  var btnAsk = document.getElementById("btnAskCashflow");
+  var chips = document.getElementById("chips");
+
+  var INCOME_WORDS = ["收", "尾款", "工资", "入账", "进账", "退款", "红包", "报酬", "项目款", "货款", "结算"];
+  var EXPENSE_WORDS = ["买", "花", "付", "充值", "打车", "咖啡", "奶茶", "餐", "吃", "超市", "房租", "水电", "电影", "机票", "酒店"];
+  var CAT_RULES = [
+    { cat: "餐饮", words: ["咖啡", "奶茶", "餐", "吃", "外卖", "饭店", "早餐", "午餐", "晚餐"] },
+    { cat: "交通", words: ["打车", "地铁", "公交", "加油", "高铁", "机票"] },
+    { cat: "购物", words: ["买", "超市", "购物", "淘", "拼多多", "京东", "衣服"] },
+    { cat: "房租", words: ["房租", "租金"] },
+    { cat: "娱乐", words: ["电影", "游戏", "会员"] }
+  ];
+  var IN_CAT_RULES = [
+    { cat: "接单", words: ["尾款", "项目", "接单", "报酬", "货款", "结算"] },
+    { cat: "工资", words: ["工资"] },
+    { cat: "退款", words: ["退款", "退货"] }
+  ];
+
+  function addBubble(html, who) {
+    var div = document.createElement("div");
+    div.className = "bubble " + who + " appear";
+    div.innerHTML = html;
+    chatLog.appendChild(div);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function parse(text) {
+    var amount = 0;
+    var m = text.match(/(\d+(?:\.\d+)?)/);
+    if (m) { amount = parseFloat(m[1]); }
+    var isIncome = false;
+    for (var i = 0; i < INCOME_WORDS.length; i++) {
+      if (text.indexOf(INCOME_WORDS[i]) > -1) { isIncome = true; break; }
+    }
+    if (!isIncome) {
+      for (var j = 0; j < EXPENSE_WORDS.length; j++) {
+        if (text.indexOf(EXPENSE_WORDS[j]) > -1) { isIncome = false; break; }
+      }
+    }
+    var rules = isIncome ? IN_CAT_RULES : CAT_RULES;
+    var cat = isIncome ? "其他" : "其他";
+    for (var k = 0; k < rules.length; k++) {
+      for (var w = 0; w < rules[k].words.length; w++) {
+        if (text.indexOf(rules[k].words[w]) > -1) { cat = rules[k].cat; k = rules.length; break; }
+      }
+    }
+    var channel = "";
+    var chanMap = [["微信", "微信"], ["支付宝", "支付宝"], ["现金", "现金"]];
+    for (var c = 0; c < chanMap.length; c++) {
+      if (text.indexOf(chanMap[c][0]) > -1) { channel = chanMap[c][1]; break; }
+    }
+    return { income: isIncome, amount: amount, cat: cat, channel: channel };
+  }
+
+  function cardHTML(r) {
+    var sign = r.income ? "+" : "-";
+    var cls = r.income ? "amount-income" : "amount-expense";
+    var typeTxt = r.income ? "收入" : "支出";
+    var note = r.income ? "主动记录 · 证据权重 0.75" : "主动记录 · 证据权重 0.75";
+    return '<div class="card-mini">' +
+      '<div class="row"><span class="k">类型</span><span class="v">' + typeTxt + '</span></div>' +
+      '<div class="row"><span class="k">金额</span><span class="v num ' + cls + '">' + sign + '¥' + r.amount.toFixed(2) + '</span></div>' +
+      '<div class="row"><span class="k">分类</span><span class="v">' + esc(r.cat) + '</span></div>' +
+      (r.channel ? '<div class="row"><span class="k">渠道</span><span class="v">' + esc(r.channel) + '</span></div>' : "") +
+      '<div class="row"><span class="k">证据</span><span class="v" style="font-size:var(--font-size-12);color:var(--color-text-secondary)">' + note + '</span></div>' +
+      '<div class="row"><span class="k">去向</span><span class="v" style="font-size:var(--font-size-12);color:var(--color-text-secondary)">已确认 → 事件账本（演示）</span></div>' +
+      '</div>';
+  }
+
+  function doRecord(text) {
+    if (!text.trim()) { return; }
+    addBubble(esc(text), "user");
+    var r = parse(text);
+    if (!r.amount || r.amount <= 0) {
+      addBubble("没听懂金额——请带一个数字，比如「买了杯咖啡 45」。", "ai");
+      return;
+    }
+    var label = r.income ? "已记收入" : "已记支出";
+    setTimeout(function () {
+      addBubble("好的，" + label + "，确认一下：<br><br>" + cardHTML(r), "ai");
+    }, 450);
+  }
+
+  function askCashflow() {
+    addBubble("我下个月会不会缺钱？", "user");
+    setTimeout(function () {
+      addBubble(
+        "基于过去 3 个月的收入节奏，未来 30 天<b>预计</b>现金流：<br><br>" +
+        '<div class="card-mini">' +
+        '<div class="row"><span class="k">30 天期末预计余额</span><span class="v num amount-income">+¥3,200</span></div>' +
+        '<div class="row"><span class="k">预计区间（90%）</span><span class="v num">-¥800 ~ +¥7,400</span></div>' +
+        '<div class="row"><span class="k">最近一个缺口点</span><span class="v num" style="color:var(--color-warning)">第 18 天 约 -¥2,400</span></div>' +
+        '<div class="row"><span class="k">依据</span><span class="v" style="font-size:var(--font-size-12)">历史 3 个月收入节奏 + 未来固定支出</span></div>' +
+        '<div class="row"><span class="k">建议动作</span><span class="v" style="font-size:var(--font-size-12)">提前 2 周安排追应收 / 缓一笔非紧急支出</span></div>' +
+        "</div><br>以上为演示估算——区间随你的现金流可信度收放，低可信时会如实标注「现金流不明」。",
+        "ai");
+    }, 500);
+  }
+
+  btnSend.addEventListener("click", function () { doRecord(inputText.value); inputText.value = ""; });
+  inputText.addEventListener("keydown", function (e) { if (e.key === "Enter") { doRecord(inputText.value); inputText.value = ""; } });
+  btnAsk.addEventListener("click", askCashflow);
+  chips.addEventListener("click", function (e) {
+    if (e.target.tagName === "BUTTON") { doRecord(e.target.textContent); }
+  });
+})();
+</script>
+</body>
+</html>

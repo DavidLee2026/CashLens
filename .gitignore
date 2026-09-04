@@ -1,0 +1,47 @@
+# ═══════════════════════════════════════════════════════════════
+# CashLens 代码仓 .gitignore（仓库根规则）
+# 铁律：真实票据 / 真实流水 / 客户上传数据 一律不进 GitHub
+# 约定：真实数据统一放 uploads/ 或 user-data/（被忽略）；合成演示样本放 samples/（可提交）
+# ═══════════════════════════════════════════════════════════════
+
+# ─── 密钥与环境 ───
+.env
+.env.*
+!.env.example
+
+# ─── 用户数据隔离区（客户上传的 CSV / 发票图 / 截图，绝不入库）───
+uploads/
+user-data/
+user_data/
+receipts-real/
+真实票据/
+客户数据/
+
+# ─── 保险丝：真实票据扩展名兜底 ───
+# 电子发票基本都是 PDF（数电票/OFD 转 PDF）；demo 素材用 PNG/JPG 即可，PDF 一律不入库
+*.pdf
+*.ofd
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ─── macOS ───
+.DS_Store
+Thumbs.db
+*~
+
+# ─── Node / opencode 运行时 ───
+node_modules/
+.opencode/node_modules/
+
+# ─── 本地运行产物 ───
+*.log
+*.db
+*.sqlite
+sqlite/
