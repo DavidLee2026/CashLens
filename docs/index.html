@@ -337,7 +337,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <div>
       <span class="eyebrow">2026 · 北大金融 AI 智能体创新大赛</span>
       <h1>一个人就是一家公司。<br>CashLens 给你一个<span class="grad">懂钱的 AI 财务团队</span>。</h1>
-      <p class="hero-sub">散在微信、支付宝、票据、账单里的钱，被自动归拢成一束光——照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
+      <p class="hero-sub">对它说一句，钱就记下了——语音记账是 CashLens 的主打入口。微信、支付宝、票据、账单里散落的收支被自动归拢成一束光，照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
       <div class="hero-facts">
         <div class="fact"><span class="num">1</span><span class="lbl">个编排引擎（大脑）</span></div>
         <div class="fact"><span class="num">33</span><span class="lbl">个财务 SKILL（方法论）</span></div>
@@ -431,12 +431,12 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">WHAT · 产品</div>
     <h2>一层内核，三层能力</h2>
-    <p class="sec-intro">对话是唯一入口：说一句记一笔、拍一张票据、导一份账单。背后是三件事——归拢、照见、建议。</p>
+    <p class="sec-intro">对话是唯一入口：说一句（语音）、拍一张票据、导一份账单，都能记一笔。背后是三件事——归拢、照见、建议。</p>
     <div class="grid grid-3">
       <div class="card">
         <div class="card-num">归拢 · 采集</div>
-        <h3>三通道，把「记」的成本趋近于零</h3>
-        <p>说一句自然语言、拍一张票据/截图（VLM 识别）、或官方账单一键导入（微信/支付宝 CSV）——所有收支汇入一本不可变的「事件账本」。官方导出才是正道，不做不稳定的平台自动同步。</p>
+        <h3>语音优先：说话，就是记账</h3>
+        <p>① 说一句——语音/文字记账，主打入口：本地语音转写，连打字都省了；② 拍一张——票据/截图，豆包大模型视觉识别；③ 导一份——微信/支付宝官方账单 CSV 一键导入。所有收支汇入一本不可变的「事件账本」，官方导出才是正道，不做不稳定的平台自动同步。</p>
       </div>
       <div class="card edge-income">
         <div class="card-num">照见 · 理解</div>
@@ -447,6 +447,32 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         <div class="card-num">建议 · 决策</div>
         <h3>在决策点，给有依据的话</h3>
         <p>「这单接不接、报多少」——结合现金垫底、历史回款周期、时间成本给出报价区间与理由；缺口提前 30 天预警，变「怕断粮」为「提前备粮」。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 三种人 ═══════════ -->
+<section id="users" style="border-bottom:1px solid var(--color-surface-border)">
+  <div class="container">
+    <div class="sec-eyebrow">WHO · 三种人</div>
+    <h2>同一种「没人管钱」，三种不同的问法</h2>
+    <p class="sec-intro">CashLens 把同一套内核，翻译成三种人每天都要做的决策——决策层的语言，按角色自动切换。</p>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-num">独立开发者 · OPC 一人公司</div>
+        <h3>「这单接不接、报多少？」</h3>
+        <p>接单报价决策：现金垫底够不够、该客户历史回款周期、时间成本——给报价区间与理由，不再拍脑袋。</p>
+      </div>
+      <div class="card edge-income">
+        <div class="card-num">小微经营者 · 小店工作室</div>
+        <h3>「这批货进不进、工钱怎么算？」</h3>
+        <p>进货决策 + 报销发票归集 + 工时工资汇总——月底一张报表，进销存与人情账都不糊涂。</p>
+      </div>
+      <div class="card edge-warning">
+        <div class="card-num">家庭 · 多平台消费者</div>
+        <h3>「这个月会不会超支？」</h3>
+        <p>微信/支付宝/拼多多/抖音账单聚合 + AI 自动分类 + 预算红线——超支提前预警，钱花在哪一目了然。</p>
       </div>
     </div>
   </div>
@@ -539,7 +565,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <p class="sec-intro">每一个能力都用真实数据跑过——以下是最近的两次实弹记录，如实呈现，包括发现的问题。</p>
     <div class="grid grid-2">
       <div>
-        <h3 style="font-size:var(--font-size-18)">① VLM 识别真实数电发票 <span class="tag tag-ok">2026-09-04 实弹</span></h3>
+        <h3 style="font-size:var(--font-size-18)">① 豆包大模型视觉识别 · 真实数电发票 <span class="tag tag-ok">2026-09-04 实弹</span></h3>
         <table class="proof-tbl">
           <tr><th>字段</th><th>识别结果</th><th>判定</th></tr>
           <tr><td>金额（价税合计 ¥530.00）</td><td class="num">530.0</td><td class="ok">正确</td></tr>
@@ -548,7 +574,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           <tr><td>分类 / 明细</td><td>餐饮 · 餐饮费 ¥500 + 6% 税</td><td class="ok">正确</td></tr>
           <tr><td>发票号码（20 位）</td><td class="num">漏读 1 位</td><td class="warn">已列入修复</td></tr>
         </table>
-        <p class="proof-note">真实电子发票端到端识别：核心字段全对；长数字串漏位问题已定位，修复方案 = 号码格式校验 + 低置信局部重识别。缺陷如实公开，才是可信的起点。</p>
+        <p class="proof-note">票据识别走豆包大模型（Doubao Seed 视觉理解 API）——用一张真实电子发票端到端实测：核心字段全对；发票号码 20 位漏读 1 位的缺陷已如实记录，修复方案 = 号码格式校验 + 低置信局部重识别。隐私口径：票据图像经豆包 API 云端识别（产品内明示）；语音转写与账本数据留在本地。</p>
       </div>
       <div>
         <h3 style="font-size:var(--font-size-18)">② 引擎五项能力实测 <span class="tag tag-ok">2026-08-28 实弹</span></h3>
@@ -586,10 +612,13 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         <button class="btn btn-ghost" type="button" id="btnAskCashflow">问下月现金流</button>
       </div>
       <div class="demo-input">
+        <button class="btn btn-ghost" type="button" id="btnMic" title="语音输入（需麦克风授权）" aria-label="按住说话" style="display:none;padding:var(--space-3)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
+        </button>
         <input type="text" id="inputText" placeholder="说一句记一笔，如：打车花了 28" aria-label="输入一句话记账">
         <button class="btn btn-primary" type="button" id="btnSend">记一笔</button>
       </div>
-      <div class="demo-tip">演示在浏览器本地完成，不联网、不保存。真实版本由本地账本 + LLM API 驱动。</div>
+      <div class="demo-tip">支持语音：点左边麦克风，说「昨天收了 3000 尾款」试试。演示在浏览器本地完成（语音识别用系统能力，不保存）；真实版本由本地账本 + LLM API 驱动。</div>
     </div>
   </div>
 </section>
@@ -605,6 +634,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     </div>
     <div class="foot-meta">
       2026 北大金融 AI 智能体创新大赛 · 参赛作品<br>
+      参赛者：李维逸<br>
       财务状态引擎 / CashPulse 预测 / 假设检验闭环<br>
       本地优先 · 证据驱动 · 可复现
     </div>
@@ -725,6 +755,37 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   chips.addEventListener("click", function (e) {
     if (e.target.tagName === "BUTTON") { doRecord(e.target.textContent); }
   });
+
+  // ── 语音输入（主打功能演示）：系统语音识别，渐进增强 ──
+  var btnMic = document.getElementById("btnMic");
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var rec = null;
+  if (SR) {
+    btnMic.style.display = "";
+    rec = new SR();
+    rec.lang = "zh-CN";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    var listening = false;
+    btnMic.addEventListener("click", function () {
+      if (listening) { rec.stop(); return; }
+      try { rec.start(); listening = true; btnMic.disabled = true; }
+      catch (e) { return; }
+      addBubble("正在听，请说一句记账（再点一次麦克风可停止）…", "ai");
+    });
+    rec.onresult = function (e) {
+      var t = e.results[0][0].transcript;
+      inputText.value = t;
+      doRecord(t);
+    };
+    rec.onend = function () { listening = false; btnMic.disabled = false; };
+    rec.onerror = function (ev) {
+      listening = false; btnMic.disabled = false;
+      if (ev.error !== "aborted" && ev.error !== "no-speech") {
+        addBubble("语音识别未授权或不可用——直接打字也完全可以。", "ai");
+      }
+    };
+  }
 })();
 </script>
 </body>
