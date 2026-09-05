@@ -280,6 +280,14 @@ h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold
 .amount-income{color:var(--color-income)}
 .amount-expense{color:var(--color-risk)}
 .demo-tip{font-size:var(--font-size-12);color:var(--color-text-tertiary);padding:0 var(--space-4) var(--space-4)}
+.mic-hint{font-size:var(--font-size-12);color:var(--color-text-secondary);padding:0 var(--space-4) var(--space-3)}
+.btn-mode{flex:0 0 auto;padding:var(--space-3);align-items:center;justify-content:center;display:inline-flex}
+.hold-zone{flex:1;display:flex;align-items:center;justify-content:center;gap:var(--space-2);
+  border:1px dashed var(--raw-gray-300);border-radius:var(--radius-md);padding:10px var(--space-4);
+  color:var(--color-text-secondary);font-size:var(--font-size-14);font-weight:var(--weight-medium);
+  cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none}
+.hold-zone:hover{border-color:var(--color-brand);color:var(--color-brand)}
+.hold-rec{background:var(--color-risk-bg);border-style:solid;border-color:var(--color-risk);color:var(--color-risk)}
 .demo-tabs{display:flex;gap:var(--space-2);padding:var(--space-4) var(--space-4) 0;flex-wrap:wrap}
 .demo-tab{border:1px solid var(--raw-gray-300);background:transparent;border-radius:var(--radius-pill);
   font-size:var(--font-size-13);font-weight:var(--weight-medium);padding:6px 14px;color:var(--color-text-secondary);
@@ -335,6 +343,16 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 .foot-slogan{font-size:var(--font-size-18);font-weight:var(--weight-semibold)}
 .foot-meta{font-size:var(--font-size-12);color:var(--color-text-secondary);text-align:right;line-height:1.8}
 
+/* ═══════════ 出处脚注与依据清单（证据驱动 · R39 口径纪律）═══════════ */
+.src-sup{font-size:10px;font-family:var(--font-mono);font-weight:var(--weight-semibold);color:var(--color-brand);text-decoration:none;vertical-align:super;margin-left:2px;letter-spacing:0}
+.src-sup:hover{text-decoration:underline}
+.sources{margin-bottom:var(--space-8);border:1px solid var(--card-border);border-radius:var(--radius-lg);background:var(--color-bg-elevated);font-size:var(--font-size-12);color:var(--color-text-secondary)}
+.sources summary{cursor:pointer;padding:var(--space-3) var(--space-5);font-weight:var(--weight-semibold);color:var(--color-text);user-select:none}
+.sources summary:hover{color:var(--color-brand)}
+.sources ol{padding:0 var(--space-5) var(--space-4) var(--space-8);margin:0}
+.sources li{padding:2px 0;line-height:1.7}
+.sources li a{color:var(--color-brand)}
+
 /* ═══════════ 响应式 ═══════════ */
 @media (max-width:900px){
   .hero-inner{grid-template-columns:1fr;gap:var(--space-10)}
@@ -382,7 +400,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <div>
       <span class="eyebrow">2026 · 北大金融 AI 智能体创新大赛</span>
       <h1>一个人就是一家公司。<br>CashLens 给你一个<span class="grad">懂钱的 AI 财务团队</span>。</h1>
-      <p class="hero-sub">对它说一句，钱就记下了——语音记账是 CashLens 的主打入口。微信、支付宝、票据、账单里散落的收支被自动归拢成一束光，照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
+      <p class="hero-sub">对它说一句，钱就记下了——语音记账是 CashLens 的入口之一：本地实弹识别已跑通，云端接入按产品分期推进。微信、支付宝、票据、账单里散落的收支被自动归拢成一束光，照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
       <div class="hero-facts">
         <div class="fact"><span class="num">1</span><span class="lbl">个编排引擎（大脑）</span></div>
         <div class="fact"><span class="num">33</span><span class="lbl">个财务 SKILL（方法论）</span></div>
@@ -448,26 +466,26 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <div class="grid grid-3">
       <div class="card edge-risk">
         <div class="card-num">01</div>
-        <h3>收入像过山车</h3>
+        <h3>收入像过山车 <a class="src-sup" href="#src-3">[3]</a></h3>
         <p>这个月 3 万、下个月归零——却没人告诉你「下个月能不能撑住」、什么时候该备粮。</p>
       </div>
       <div class="card edge-warning">
         <div class="card-num">02</div>
-        <h3>钱散在五个地方</h3>
+        <h3>钱散在五个地方 <a class="src-sup" href="#src-4">[4]</a></h3>
         <p>微信、支付宝、银行、商户后台、一抽屉发票——月底对不上账，是常态。</p>
       </div>
       <div class="card edge-cyan">
         <div class="card-num">03</div>
-        <h3>报价靠感觉</h3>
+        <h3>报价靠感觉 <a class="src-sup" href="#src-5">[5]</a></h3>
         <p>「这单接不接、报多少」拍脑袋定了价，回头发现连房租都没覆盖。</p>
       </div>
     </div>
     <div class="gap-row" style="margin-top:var(--space-8)">
       <div class="gap-item"><span class="x">✕</span>记账 App 只出报表，不管你的现金流</div>
       <div class="gap-item"><span class="x">✕</span>企业级财务软件，一个人用不起</div>
-      <div class="gap-item"><span class="x">✕</span>通用 AI 拿不到你的真实流水，只会泛泛而谈</div>
+      <div class="gap-item"><span class="x">✕</span>通用 AI 拿不到你的真实流水，只会泛泛而谈 <a class="src-sup" href="#src-6">[6]</a></div>
     </div>
-    <p style="font-size:var(--font-size-12);color:var(--color-text-tertiary);margin-top:var(--space-6)">目标人群口径：灵活就业人员约 2.8 亿、个体工商户约 7,800 万（据公开统计口径，人口规模 ≠ 可达市场）。</p>
+    <p style="font-size:var(--font-size-12);color:var(--color-text-tertiary);margin-top:var(--space-6)">目标人群口径：中国灵活就业人员 2025 年约 2.8 亿、预计 2026 年 3.2 亿<a class="src-sup" href="#src-1">[1]</a>；登记在册个体工商户约 1.25 亿户（市场监管总局，2024 年 11 月）<a class="src-sup" href="#src-2">[2]</a>。人口规模 ≠ 可达市场——CashLens 服务的是其中「一人公司 / 独立开发者 / 小微经营者」子集，而非全部灵活就业人群。</p>
   </div>
 </section>
 
@@ -481,7 +499,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="card">
         <div class="card-num">归拢 · 采集</div>
         <h3>语音优先：说话，就是记账</h3>
-        <p>① 说一句——语音/文字记账，主打入口：本地语音转写，连打字都省了；② 拍一张——票据/截图，豆包大模型视觉识别；③ 导一份——微信/支付宝官方账单 CSV 一键导入。所有收支汇入一本不可变的「事件账本」，官方导出才是正道，不做不稳定的平台自动同步。</p>
+        <p>① 说一句——语音/文字记账（产品主打入口，分期推进）：本地实弹转写已跑通，云端语音识别按复赛节奏接入；② 拍一张——票据/截图，豆包大模型视觉识别；③ 导一份——微信/支付宝官方账单 CSV 一键导入。所有收支汇入一本不可变的「事件账本」，官方导出才是正道，不做不稳定的平台自动同步。</p>
       </div>
       <div class="card edge-income">
         <div class="card-num">照见 · 理解</div>
@@ -767,7 +785,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">LIVE · 场景演示</div>
     <h2>三种场景，各走一遍</h2>
-    <p class="sec-intro">上面对应的三种人，在这里各有一段可点的剧本——跟着走一遍，看 CashLens 如何应答每一步。也可以自己输入，或用麦克风说一句（本地语音识别，不保存）。</p>
+    <p class="sec-intro">上面对应的三种人，在这里各有一段可点的剧本——跟着走一遍，看 CashLens 如何应答每一步。也可以自己输入，或用麦克风说一句（语音识别：本地打开 + 启动识别服务时为本地实弹链路；线上页为浏览器语音识别兜底。音频不留存）。</p>
     <div class="demo-shell" role="region" aria-label="CashLens 三种场景演示">
       <div class="demo-tabs" role="tablist" aria-label="选择使用场景">
         <button class="demo-tab active" type="button" role="tab" aria-selected="true" data-scene="opc">OPC 一人公司</button>
@@ -778,13 +796,16 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="demo-chat" id="chatLog" aria-live="polite"></div>
       <div class="chips" id="sceneSteps" aria-label="剧本步骤"></div>
       <div class="demo-input">
-        <button class="btn btn-ghost" type="button" id="btnMic" title="语音输入（需麦克风授权）" aria-label="语音输入" style="display:none;padding:var(--space-3)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
-        </button>
-        <input type="text" id="inputText" placeholder="也可以自己说一句记账，如：打车花了 28" aria-label="输入一句话记账">
-        <button class="btn btn-primary" type="button" id="btnSend">记一笔</button>
+        <button class="btn btn-ghost btn-mode" type="button" id="btnMode" title="切换到键盘输入" aria-label="切换到键盘输入"></button>
+        <div class="hold-zone" id="holdZone" role="button" tabindex="0" aria-label="按住说话，松开结束">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
+          <span id="holdLabel">按住 说话</span>
+        </div>
+        <input type="text" id="inputText" placeholder="输入记账或问题，如：打车花了 28 / 我下个月现金流怎么样" aria-label="输入记账或问题" style="display:none">
+        <button class="btn btn-primary" type="button" id="btnSend" style="display:none">发送</button>
       </div>
-      <div class="demo-tip">三种人，三种用法：点上方切换场景，再点剧本里的句子一步步体验；也可以自己输入，或用麦克风说一句（本地语音识别）。演示不保存任何数据。</div>
+      <div class="mic-hint" id="micHint" role="status" aria-live="polite"></div>
+      <div class="demo-tip">三种人，三种用法：点上方切换场景，再点剧本里的句子一步步体验；也可以自己输入，或用麦克风说一句。演示不保存任何数据。</div>
     </div>
   </div>
 </section>
@@ -793,7 +814,19 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
 <!-- ═══════════ Footer ═══════════ -->
 <footer>
-  <div class="container foot-inner">
+  <div class="container">
+    <details class="sources">
+      <summary>数据与判断依据（共 6 条 · 2026-08 调研核实 · 证据驱动是我们的产品纪律，也是本页纪律）</summary>
+      <ol>
+        <li id="src-1">灵活就业规模：2025 年约 2.8 亿、预计 2026 年 3.2 亿（占就业人口逾四成）——联合早报转引报告，2026-06。<a href="https://www.zaobao.com/news/china/story20260607-9169767">来源 ↗</a></li>
+        <li id="src-2">个体工商户：登记在册约 1.25 亿户（2024 年 11 月）——国家市场监管总局，中国政府网发布。<a href="https://www.gov.cn/zhengce/jiedu/tujie/202411/content_6985570.htm">来源 ↗</a></li>
+        <li id="src-3">痛点「收入不稳定」：MDPI《Being Pushed or Pulled》(2025) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
+        <li id="src-4">痛点「现金流不可见 / 钱散多处」：Springer《Cash Flow Forecasting for Self-employed》(2024) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
+        <li id="src-5">痛点「报价靠感觉 / 被压价」：Sage《Discounted Prices, Discounted Respect?》(2023) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
+        <li id="src-6">「记账 App 只出报表、国内无人做一人公司财务决策层」：2026-08 竞品实时核查（10+ 产品原文核实）。<a href="https://post.smzdm.com/p/avg6gn6p/">记账 App 横评来源 ↗</a></li>
+      </ol>
+    </details>
+    <div class="foot-inner">
     <div>
       <div class="foot-slogan">把散落的钱，聚成一束光。</div>
       <div style="font-size:var(--font-size-14);color:var(--color-text-secondary);margin-top:var(--space-2)">CashLens · 多智能体财务系统 · 面向一人公司与小微经营者</div>
@@ -803,6 +836,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       参赛者：李维逸<br>
       财务状态引擎 / CashPulse 预测 / 假设检验闭环<br>
       本地优先 · 证据驱动 · 可复现
+    </div>
     </div>
   </div>
 </footer>
@@ -819,7 +853,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   var sceneText = document.getElementById("sceneText");
   var tabs = document.querySelectorAll(".demo-tab");
 
-  var INCOME_WORDS = ["收", "尾款", "工资", "入账", "进账", "退款", "红包", "报酬", "项目款", "货款", "结算"];
+  var INCOME_WORDS = ["客户支付", "收到", "收款", "回款", "收", "尾款", "工资", "入账", "进账", "退款", "红包", "报酬", "项目款", "货款", "结算"];
   var EXPENSE_WORDS = ["买", "花", "付", "充值", "打车", "咖啡", "奶茶", "餐", "吃", "超市", "房租", "水电", "电影", "机票", "酒店"];
   var CAT_RULES = [
     { cat: "餐饮", words: ["咖啡", "奶茶", "餐", "吃", "外卖", "饭店", "早餐", "午餐", "晚餐"] },
@@ -983,14 +1017,57 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     }
   }
 
-  function playStep(i) {
-    var s = SCENES[curScene];
-    if (!s || i !== playIndex || i >= s.steps.length) { return; }
+  function playStepAt(sceneKey, i) {
+    var s = SCENES[sceneKey];
+    if (!s || !s.steps[i]) { return; }
     var st = s.steps[i];
     addBubble(esc(st.u), "user");
     setTimeout(function () { addBubble(st.a, "ai"); }, 500);
-    playIndex = i + 1;
+    if (i + 1 > playIndex) { playIndex = i + 1; }
     renderSteps();
+  }
+  function playStep(i) {
+    if (curScene && i === playIndex && i < SCENES[curScene].steps.length) { playStepAt(curScene, i); }
+  }
+
+  // ── 意图匹配：输入/语音与场景剧本对上时，就答库里的剧本文案 ──
+  // 实弹教训：用户直接说剧本里的句子，不该走「记一笔」通用解析（无金额问题更不该报「没听懂金额」）
+  function bigrams(s) {
+    var clean = s.replace(/\s+/g, "");
+    var out = {};
+    for (var i = 0; i < clean.length - 1; i++) {
+      var b = clean.substr(i, 2);
+      out[b] = (out[b] || 0) + 1;
+    }
+    return out;
+  }
+  function matchScene(text) {
+    var tb = bigrams(text);
+    var tbNum = extractAmount(text);
+    var best = null, bestScore = 0;
+    Object.keys(SCENES).forEach(function (key) {
+      SCENES[key].steps.forEach(function (st, i) {
+        var sb = bigrams(st.u);
+        var inter = 0, sTotal = 0;
+        for (var b in sb) {
+          if (sb.hasOwnProperty(b)) {
+            sTotal += sb[b];
+            if (tb[b]) { inter += Math.min(sb[b], tb[b]); }
+          }
+        }
+        if (sTotal === 0) { return; }
+        var ratio = inter / sTotal;
+        var sNum = extractAmount(st.u);
+        var bonus = (tbNum > 0 && tbNum === sNum) ? 0.3 : 0;   // 数字一致加权：三千 vs 3000 也算对上
+        var score = ratio + bonus;
+        if (score > bestScore) { bestScore = score; best = { key: key, i: i }; }
+      });
+    });
+    return bestScore >= 0.6 && best ? best : null;
+  }
+  function sceneNameOf(k) {
+    var m = { opc: "OPC 一人公司", smallbiz: "小微经营者", family: "家庭日常" };
+    return m[k] || k;
   }
 
   tabs.forEach(function (t) {
@@ -1017,10 +1094,120 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   });
 
   // ── 自由输入兜底：任何场景下都能自己说一句记账 ──
+  // 金额解析：阿拉伯数字（28 / 45.5）与中文数字（三千 / 三千五 / 一万二 / 五百零三）都支持
+  // 实弹教训：本地语音识别回的是「三千元」而非「3000」，只认阿拉伯数字会漏记——中文金额必须能记账
+  function cnToAmount(s) {
+    var D = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    var U = { 十: 10, 百: 100, 千: 1000 };
+    var B = { 万: 10000, 亿: 100000000 };
+    var dot = s.indexOf("点");
+    var frac = 0, fdiv = 1;
+    if (dot > -1) {
+      for (var i2 = dot + 1; i2 < s.length; i2++) {
+        var dc = D[s[i2]];
+        if (dc === undefined) { break; }
+        fdiv *= 10; frac += dc / fdiv;
+      }
+      s = s.slice(0, dot);
+    }
+    // 口语报价常直接报数字（二九九 = 299、九九 = 99、二零二六 = 2026）——整串没有任何 十百千万亿 单位时，按十进制逐位展开
+    var hasUnitChar = false;
+    for (var ui = 0; ui < s.length; ui++) {
+      if (U[s[ui]] !== undefined || B[s[ui]] !== undefined) { hasUnitChar = true; break; }
+    }
+    if (!hasUnitChar) {
+      var acc = 0;
+      for (var di = 0; di < s.length; di++) {
+        var dv = D[s[di]];
+        if (dv !== undefined) { acc = acc * 10 + dv; }   // 零也占位：二九零九 → 2909
+      }
+      return Math.round((acc + frac) * 100) / 100;
+    }
+    var result = 0, section = 0, num = 0, litAcc = 0, zeroPending = false;
+    var lastUnit = 0, lastBig = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      if (c === "零" || c === "〇") { zeroPending = true; continue; }
+      if (D[c] !== undefined) {
+        if (zeroPending) { litAcc = litAcc * 10 + D[c]; zeroPending = false; }
+        else { num = D[c]; }
+        continue;
+      }
+      if (U[c] !== undefined) {
+        section += (litAcc > 0 ? litAcc : num || 1) * U[c];
+        lastUnit = U[c]; lastBig = 0;
+        num = 0; litAcc = 0; zeroPending = false;
+        continue;
+      }
+      if (B[c] !== undefined) {
+        section += litAcc > 0 ? litAcc : num;
+        section = (section || 1) * B[c];
+        result += section; section = 0;
+        lastBig = B[c]; lastUnit = 0;
+        num = 0; litAcc = 0; zeroPending = false;
+      }
+    }
+    var tail = 0;
+    if (litAcc > 0) { tail = litAcc; }
+    else if (num > 0) {
+      if (lastBig > 0) { tail = num * (lastBig / 10); }
+      else if (lastUnit > 0) { tail = num * (lastUnit / 10); }
+      else { tail = num; }
+    }
+    return Math.round((result + section + tail + frac) * 100) / 100;
+  }
+  // ═══════════ 金额识别（句级语义判定，替代局部窗口猜测）═══════════
+  // 前几轮数字 bug 的共同根因：用「数字前后几格」局部猜测是否金额，越补越碎、改一处坏一处。
+  // 改为两段式：1) 枚举句中所有数字候选并归一化；2) 先判整句是否「金钱事件」（动词/渠道/货币单位/记账祈使），再对候选按证据打分取最高者。
+  var MONEY_VERBS = ["支付", "收到", "收款", "进账", "入账", "到账", "转账", "付款", "退款", "报销", "充值", "扣款", "结算", "消费", "花费", "花", "付", "收", "买", "卖", "转", "赚", "借", "还", "缴", "报", "工资", "房租", "货款", "尾款", "报酬", "稿费", "分红", "押金", "定金", "价格", "报价", "多少钱", "记录", "记账"];
+  var CHANNEL_WORDS = ["微信", "支付宝", "现金", "银行卡", "银行", "零钱"];
+  var MONEY_UNIT_RE = /(?:元|块|块钱|万元|人民币)/;
+  var COUNTER_CHAR = "个名位次天点号分秒里台件杯份张岁层月周年季刻钟条辆双只朵页本集回人部下节课";
+  var NUM_SPAN_RE = /[零〇一二两三四五六七八九十百千万亿]+(?:点[零〇一二三四五六七八九]+)?|\d+(?:\.\d+)?/g;
+
+  function spansOf(text) {
+    var out = [], m; NUM_SPAN_RE.lastIndex = 0;
+    while ((m = NUM_SPAN_RE.exec(text)) !== null) {
+      var v = /\d/.test(m[0]) ? parseFloat(m[0]) : cnToAmount(m[0]);
+      if (v > 0) { out.push({ v: v, start: m.index, end: m.index + m[0].length }); }
+    }
+    return out;
+  }
+  function hasMoneySignal(text) {
+    if (MONEY_UNIT_RE.test(text)) { return true; }
+    for (var i = 0; i < MONEY_VERBS.length; i++) { if (text.indexOf(MONEY_VERBS[i]) > -1) { return true; } }
+    for (var j = 0; j < CHANNEL_WORDS.length; j++) { if (text.indexOf(CHANNEL_WORDS[j]) > -1) { return true; } }
+    return false;
+  }
+  function scoreSpan(text, sp) {
+    var s = 0;
+    var before1 = sp.start > 0 ? text.charAt(sp.start - 1) : "";
+    if (before1 === "周" || before1 === "期" || before1 === "拜" || before1 === "第") { return -99; } // 周三/星期三/礼拜三/第三 是序数或星期，不是金额
+    var afterClean = text.slice(sp.end).replace(/^[\s,，。.．、!！?？:：;；'"”’「」『』()（）]*/, "");
+    if (sp.v === 1 && afterClean.charAt(0) === "下") { return -99; }          // 「记录一下」的"一"不是金额
+    if (/^(?:元|块|块钱|万元|人民币)/.test(afterClean)) { s += 3; }          // 数字紧跟货币单位
+    if (afterClean === "") { s += 1; }                                        // 数字在句尾
+    if (afterClean.indexOf("套餐") === 0) { s += 1; }                         // 「299 套餐」= 价格名词
+    var near = text.slice(Math.max(0, sp.start - 4), Math.min(text.length, sp.end + 4));
+    for (var i = 0; i < MONEY_VERBS.length; i++) { if (near.indexOf(MONEY_VERBS[i]) > -1) { s += 2; break; } }
+    if (afterClean !== "" && afterClean.indexOf("套餐") !== 0 && COUNTER_CHAR.indexOf(afterClean.charAt(0)) > -1) { s -= 2; } // 紧跟量词减分
+    return s;
+  }
+  function extractAmount(text) {
+    var spans = spansOf(text);
+    if (spans.length === 0) { return 0; }
+    var money = hasMoneySignal(text);
+    var best = null, bestScore = -99;
+    for (var i = 0; i < spans.length; i++) {
+      var sc = scoreSpan(text, spans[i]);
+      if (sc > bestScore) { bestScore = sc; best = spans[i]; }
+    }
+    if (!best) { return 0; }
+    if (money) { return bestScore >= 1 ? best.v : 0; }   // 句内有金钱信号 → 取证据最高的候选（≥1 才认，避免「花了10分钟」临界误判）
+    return bestScore >= 1 ? best.v : 0;                  // 无显式信号 → 仅当句尾/带单位等强证据才认金额
+  }
   function parse(text) {
-    var amount = 0;
-    var m = text.match(/(\d+(?:\.\d+)?)/);
-    if (m) { amount = parseFloat(m[1]); }
+    var amount = extractAmount(text);
     var isIncome = false;
     for (var i = 0; i < INCOME_WORDS.length; i++) {
       if (text.indexOf(INCOME_WORDS[i]) > -1) { isIncome = true; break; }
@@ -1045,13 +1232,19 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     return { income: isIncome, amount: amount, cat: cat, channel: channel };
   }
 
+  // 金额显示：千分位 + 两位小数（金融数字可读性）
+  function fmtAmount(n) {
+    var s = n.toFixed(2);
+    var i = s.indexOf(".");
+    return (i > -1 ? s.slice(0, i).replace(/\B(?=(\d{3})+(?!\d))/g, ",") + s.slice(i) : s);
+  }
   function cardHTML(r) {
     var sign = r.income ? "+" : "-";
     var cls = r.income ? C_INC : C_RISK;
     var typeTxt = r.income ? "收入" : "支出";
     return mkCard([
       { k: "类型", v: typeTxt },
-      { k: "金额", v: '<span class="num" ' + cls + '>' + sign + '¥' + r.amount.toFixed(2) + '</span>' },
+      { k: "金额", v: '<span class="num" ' + cls + '>' + sign + '¥' + fmtAmount(r.amount) + '</span>' },
       { k: "分类", v: esc(r.cat) + (r.channel ? " · " + esc(r.channel) : "") },
       { k: "证据", v: "0.75 主动记录 → 事件账本（演示）" }
     ]);
@@ -1059,12 +1252,22 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
   function doRecord(text) {
     if (!text.trim()) { return; }
-    addBubble(esc(text), "user");
-    var r = parse(text);
-    if (!r.amount || r.amount <= 0) {
-      addBubble("没听懂金额——请带一个数字，比如「买了杯咖啡 45」。", "ai");
+    // 意图分流 1：与某个场景剧本对上 → 答库里的剧本文案（说一样的话，得一样的回答）
+    var hit = matchScene(text);
+    if (hit) {
+      if (hit.key === curScene) { playStepAt(hit.key, hit.i); return; }
+      var otherU = SCENES[hit.key].steps[hit.i].u;
+      addBubble(esc(text), "user");
+      addBubble("这句是「" + sceneNameOf(hit.key) + "」场景剧本里的话（" + esc(otherU) + "）。当前演示按场景隔离——点上方「" + sceneNameOf(hit.key) + "」标签再问，我会用那个场景的上下文回答。", "ai");
       return;
     }
+    // 意图分流 2：带金额 → 当记账处理
+    var r = parse(text);
+    if (!r.amount || r.amount <= 0) {
+      addBubble("这句话我先接不上——目前演示支持两类：带金额的记账（如「打车花了 28」、说「三千」也行），或当前场景剧本里的问题（上方句子直接说或点一下都行）。也可以切到另外两种人试试。", "ai");
+      return;
+    }
+    addBubble(esc(text), "user");
     var label = r.income ? "已记收入" : "已记支出";
     setTimeout(function () { addBubble("好的，" + label + "，确认一下：<br><br>" + cardHTML(r), "ai"); }, 450);
   }
@@ -1076,12 +1279,62 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   curScene = "opc";
   renderScene();
 
-  // ── 语音输入（主打功能）：本地 ASR 真链路（localhost）／系统语音兜底（线上）──
-  var btnMic = document.getElementById("btnMic");
+  // ── 输入交互：微信式 —— 默认按住说话，左侧图标按钮切换键盘输入 ──
+  var btnMode = document.getElementById("btnMode");
+  var holdZone = document.getElementById("holdZone");
+  var holdLabel = document.getElementById("holdLabel");
+  var micHint = document.getElementById("micHint");
+  var ICON_KEY = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M7 9h3M7 12h6M14 15h3M7 15h2"/><path d="M10 20h4"/></svg>';
+  var ICON_MIC = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
+  var modeVoice = true;
+
+  function setMode(m) {
+    modeVoice = (m === "voice");
+    if (modeVoice) {
+      btnMode.innerHTML = ICON_KEY;                 // 语音态：图标为键盘，点它去打字
+      btnMode.title = "切换到键盘输入";
+      btnMode.setAttribute("aria-label", "切换到键盘输入");
+      holdZone.style.display = "flex";
+      inputText.style.display = "none";
+      btnSend.style.display = "none";
+      setMicUI("idle");
+    } else {
+      btnMode.innerHTML = ICON_MIC;                 // 键盘态：图标为麦克风，点它回语音
+      btnMode.title = "切换到语音（按住说话）";
+      btnMode.setAttribute("aria-label", "切换到语音输入：按住说话");
+      holdZone.style.display = "none";
+      inputText.style.display = "";
+      btnSend.style.display = "";
+      inputText.focus();
+      if (micHint) { micHint.textContent = "键盘模式：输入记账或问题后点「发送」"; }
+    }
+  }
+  btnMode.addEventListener("click", function () { setMode(modeVoice ? "text" : "voice"); });
+
+  function setMicUI(state) {
+    if (state === "rec") {
+      holdZone.classList.add("hold-rec");
+      holdLabel.textContent = "松开 结束";
+      holdZone.setAttribute("aria-label", "正在录音，松开结束");
+      if (micHint) { micHint.textContent = "正在录音 — 说完松开即识别"; }
+    } else {
+      holdZone.classList.remove("hold-rec");
+      holdLabel.textContent = "按住 说话";
+      holdZone.setAttribute("aria-label", "按住说话，松开结束");
+      if (micHint) {
+        micHint.textContent = state === "off"
+          ? "语音在 file:// 方式下不可用：请启动本地服务后用 http://localhost:8000/ 打开"
+          : "按住「说话」说一句记账或问题，松开即识别；点左边图标可切换打字";
+      }
+    }
+  }
+
+  // ── 语音链路：本地（localhost → Qwen3-ASR）／线上（浏览器语音兜底）──
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var isFile = location.protocol === "file:";
   var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  var rec = null;
+  var rec = null, recOn = false;
+  var recording = false, aCtx = null, aStream = null, aSrc = null, aProc = null, aChunks = [];
 
   // 工具：Float32Array(任意采样率) → 16kHz mono WAV(16bit) Blob
   function toWavBlob(all, sr) {
@@ -1091,7 +1344,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     for (var i = 0; i < n; i++) { out[i] = all[Math.floor(i * ratio)]; }
     var buf = new ArrayBuffer(44 + n * 2);
     var v = new DataView(buf);
-    function ws(o, s) { for (var j = 0; j < s.length; j++) { v.setUint8(o + j, s.charCodeAt(j)); } }
+    function ws(o, str) { for (var j = 0; j < str.length; j++) { v.setUint8(o + j, str.charCodeAt(j)); } }
     ws(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); ws(8, "WAVE"); ws(12, "fmt ");
     v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
     v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
@@ -1105,19 +1358,20 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     fetch("/api/asr", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: blob })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j.ok && j.text) {
-          inputText.value = j.text;          // 识别文字填入输入框，等用户确认
-          inputText.focus();
-          addBubble("本地识别结果：「" + esc(j.text) + "」——确认无误就点「记一笔」发送。", "ai");
-        } else {
-          addBubble("本地语音识别没出结果" + (j.error ? "（" + j.error + "）" : "") + "——直接打字也可以。", "ai");
-        }
+        if (j.ok && j.text) { asrDone(j.text); }
+        else { addBubble("本地识别没出结果" + (j.error ? "（" + j.error + "）" : "") + "——按住再说一次，或打字也可以。", "ai"); }
       })
       .catch(function () { addBubble("连不上本地识别服务——请确认已启动：python3 backend/asr_server.py。", "ai"); });
   }
 
-  var recording = false, aCtx = null, aStream = null, aSrc = null, aProc = null, aChunks = [];
-  function stopRec() {
+  function asrDone(text) {
+    inputText.value = text || "";
+    setMode("text");                 // 识别结果先落到输入框，切到键盘模式由人确认后再「发送」
+    inputText.focus();
+    addBubble("识别结果：「" + esc(text) + "」——确认无误就点「发送」（要改可直接改文字）。", "ai");
+  }
+
+  function stopLocalRec(cancelled) {
     recording = false;
     try { aSrc.disconnect(); aProc.disconnect(); } catch (e) {}
     if (aStream) { aStream.getTracks().forEach(function (t) { t.stop(); }); }
@@ -1127,72 +1381,95 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     aChunks.forEach(function (c) { all.set(c, off); off += c.length; });
     var sr = aCtx ? aCtx.sampleRate : 48000;
     if (aCtx) { aCtx.close(); }
-    if (total < 1600) { addBubble("录音太短，没听清——请再试一次，说完稍停半秒。", "ai"); return; }
-    addBubble("录音完成，正在本地识别…", "ai");
+    aCtx = null; aStream = null; aSrc = null; aProc = null; aChunks = [];
+    setMicUI("idle");
+    if (cancelled) { addBubble("已取消，未记录。", "ai"); return; }
+    if (total < 1600) { addBubble("说话时间太短——按住再说一次，说完再松开。", "ai"); return; }
+    addBubble("录音完成，正在识别…", "ai");
     sendToAsr(toWavBlob(all, sr));
   }
 
-  if (isLocal) {
-    // ── 本地演示 = 产品真实语音链路：录音 → /api/asr → 本地 Qwen3-ASR ──
-    btnMic.style.display = "";
-    btnMic.addEventListener("click", function () {
-      if (recording) { stopRec(); return; }
+  function startRec() {
+    if (recording || recOn) { return; }
+    if (isFile) {
+      addBubble("当前是 file:// 方式，语音不可用。请启动本地服务体验语音记账：<br><span style='font-family:var(--font-mono);font-size:var(--font-size-12);background:var(--color-bg);padding:2px 6px;border-radius:4px'>cd 09-代码 && python3 backend/asr_server.py</span><br>再用浏览器打开 <span style='font-family:var(--font-mono);font-size:var(--font-size-12)'>http://localhost:8000/</span> 体验。", "ai");
+      setMode("text");
+      return;
+    }
+    if (isLocal) {
+      recording = true; setMicUI("rec");
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        recording = false; setMicUI("idle");
         addBubble("当前浏览器不支持录音——建议用 Chrome/Safari 打开。", "ai"); return;
       }
       navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
+        if (!recording) { s.getTracks().forEach(function (t) { t.stop(); }); return; } // 按下即松：放弃
         aStream = s; aChunks = [];
         aCtx = new (window.AudioContext || window.webkitAudioContext)();
         aSrc = aCtx.createMediaStreamSource(s);
         aProc = aCtx.createScriptProcessor(4096, 1, 1);
         aProc.onaudioprocess = function (e) { aChunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
         aSrc.connect(aProc); aProc.connect(aCtx.destination);
-        recording = true;
-        addBubble("正在录音…请说一句记账（如「昨天微信收了 3000 尾款」），说完再点一次麦克风结束。", "ai");
+        // 注意：开始录音时绝不在此弹气泡——气泡会把聊天区顶高、把按钮顶出指针位置触发 pointerleave，录音会被误取消（实弹教训）
       }).catch(function () {
-        addBubble("无法访问麦克风——请在地址栏左侧允许麦克风后重试；直接打字也可以。", "ai");
+        recording = false; setMicUI("idle");
+        addBubble("无法访问麦克风——请在地址栏左侧允许后重试；也可点左边图标打字。", "ai");
       });
-    });
-  } else if (SR && !isFile) {
-    // ── 线上（GitHub Pages）：系统语音识别兜底 ──
-    btnMic.style.display = "";
-    rec = new SR();
-    rec.lang = "zh-CN";
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-    var listening = false;
-    btnMic.addEventListener("click", function () {
-      if (listening) { rec.stop(); return; }
-      try { rec.start(); listening = true; btnMic.disabled = true; }
-      catch (e) { addBubble("无法启动语音识别：" + (e.name || "未知错误") + "——直接打字也可以。", "ai"); return; }
-      addBubble("正在听…请说一句记账（说完会自动停下识别）。", "ai");
-    });
-    rec.onresult = function (e) {
-      var t = e.results[0][0].transcript;
-      inputText.value = t;                 // 识别文字先填入输入框，等用户确认
-      inputText.focus();
-      addBubble("听清了：「" + esc(t) + "」。确认无误就点「记一笔」发送。", "ai");
-    };
-    rec.onend = function () { listening = false; btnMic.disabled = false; };
-    rec.onerror = function (ev) {
-      listening = false; btnMic.disabled = false;
-      if (ev.error === "aborted") { return; }
-      if (ev.error === "no-speech") {
-        addBubble("没有听到声音——请靠近麦克风、说完稍等片刻。", "ai");
-        return;
-      }
-      addBubble("语音识别失败（" + ev.error + "）——直接打字也可以。", "ai");
-    };
-  } else if (isFile) {
-    // file:// 下无法用真实语音链路：指引本地服务
-    btnMic.style.display = "";
-    btnMic.addEventListener("click", function () {
-      addBubble("当前是 file:// 方式打开，语音不可用。请启动本地服务体验语音记账：<br><span style='font-family:var(--font-mono);font-size:var(--font-size-12);background:var(--color-bg);padding:2px 6px;border-radius:4px'>cd 09-代码 && python3 backend/asr_server.py</span><br>再用浏览器打开 <span style='font-family:var(--font-mono);font-size:var(--font-size-12)'>http://localhost:8000/</span>，点麦克风说话就能记账。", "ai");
-    });
-  } else {
-    btnMic.style.display = "none";
+      return;
+    }
+    if (SR) {
+      rec = new SR();
+      rec.lang = "zh-CN"; rec.interimResults = false; rec.maxAlternatives = 1;
+      recOn = true; setMicUI("rec");
+      var tGot = false;
+      rec.onresult = function (e) { tGot = true; asrDone(e.results[0][0].transcript); };
+      rec.onend = function () {
+        recOn = false; setMicUI("idle");
+        if (!tGot) { addBubble("没听清——按住再说一次，或点左边图标打字。", "ai"); }
+      };
+      rec.onerror = function (ev) {
+        recOn = false; setMicUI("idle");
+        if (ev.error === "aborted") { return; }
+        addBubble("语音识别失败（" + ev.error + "）——直接打字也可以。", "ai");
+      };
+      try { rec.start(); } catch (e) { recOn = false; setMicUI("idle"); addBubble("无法启动语音识别——请用 Chrome 或直接打字。", "ai"); }
+      return;
+    }
+    addBubble("当前环境不支持语音——请用 Chrome 打开，或点左边图标打字。", "ai");
   }
-})();
+  function stopRec() {
+    if (isLocal) { stopLocalRec(false); }
+    else if (recOn) { rec.stop(); }
+  }
+  function cancelRec() {
+    if (isLocal) { stopLocalRec(true); }
+    else if (recOn) { try { rec.abort(); } catch (e) { recOn = false; setMicUI("idle"); } }
+  }
+
+  // 按住说话：Pointer Events —— 按下开始并锁定指针，抬起/系统取消 结束
+  // 实弹教训：按住期间页面任何布局变化（气泡弹出顶高聊天区）都会让按钮移出指针位置、触发 pointerleave 自动取消
+  // → 录音中只在输入栏显示状态（变红「松开 结束」），不弹泡；并用 setPointerCapture 把指针锁定在按钮上，轻微移出也不误取消
+  holdZone.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    if (e.pointerType === "mouse" && e.button !== 0) { return; }
+    try { holdZone.setPointerCapture(e.pointerId); } catch (err) {}
+    startRec();
+  });
+  holdZone.addEventListener("pointerup", function (e) {
+    try { holdZone.releasePointerCapture(e.pointerId); } catch (err) {}
+    stopRec();
+  });
+  holdZone.addEventListener("pointercancel", function () { cancelRec(); });
+  holdZone.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  holdZone.addEventListener("keydown", function (e) {
+    if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); startRec(); }
+  });
+  holdZone.addEventListener("keyup", function (e) {
+    if (e.key === " " || e.key === "Enter") { stopRec(); }
+  });
+
+  // 默认进入语音模式（按住说话）
+  setMode("voice");})();
 </script>
 </body>
 </html>
