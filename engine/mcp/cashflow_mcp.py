@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
-"""CashLens 最小 MCP 服务器：查询现金流状态（实测 2 用）"""
+"""CashLens 最小 MCP 服务器：查询现金流状态（v2：接 state_engine 真计算）"""
 import json
+import os
 import sys
+from pathlib import Path
 
 # 手写最小 stdio JSON-RPC MCP 服务器（不依赖 SDK，纯标准库）
 # 协议：initialize 握手 → notifications/initialized → tools/list → tools/call
+
+REPO_ROOT = Path(__file__).resolve().parents[2]           # engine/mcp/ → 仓库根
+sys.path.insert(0, str(REPO_ROOT / "backend"))
+from app.services.state_engine import EventLedger, calc  # noqa: E402
+
+
+def ledger_path() -> Path:
+    """事件账本路径：可用环境变量 CASH_LEDGER 覆盖，默认 仓库/data/finance_events.jsonl。"""
+    return Path(os.environ.get("CASH_LEDGER") or str(REPO_ROOT / "data" / "finance_events.jsonl"))
 
 
 def log(msg):
@@ -31,15 +42,33 @@ TOOL_DEF = {
 
 
 def tool_get_cashflow_status(args: dict) -> dict:
-    """返回模拟的状态引擎数据（实测阶段用静态数据）"""
+    """读取真实事件账本 → state_engine 真计算；无账本/无数据时如实标注，不返回假数字。"""
+    lp = ledger_path()
+    if not lp.exists():
+        return {
+            "health": 0.0, "confidence": 0.0, "labels": ["unknown"],
+            "reason": f"事件账本不存在: {lp}（先记几笔，或用 CASH_LEDGER 指定路径）",
+            "as_of": args.get("as_of", "now"), "source": "state-engine-real-v1",
+        }
+    events = EventLedger(lp).load()
+    state = calc.compute(events)
+    fc = calc.forecast_cashflow(events, horizon_days=30)
+    fc["confidence"] = state["cashflow_confidence"]
+    low = fc["band90_low_cents"]
     return {
-        "health": 0.72,
-        "confidence": 0.65,
-        "labels": ["learning"],
-        "gap_30d": {"exists": False, "amount": 0.0},
-        "cashflow_30d": {"min_balance": 3200.50, "expected_income": 15000.0, "expected_expense": 11200.0},
-        "as_of": args.get("as_of", "now"),
-        "source": "mcp-demo-v1"
+        "health": state["financial_health"],
+        "confidence": state["cashflow_confidence"],
+        "labels": [state["label"]],
+        "stability_days": state["stability_days"],
+        "events_count": state["events_count"],
+        "gap_30d": {"exists": low < 0, "amount_cents": low if low < 0 else 0},
+        "cashflow_30d": {
+            "median_balance_cents": fc["median_balance_cents"],
+            "min_balance_cents": low,
+            "band90_high_cents": fc["band90_high_cents"],
+        },
+        "as_of": args.get("as_of") or state["as_of"],
+        "source": "state-engine-real-v1",
     }
 
 

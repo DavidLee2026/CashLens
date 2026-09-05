@@ -45,3 +45,5 @@ node_modules/
 *.db
 *.sqlite
 sqlite/
+# 本地事件账本与状态库（运行时数据，勿入库）
+data/
