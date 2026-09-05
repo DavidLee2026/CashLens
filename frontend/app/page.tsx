@@ -40,7 +40,7 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
 
 export default function Workbench() {
   const [msgs, setMsgs] = useState<Msg[]>([
-    { role: "ai", text: "你好，我是 CashLens 的本地工作台。记账直接说（如「昨天微信收了 3000 尾款」），或问我「下个月现金流怎么样」。所有数据真写进本地事件账本，不做剧本。\n\n提示：本地账本目前为空时，会显示 learning；先记几笔再问我现金流。\n（需先启动后端：cd backend && python3 -m uvicorn app.main:app --port 8001）" },
+    { role: "ai", text: "你好，我是 CashLens 的本地工作台。记账直接说（如「昨天微信收了 3000 尾款」），或问我「下个月现金流怎么样」；接入 LLM 后也能自由聊天。所有金额/状态都真写进本地事件账本并由状态引擎计算，不做剧本。\n\n先记几笔再问我现金流，面板会实时变化。\n（需先启动后端：cd backend && python3 -m uvicorn app.main:app --port 8001）" },
   ]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,18 +48,21 @@ export default function Workbench() {
   const [fc, setFc] = useState<Fc | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [apiOk, setApiOk] = useState(true);
+  const [llmOn, setLlmOn] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   async function refresh() {
     try {
-      const [s, f, e] = await Promise.all([
+      const [s, f, e, c] = await Promise.all([
         j<{ state: StateT }>("/api/state"),
         j<Fc>("/api/forecast?horizon_days=30"),
         j<{ events: Ev[] }>("/api/events?limit=20"),
+        j<{ llm: boolean }>("/api/capabilities"),
       ]);
       setState(s.state);
       setFc(f);
       setEvents(e.events);
+      setLlmOn(!!c.llm);
       setApiOk(true);
     } catch {
       setApiOk(false);
@@ -126,7 +129,10 @@ export default function Workbench() {
           <section className="card convo" aria-label="对话记账">
             <div className="convo-head">
               <span className="t">说一句，钱就记下了</span>
-              <span className="muted">{state ? `${state.events_count} 笔 · 本地账本` : "…"}</span>
+              <span className="muted">
+                {state ? `${state.events_count} 笔 · 本地账本 · ` : ""}
+                {llmOn ? "LLM 对话" : "规则层"}
+              </span>
             </div>
             <div className="log" ref={logRef}>
               {msgs.map((m, i) => (
@@ -148,7 +154,7 @@ export default function Workbench() {
                 {busy ? "处理中…" : "发送"}
               </button>
             </div>
-            <div className="hint">规则语义解析（兜底）→ 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据，非剧本。</div>
+            <div className="hint">LLM 语义理解（后端已配 Key 时）+ 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。自由对话文本会上云（见隐私口径）。</div>
           </section>
 
           {/* 右侧面板 */}
