@@ -2,42 +2,44 @@
 """CashLens 本地语音识别服务（backend 雏形 · 单文件原型）
 
 职责：同时提供「静态页面」与「语音识别 API」，让网页 demo 走真实本地 ASR 链路：
-  页面录音（16kHz mono WAV）→ POST /api/asr → 本地 Qwen3-ASR 转写 → 返回文本
+  页面录音（16kHz mono WAV）→ POST /api/asr → 本地 ASR 转写 → 返回文本
 
 路由：
   GET  /           静态页面（docs/ 目录）
   GET  /api/health 存活检查
   POST /api/asr    WAV 音频 → {ok, text}
 
-用法（在 09-代码/ 目录下）：
-  python3 backend/asr_server.py          # 默认端口 8000
-  python3 backend/asr_server.py 8001     # 指定端口
+用法（在 09-代码/ 目录下，ASR 工具与模型路径通过环境变量传入，不入库）：
+  ASR_CLI=/绝对路径/transcribe-cli ASR_MODEL=/绝对路径/asr模型.gguf \\
+      python3 backend/asr_server.py          # 默认端口 8000
+  ASR_CLI=... ASR_MODEL=... python3 backend/asr_server.py 8001   # 指定端口
 
 说明：本文件是语音采集模块的原型，后续并入正式 FastAPI 后端（backend/app/）。
 """
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse
 
-# ─── 配置（可用环境变量覆盖，便于不同机器）───
+# ─── 配置（ASR 工具/模型路径一律走环境变量，避免在仓库里写死本机路径）───
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs"))
-CLI = os.environ.get("ASR_CLI", os.path.expanduser("~/dev/transcribe.cpp/build/bin/transcribe-cli"))
-MODEL = os.environ.get("ASR_MODEL", os.path.expanduser("~/models/asr/Qwen3-ASR-1.7B-Q4_K_M.gguf"))
+CLI = os.environ.get("ASR_CLI") or shutil.which("transcribe-cli") or ""
+MODEL = os.environ.get("ASR_MODEL") or ""
 ASR_TIMEOUT = 180  # 秒
 
 
 def run_asr(wav_bytes: bytes) -> dict:
-    """调本地 Qwen3-ASR：WAV(16k mono) → 识别文本"""
-    if not os.path.exists(CLI):
-        return {"ok": False, "text": "", "error": f"ASR CLI 不存在: {CLI}"}
-    if not os.path.exists(MODEL):
-        return {"ok": False, "text": "", "error": f"ASR 模型不存在: {MODEL}"}
+    """调本地 ASR：WAV(16k mono) → 识别文本"""
+    if not CLI:
+        return {"ok": False, "text": "", "error": "未找到本地 ASR CLI：请设置环境变量 ASR_CLI（或确保 transcribe-cli 在 PATH 中）"}
+    if not MODEL or not os.path.exists(MODEL):
+        return {"ok": False, "text": "", "error": "未找到 ASR 模型：请设置环境变量 ASR_MODEL 指向 gguf 模型文件"} 
 
     tmp = None
     try:
@@ -74,7 +76,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if urlparse(self.path).path == "/api/health":
-            body = json.dumps({"ok": True, "asr": "qwen3-local"}).encode("utf-8")
+            body = json.dumps({"ok": True, "asr": "local-asr"}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
