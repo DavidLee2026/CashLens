@@ -53,13 +53,31 @@ function sessionId(): string {
 }
 
 export default function Workbench() {
-  // 空会话占位 · 人格层开场白（v1 · 2026-09-06 · 与 backend _PERSONA_PROMPT 同源，规格见 02-脑暴/对话人格层规格-20260906.md 第四节）
-  const [msgs, setMsgs] = useState<Msg[]>([
-    {
-      role: "ai",
-      text: "我是 CashLens 财务管家——你散在各处的钱，我帮你归拢成一本随时能看懂的账；你下个月会不会缺钱，我提前告诉你；这单接不接、报多少，我给你的不是感觉，是理由。\n\n先试一句记账吧，比如「昨天微信收了 3000 尾款」或「打车花了 28」；也可以问我「下个月现金流怎么样」。\n\n（本地开发提示：需先启动后端 cd backend && python3 -m uvicorn app.main:app --port 8001）",
-    },
-  ]);
+  // 空会话占位 · 开场白 B+ 版（2026-09-06 定稿：B 极简上手型为基底，加长+增人情味 · 与 backend _PERSONA_PROMPT 同源，规格见 02-脑暴/对话人格层规格-20260906.md 第四节）
+  const [msgs, setMsgs] = useState<Msg[]>(() => {
+    // 对话历史持久化：刷新优先从 localStorage 恢复（只恢复文本；按钮/草稿不持久）
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem("cl_msgs");
+      if (raw) {
+        const arr: unknown = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          const ok = arr
+            .filter((x) => !!x && typeof x === "object" && (x as Msg).role !== undefined && typeof (x as Msg).text === "string")
+            .map((x) => ({ role: (x as Msg).role, text: (x as Msg).text }));
+          if (ok.length > 0) return ok;
+        }
+      }
+    } catch {
+      /* 忽略损坏缓存 */
+    }
+    return [
+      {
+        role: "ai",
+        text: "你好，我是 CashLens 财务管家。钱的事你不用懂格式，也不用自己记流水账——跟我说大白话就行，剩下的归拢、分类、盯缺口，都交给我。\n\n比如一句「昨天微信收了 3000 尾款」或「打车花了 28」，我马上帮你记好；想知道下个月会不会缺钱，就问我「现金流怎么样」，我会把依据一起讲给你听。\n\n先来一句试试？\n\n（本地开发提示：需先启动后端 cd backend && python3 -m uvicorn app.main:app --port 8001）",
+      },
+    ];
+  });
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<StateT | null>(null);
@@ -90,6 +108,20 @@ export default function Workbench() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    // 对话历史持久化（刷新不丢；只存文本，最近 40 条）
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          "cl_msgs",
+          JSON.stringify(msgs.slice(-40).map((m) => ({ role: m.role, text: m.text })))
+        );
+      }
+    } catch {
+      /* 忽略存储失败 */
+    }
+  }, [msgs]);
 
   useEffect(() => {
     const el = logRef.current;
