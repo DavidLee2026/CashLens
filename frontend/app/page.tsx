@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type Msg = { role: "user" | "ai"; text: string };
+type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string };
+type Msg = { role: "user" | "ai"; text: string; pending?: PendingDraft[] };
 type StateT = {
   label: string;
   financial_health: number;
@@ -19,7 +20,7 @@ type Fc = {
   reason: string;
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
-type ChatReply = { ok: boolean; text: string; session_id?: string };
+type ChatReply = { ok: boolean; text: string; session_id?: string; pending?: PendingDraft[] };
 
 const yuan = (c: number) =>
   `¥${(c / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -91,6 +92,19 @@ export default function Workbench() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs]);
 
+  async function act(p: PendingDraft, acceptIt: boolean) {
+    try {
+      await j<{ ok: boolean }>(`/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`, { method: "POST" });
+      setMsgs((m) => [
+        ...m,
+        { role: "ai", text: acceptIt ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}）。` : "已忽略，这笔不入账。" },
+      ]);
+      refresh();
+    } catch {
+      setMsgs((m) => [...m, { role: "ai", text: "操作失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。" }]);
+    }
+  }
+
   async function send() {
     const t = text.trim();
     if (!t || busy) return;
@@ -106,7 +120,7 @@ export default function Workbench() {
       if (r.session_id && typeof window !== "undefined") {
         window.localStorage.setItem("cl_session", r.session_id);
       }
-      setMsgs((m) => [...m, { role: "ai", text: r.text }]);
+      setMsgs((m) => [...m, { role: "ai", text: r.text, pending: r.pending }]);
     } catch {
       setMsgs((m) => [...m, { role: "ai", text: "连不上本地后端：请先运行 cd backend && python3 -m uvicorn app.main:app --port 8001。" }]);
       setApiOk(false);
@@ -154,6 +168,23 @@ export default function Workbench() {
               {msgs.map((m, i) => (
                 <div key={i} className={`b ${m.role}`}>
                   {m.text}
+                  {m.pending && m.pending.length > 0 && (
+                    <div className="acts">
+                      {m.pending.map((p) => (
+                        <div className="act-row" key={p.id}>
+                          <span className="num">
+                            {p.direction === "income" ? "收入" : "支出"} {yuan(p.amount_cents)}（{p.category}）
+                          </span>
+                          <button className="btn-mini ok" onClick={() => act(p, true)}>
+                            确认入账
+                          </button>
+                          <button className="btn-mini" onClick={() => act(p, false)}>
+                            不要这笔
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

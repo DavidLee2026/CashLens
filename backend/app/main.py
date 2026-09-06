@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import llm_skill, parser_rule, query_tools, session_mem
+from .services import llm_skill, parser_rule, pending, query_tools, session_mem
 from .services.state_engine import EventLedger, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -116,38 +116,45 @@ def _cashflow_text() -> dict:
     return query_tools.cashflow_text(_events())
 
 
-def _record_one(direction: str, amount_cents: int, channel: str, category: str, note: str, counterparty: str = ""):
-    """写一笔到事件账本；返回 (event, appended)。"""
+def _append_event(direction: str, amount_cents: int, category: str, channel: str, note: str, counterparty: str = ""):
+    """真正写入事件账本（确认后调用）。返回 (event, appended)。"""
     ev = make_event(
         ts=datetime.now(), event_type=direction, amount_cents=amount_cents,
         evidence_kind="voice", channel=channel or "manual", category=category or "其他",
-        counterparty=counterparty or "", note=note or "", confirmed=False,
+        counterparty=counterparty or "", note=note or "", confirmed=True,
     )
     book = EventLedger(LEDGER_PATH)
     res = book.append(ev, strict_dedupe=True)
     return ev, res["appended"]
 
 
+def _draft_one(direction: str, amount_cents: int, category: str, channel: str, note: str, counterparty: str = "") -> dict:
+    """识别 → 只生成待确认草稿（不直接入账）。"""
+    return pending.create(
+        DATA_DIR, direction=direction, amount_cents=amount_cents,
+        category=category, channel=channel, note=note, counterparty=counterparty,
+    )
+
+
 def _rule_reply(text: str) -> dict:
-    """规则兜底（无 LLM 时）：记账 / 问现金流 / 接不上。"""
+    """规则兜底（无 LLM 时）：记账走待确认 / 问现金流 / 接不上。"""
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
         return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}
     if r["kind"] == "ask_cashflow":
         out = _cashflow_text()
         return {"ok": True, "text": out["text"], "state": out.get("state"), "forecast": out.get("forecast")}
-    try:
-        ev, appended = _record_one(r["direction"], r["amount_cents"], r["channel"], r["category"], r["text"])
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    d = _draft_one(r["direction"], r["amount_cents"], r["category"], r["channel"], r["text"])
     dir_cn = "收入" if r["direction"] == "income" else "支出"
-    if not appended:
-        return {"ok": True, "text": "这笔和账本里已有的记录重复了（dedupe 拦截），未重复入账。", "event": ev}
-    return {"ok": True, "text": f"好的，已记{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}），证据 0.75 主动记录 → 事件账本。"}
+    return {
+        "ok": True,
+        "text": f"识别到{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}）——请确认后入账。",
+        "pending": [d],
+    }
 
 
 def _run_actions(parsed: dict, text: str) -> dict:
-    """执行 LLM 选出的动作（真数据/真记账），返回分段文案 + 结构化结果（供合成回复与记忆）。"""
+    """执行 LLM 选出的动作：记账=生成待确认草稿；查询=真数据。返回文案+结构化结果。"""
     events = _events()
 
     def h_cashflow(evs, act):
@@ -155,21 +162,22 @@ def _run_actions(parsed: dict, text: str) -> dict:
         return {"text": out["text"], "payload": {"state": out.get("state"), "forecast": out.get("forecast")}}
 
     def h_latest_income(evs, act):
-        ev = query_tools.latest_event(evs, "income")
-        return {"text": query_tools.latest_event_text(evs, "income"), "payload": {"event": ev}}
+        return {"text": query_tools.latest_event_text(evs, "income"),
+                "payload": {"event": query_tools.latest_event(evs, "income")}}
 
     def h_latest_expense(evs, act):
-        ev = query_tools.latest_event(evs, "expense")
-        return {"text": query_tools.latest_event_text(evs, "expense"), "payload": {"event": ev}}
+        return {"text": query_tools.latest_event_text(evs, "expense"),
+                "payload": {"event": query_tools.latest_event(evs, "expense")}}
 
     def h_spending(evs, act):
         m = act.get("month")
-        s = query_tools.spending_month(evs, month=m)
-        return {"text": query_tools.spending_month_text(evs, month=m), "payload": s}
+        return {"text": query_tools.spending_month_text(evs, month=m),
+                "payload": query_tools.spending_month(evs, month=m)}
 
     def h_recent(evs, act):
         limit = int(act.get("limit") or 5)
-        return {"text": query_tools.recent_events_text(evs, limit=limit), "payload": {"recent": list(reversed(evs))[:limit]}}
+        return {"text": query_tools.recent_events_text(evs, limit=limit),
+                "payload": {"recent": list(reversed(evs))[:limit]}}
 
     handlers = {
         "ask_cashflow": h_cashflow,
@@ -180,8 +188,8 @@ def _run_actions(parsed: dict, text: str) -> dict:
     }
     parts: list[str] = []
     results: list[dict] = []
+    drafts: list[dict] = []
     executed = False
-    any_record = False
     for a in parsed.get("actions", []):
         kind = a.get("kind")
         if kind == "record":
@@ -192,30 +200,21 @@ def _run_actions(parsed: dict, text: str) -> dict:
                     continue
             except (TypeError, ValueError):
                 continue
-            any_record = True
             executed = True
-            try:
-                ev, appended = _record_one(
-                    direction, amount, a.get("channel"), a.get("category"),
-                    a.get("note") or text, a.get("counterparty", ""),
-                )
-            except ValueError:
-                continue
+            d = _draft_one(direction, amount, a.get("category"), a.get("channel"),
+                           a.get("note") or text, a.get("counterparty", ""))
+            drafts.append(d)
             dir_cn = "收入" if direction == "income" else "支出"
-            ch = ev.get("channel") or "manual"
-            parts.append(
-                f"好的，已记{dir_cn} {_yuan(amount)}（{ev.get('category') or '其他'} · {ch}）"
-                if appended else f"{_yuan(amount)} 与账本重复（dedupe 拦截），未重复入账。"
-            )
-            results.append({"action": "record", "appended": appended, "direction": direction,
-                            "amount_cents": amount, "category": ev.get("category"), "channel": ch,
-                            "ts": str(ev.get("ts"))[:10], "note": ev.get("note", "")[:80]})
+            parts.append(f"识别到{dir_cn} {_yuan(amount)}（{d['category']} · {d['channel']}）——请确认后入账。")
+            results.append({"action": "record_draft", "status": "pending_confirm", "id": d["id"],
+                            "direction": direction, "amount_cents": amount,
+                            "category": d["category"], "channel": d["channel"]})
         elif kind in handlers:
             executed = True
             out = handlers[kind](events, a)
             parts.append(out["text"])
             results.append({"action": kind, "data": out["payload"]})
-    return {"parts": parts, "executed": executed, "any_record": any_record, "results": results}
+    return {"parts": parts, "executed": executed, "results": results, "drafts": drafts}
 
 
 @app.get("/api/capabilities")
@@ -224,9 +223,33 @@ def capabilities():
     return {"llm": on, "model": (llm_skill._model() if on else None)}
 
 
+@app.get("/api/pending")
+def pending_list():
+    """待确认草稿列表（识别→确认→入账）。"""
+    return {"pending": pending.list_all(DATA_DIR)}
+
+
+@app.post("/api/pending/{pid}/accept")
+def pending_accept(pid: str):
+    """确认入账：写入事件账本。"""
+    out = pending.accept(DATA_DIR, pid, _append_event)
+    if out is None:
+        raise HTTPException(status_code=404, detail="待确认草稿不存在")
+    state = run_state(LEDGER_PATH, DB_PATH)["state"]
+    return {"ok": True, "appended": out["appended"], "draft": out["draft"], "state": state}
+
+
+@app.post("/api/pending/{pid}/decline")
+def pending_decline(pid: str):
+    """不要这笔：丢弃草稿，不入账。"""
+    if not pending.decline(DATA_DIR, pid):
+        raise HTTPException(status_code=404, detail="待确认草稿不存在")
+    return {"ok": True}
+
+
 @app.post("/api/chat")
 def chat(body: ChatIn):
-    """多轮自由对话：会话记忆 + LLM 选动作 + 真执行 + 结果合成（LLM 只润色不编数）。"""
+    """多轮自由对话：会话记忆 + LLM 选动作 + 真执行 + 结果合成（记录走待确认）。"""
     sid = body.session_id or uuid.uuid4().hex
     session_mem.touch(sid)
     memory = session_mem.context_of(sid)
@@ -248,7 +271,8 @@ def chat(body: ChatIn):
             else:
                 final = str(parsed.get("reply", "")).strip() or "我还在学习这句怎么接——可以记一笔账，或问我最近流水 / 现金流。"
             session_mem.add_turn(sid, body.text, final, result_note=final[:120])
-            return {"ok": True, "text": final, "session_id": sid}
+            return {"ok": True, "text": final, "session_id": sid,
+                    "pending": [{k: d[k] for k in ("id", "direction", "amount_cents", "category", "channel")} for d in run["drafts"]]}
 
     r = _rule_reply(body.text)
     session_mem.add_turn(sid, body.text, r.get("text", ""))
