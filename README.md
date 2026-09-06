@@ -25,7 +25,7 @@
 
 ## 多智能体架构
 
-不是 N 个机器人常驻，而是 **1 个编排引擎按需激活 N 个 Markdown SKILL**（方法论即文件，可自加），MCP 协议统一接入工具。MVP 实弹 8 个 SKILL，其余标注 Phase 2/3。LLM 层为 OpenAI 兼容统一网关，厂商可插拔。
+不是 N 个机器人常驻，而是 **1 个编排引擎按需激活 N 个 Markdown SKILL**（方法论即文件，可自加），MCP 协议统一接入工具。MVP 清单 8 个 SKILL，仓库已落地 accounting / order-decision / cashflow-forecast 三个示例，其余标注 Phase 2/3。LLM 层为 OpenAI 兼容统一网关，厂商可插拔。
 
 ## 仓库概览
 

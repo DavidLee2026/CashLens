@@ -402,9 +402,9 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <h1>一个人就是一家公司。<br>CashLens 给你一个<span class="grad">懂钱的 AI 财务团队</span>。</h1>
       <p class="hero-sub">对它说一句，钱就记下了——语音记账是 CashLens 的入口之一：本地实弹识别已跑通，云端接入按产品分期推进。微信、支付宝、票据、账单里散落的收支被自动归拢成一束光，照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
       <div class="hero-facts">
-        <div class="fact"><span class="num">1</span><span class="lbl">个编排引擎（大脑）</span></div>
-        <div class="fact"><span class="num">33</span><span class="lbl">个财务 SKILL（方法论）</span></div>
-        <div class="fact"><span class="num">8</span><span class="lbl">个 MVP 实弹（其余 Phase 2/3）</span></div>
+        <div class="fact"><span class="num">1</span><span class="lbl">个编排引擎（五项实弹已过）</span></div>
+        <div class="fact"><span class="num">8</span><span class="lbl">个 MVP 清单 SKILL（规划定稿）</span></div>
+        <div class="fact"><span class="num">3</span><span class="lbl">个仓库落地 SKILL 示例（记账/接单/现金流预测）</span></div>
         <div class="fact"><span class="num">本地</span><span class="lbl">账本与决策数据留在磁盘</span></div>
       </div>
       <div class="hero-cta">
@@ -727,8 +727,8 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section id="arch" style="background:var(--color-bg-elevated);border-top:1px solid var(--color-surface-border);border-bottom:1px solid var(--color-surface-border)">
   <div class="container">
     <div class="sec-eyebrow">ARCHITECTURE · 多智能体</div>
-    <h2>1 个引擎 + 33 个 SKILL = 一个财务团队</h2>
-    <p class="sec-intro">不是 33 个机器人常驻——那是堆 Agent。而是一个编排引擎（大脑）按需激活 33 本「员工手册」（SKILL）：记一笔只激活几个，复杂决策才让多位专家并行审议。</p>
+    <h2>1 个引擎 + 33 个 SKILL（方法论规划库）= 一个财务团队</h2>
+    <p class="sec-intro">不是 33 个机器人常驻——那是堆 Agent。而是一个编排引擎（大脑）按需激活 33 本「员工手册」（SKILL）：仓库已落地记账 / 接单决策 / 现金流预测 3 个示例，其余按 MVP → Phase 2/3 渐进补齐。记一笔只激活几个，复杂决策才让多位专家并行审议。</p>
     <div class="engine-core">编排引擎 · opencode 范式（1 个大脑，思考 → 选 SKILL → 调工具 → 观察 → 再思考）</div>
     <div class="agents" style="margin-bottom:var(--space-6)">
       <div class="agent"><div class="a-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/></svg></div><h4>记账员</h4><p>采集 · 分类 · 入账</p></div>
@@ -739,7 +739,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <div class="gap-row">
       <div class="gap-item">SKILL = Markdown，可自加（开放可复用）</div>
       <div class="gap-item">多模型可插拔（LLM API 统一网关）</div>
-      <div class="gap-item">MVP 实弹 8 个 SKILL，其余 Phase 2/3 标注</div>
+      <div class="gap-item">MVP 清单 8 个 SKILL · 仓库落地示例 3 个（记账/接单决策/现金流预测）</div>
     </div>
   </div>
 </section>
@@ -757,7 +757,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           <tr><th>字段</th><th>识别结果</th><th>判定</th></tr>
           <tr><td>金额（价税合计 ¥530.00）</td><td class="num">530.0</td><td class="ok">正确</td></tr>
           <tr><td>开票日期 2026-08-26</td><td class="num">2026-08-26</td><td class="ok">正确</td></tr>
-          <tr><td>商户（销售方）</td><td>上海韵品餐饮管理有限公司</td><td class="ok">正确</td></tr>
+          <tr><td>商户（销售方）</td><td>上海·餐饮商户（隐私打码）</td><td class="ok">正确</td></tr>
           <tr><td>分类 / 明细</td><td>餐饮 · 餐饮费 ¥500 + 6% 税</td><td class="ok">正确</td></tr>
           <tr><td>发票号码（20 位）</td><td class="num">漏读 1 位</td><td class="warn">已列入修复</td></tr>
         </table>
@@ -777,6 +777,32 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       </div>
     </div>
     <p class="quote" style="margin-top:var(--space-8)">纪律：AI 自报不可信。每个 SKILL 都要配 golden case 与真实数据实弹验证——这条纪律从第一天就写在开发规范里。</p>
+  </div>
+</section>
+
+<!-- ═══════════ 路线图（诚实标注：愿景非承诺）═══════════ -->
+<section id="roadmap" style="border-bottom:1px solid var(--color-surface-border)">
+  <div class="container">
+    <div class="sec-eyebrow">ROADMAP · 开发路线（当前为原型/早期验证阶段）</div>
+    <h2>三步走：先把闭环做真，再把产品做广</h2>
+    <p class="sec-intro">以下为规划路线，非交付承诺——每一步都遵循「先实弹验证再对外宣称」（R38 纪律）。</p>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-num">现在 → 2026 Q3</div>
+        <h3>最小闭环实弹</h3>
+        <p>状态引擎 → 决策引擎 → 采集到决策全链路可演示；WTCC 创客组材料提交（原型级、如实标注）。</p>
+      </div>
+      <div class="card edge-income">
+        <div class="card-num">2026 Q4</div>
+        <h3>产品化 + 真实验证</h3>
+        <p>CashPulse 区间预测 / 状态标签产品化；真实用户（约 100 人）验证反馈回灌；正式前端。</p>
+      </div>
+      <div class="card edge-warning">
+        <div class="card-num">2027 Q1</div>
+        <h3>闭环完整化 + B 端试点</h3>
+        <p>假设检验闭环完整版；B 端路径试点（代账 / 银行小微信贷 / SaaS 嵌入式）。</p>
+      </div>
+    </div>
   </div>
 </section>
 
