@@ -172,6 +172,7 @@ def forecast_cashflow(events: list[dict], as_of=None, horizon_days: int = 30) ->
             "band90_low_cents": 0,
             "band90_high_cents": 0,
             "confidence": 0.0,
+            "insufficient": True,
             "reason": "近 90 天无事件，现金流不明",
         }
     vals = list(daily.values())
@@ -179,13 +180,20 @@ def forecast_cashflow(events: list[dict], as_of=None, horizon_days: int = 30) ->
     std = statistics.pstdev(vals) if len(vals) > 1 else 0.0
     current_balance = sum(vals)  # MVP 代理：近 90 天累计净流当作当前可确认余额
 
+    insufficient = len(daily) < 5  # 数据点太少：区间不可信，如实标注
     median = current_balance + mean * horizon_days
     low = current_balance + (mean - BAND_Z * std) * horizon_days
     high = current_balance + (mean + BAND_Z * std) * horizon_days
+    reason = (
+        f"数据不足（近 90 天仅 {len(daily)} 天有记录），区间暂不可信——多记或导入几笔后自动变宽"
+        if insufficient
+        else f"基于过去 {FORECAST_WINDOW_DAYS} 天日净流入节奏（{len(daily)} 天有记录）"
+    )
     return {
         "median_balance_cents": int(median),
         "band90_low_cents": int(low),
         "band90_high_cents": int(high),
         "confidence": None,  # 由调用方用 compute() 的 cashflow_confidence 填充
-        "reason": f"基于过去 {FORECAST_WINDOW_DAYS} 天日净流入节奏（{len(vals)} 天有记录）",
+        "insufficient": insufficient,
+        "reason": reason,
     }

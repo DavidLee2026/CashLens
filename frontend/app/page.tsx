@@ -15,6 +15,7 @@ type Fc = {
   band90_low_cents: number;
   band90_high_cents: number;
   confidence: number;
+  insufficient?: boolean;
   reason: string;
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
@@ -199,7 +200,11 @@ export default function Workbench() {
                     <span className="k">区间上沿</span>
                     <b className="num">{yuan(fc.band90_high_cents)}</b>
                   </div>
-                  <div className="fc-note">{fc.reason} · 可信度低时如实标注「现金流不明」</div>
+                  <div className="fc-note">
+                    {fc.insufficient
+                      ? "数据不足：区间暂不可信 —— 多记或导入几笔后自动变宽（现金流不明口径）"
+                      : `${fc.reason} · 可信度低时如实标注「现金流不明」`}
+                  </div>
                 </>
               ) : (
                 <div className="empty">{apiOk ? "等待数据…" : "后端未连接"}</div>

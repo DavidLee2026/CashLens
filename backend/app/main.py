@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import llm_skill, parser_rule
+from .services import llm_skill, parser_rule, query_tools
 from .services.state_engine import EventLedger, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -119,18 +119,7 @@ def _ctx_summary() -> str:
 def _cashflow_text() -> dict:
     """真计算现金流回复（LLM 与规则共用，杜绝模型编数字）。"""
     events = EventLedger(LEDGER_PATH).load()
-    st = calc.compute(events)
-    fc = calc.forecast_cashflow(events, horizon_days=30)
-    fc["confidence"] = st["cashflow_confidence"]
-    if st["events_count"] == 0:
-        return {"text": "账本还是空的——先记几笔（如「昨天微信收了 3000 尾款」），我才能照见你的现金流。", "state": st, "forecast": fc}
-    low = fc["band90_low_cents"]
-    gap_txt = f"最坏情形 {_yuan(-low)} 缺口" if low < 0 else "未见缺口"
-    text = (
-        f"当前状态：{st['label']} · 健康度 {st['financial_health']:.2f} · 现金流可信度 {st['cashflow_confidence']:.2f}。"
-        f"未来 30 天期末预计 {_yuan(fc['median_balance_cents'])}，区间 {_yuan(fc['band90_low_cents'])} ~ {_yuan(fc['band90_high_cents'])}（{gap_txt}）。"
-    )
-    return {"text": text, "state": st, "forecast": fc}
+    return query_tools.cashflow_text(events)
 
 
 def _record_one(direction: str, amount_cents: int, channel: str, category: str, note: str, counterparty: str = ""):
@@ -149,7 +138,7 @@ def _rule_reply(text: str) -> dict:
     """规则兜底（原逻辑）：记账 / 问现金流 / 接不上。"""
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
-        return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「现金流怎么样 / 下个月会不会缺钱」。配置 LLM API Key 后可自由对话。"}
+        return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}
     if r["kind"] == "ask_cashflow":
         out = _cashflow_text()
         return {"ok": True, "text": out["text"], "state": out.get("state"), "forecast": out.get("forecast")}
@@ -165,8 +154,22 @@ def _rule_reply(text: str) -> dict:
 
 
 def _apply_llm(parsed: dict, text: str) -> dict:
-    """LLM 主解析结果落地：多笔记账 / 问现金流 / 纯聊天。"""
-    parts, asked, any_record = [], False, False
+    """LLM 主解析结果落地：记账 / 真实数据查询 / 纯聊天。
+
+    纪律：凡执行了 record 或 ask_*（真数据动作），回复只采用后端真数据文案
+    （不拼接 LLM 的 reply，防止它编造数值或承诺不存在的功能）；纯聊天才用 LLM reply。
+    """
+    events = EventLedger(LEDGER_PATH).load()
+    handlers = {
+        "ask_cashflow": lambda: query_tools.cashflow_text(events),
+        "ask_latest_income": lambda: {"text": query_tools.latest_event_text(events, "income")},
+        "ask_latest_expense": lambda: {"text": query_tools.latest_event_text(events, "expense")},
+        "ask_spending": lambda: {"text": query_tools.spending_month_text(events)},
+        "ask_recent": lambda: {"text": query_tools.recent_events_text(events)},
+    }
+    parts: list[str] = []
+    any_record = False
+    any_data = False
     for a in parsed.get("actions", []):
         kind = a.get("kind")
         if kind == "record":
@@ -188,22 +191,23 @@ def _apply_llm(parsed: dict, text: str) -> dict:
             dir_cn = "收入" if direction == "income" else "支出"
             ch = ev.get("channel") or "manual"
             parts.append(
-                f"已记{dir_cn} {_yuan(amount)}（{ev.get('category') or '其他'} · {ch}）"
-                if appended else f"{_yuan(amount)} 与账本重复（dedupe 拦截）"
+                f"好的，已记{dir_cn} {_yuan(amount)}（{ev.get('category') or '其他'} · {ch}）"
+                if appended else f"{_yuan(amount)} 与账本重复（dedupe 拦截），未重复入账。"
             )
-        elif kind == "ask_cashflow":
-            asked = True
-    body = {"ok": True}
-    if asked:
-        out = _cashflow_text()
-        parts.append(out["text"])
-        body["state"], body["forecast"] = out.get("state"), out.get("forecast")
-    extra = str(parsed.get("reply", "")).strip()
-    if any_record or asked:
-        base = "，".join(parts)
-        body["text"] = base + ("。" if not base.endswith(("。", "！", "？")) else "") + (f"\n{extra}" if extra else "")
+        elif kind in handlers:
+            any_data = True
+            parts.append(handlers[kind]()["text"])
+    body: dict = {"ok": True}
+    if any_record or any_data:
+        body["text"] = "\n".join(parts)
     else:
-        body["text"] = extra or "我还在学习这句怎么接——可以试着记一笔账，或问我现金流。"
+        extra = str(parsed.get("reply", "")).strip()
+        body["text"] = extra or "我还在学习这句怎么接——可以记一笔账，或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。"
+    if any_record:
+        try:
+            body["state"] = run_state(LEDGER_PATH, DB_PATH)["state"]
+        except Exception:
+            pass
     return body
 
 
