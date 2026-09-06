@@ -68,6 +68,8 @@ button{font-family:inherit}
 .btn-mini:hover{border-color:var(--brand);color:var(--brand)}
 .btn-mini.ok{background:var(--income-bg);border-color:var(--income);color:var(--income)}
 .btn-mini.ok:hover{background:var(--income);color:#fff}
+.btn-mini:disabled{opacity:.5;cursor:not-allowed}
+.btn-mini.ok:disabled:hover{background:var(--income-bg);color:var(--income)}
 
 /* 右侧面板 */
 .side{display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 130px);overflow-y:auto;padding:2px}

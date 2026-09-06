@@ -53,8 +53,12 @@ function sessionId(): string {
 }
 
 export default function Workbench() {
+  // 空会话占位 · 人格层开场白（v1 · 2026-09-06 · 与 backend _PERSONA_PROMPT 同源，规格见 02-脑暴/对话人格层规格-20260906.md 第四节）
   const [msgs, setMsgs] = useState<Msg[]>([
-    { role: "ai", text: "你好，我是 CashLens 的本地工作台。记账直接说（如「昨天微信收了 3000 尾款」），或问我「下个月现金流怎么样」；接入 LLM 后也能自由聊天。所有金额/状态都真写进本地事件账本并由状态引擎计算，不做剧本。\n\n先记几笔再问我现金流，面板会实时变化。\n（需先启动后端：cd backend && python3 -m uvicorn app.main:app --port 8001）" },
+    {
+      role: "ai",
+      text: "我是 CashLens 财务管家——你散在各处的钱，我帮你归拢成一本随时能看懂的账；你下个月会不会缺钱，我提前告诉你；这单接不接、报多少，我给你的不是感觉，是理由。\n\n先试一句记账吧，比如「昨天微信收了 3000 尾款」或「打车花了 28」；也可以问我「下个月现金流怎么样」。\n\n（本地开发提示：需先启动后端 cd backend && python3 -m uvicorn app.main:app --port 8001）",
+    },
   ]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -92,9 +96,21 @@ export default function Workbench() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs]);
 
+  const [actingIds, setActingIds] = useState<Set<string>>(new Set());
+
   async function act(p: PendingDraft, acceptIt: boolean) {
+    if (actingIds.has(p.id)) return; // 防连点：处理中不可重复提交
+    setActingIds((prev) => new Set(prev).add(p.id));
     try {
       await j<{ ok: boolean }>(`/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`, { method: "POST" });
+      // 成功即从气泡移除该草稿按钮（已入账/已忽略的不允许再点）
+      setMsgs((m) =>
+        m.map((msg) =>
+          msg.pending && msg.pending.some((x) => x.id === p.id)
+            ? { ...msg, pending: msg.pending.filter((x) => x.id !== p.id) }
+            : msg
+        )
+      );
       setMsgs((m) => [
         ...m,
         { role: "ai", text: acceptIt ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}）。` : "已忽略，这笔不入账。" },
@@ -102,6 +118,12 @@ export default function Workbench() {
       refresh();
     } catch {
       setMsgs((m) => [...m, { role: "ai", text: "操作失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。" }]);
+    } finally {
+      setActingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(p.id);
+        return next;
+      });
     }
   }
 
@@ -175,11 +197,11 @@ export default function Workbench() {
                           <span className="num">
                             {p.direction === "income" ? "收入" : "支出"} {yuan(p.amount_cents)}（{p.category}）
                           </span>
-                          <button className="btn-mini ok" onClick={() => act(p, true)}>
-                            确认入账
+                          <button className="btn-mini ok" disabled={actingIds.has(p.id)} onClick={() => act(p, true)}>
+                            {actingIds.has(p.id) ? "处理中…" : "确认入账"}
                           </button>
-                          <button className="btn-mini" onClick={() => act(p, false)}>
-                            不要这笔
+                          <button className="btn-mini" disabled={actingIds.has(p.id)} onClick={() => act(p, false)}>
+                            {actingIds.has(p.id) ? "处理中…" : "不要这笔"}
                           </button>
                         </div>
                       ))}
