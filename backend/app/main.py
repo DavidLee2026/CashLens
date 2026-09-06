@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import llm_skill, parser_rule, query_tools
+from .services import llm_skill, parser_rule, query_tools, session_mem
 from .services.state_engine import EventLedger, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -96,30 +97,23 @@ def get_forecast(horizon_days: int = 30):
 
 
 class ChatIn(BaseModel):
-    """用户的一句话（记账或问现金流）。"""
+    """用户的一句话（记账/查询/闲聊）+ 可选会话 id（多轮自由对话）。"""
 
     text: str
+    session_id: str | None = None
 
 
 def _yuan(cents: int) -> str:
     return f"¥{cents / 100:,.2f}"
 
 
-def _ctx_summary() -> str:
-    """给 LLM 的当前系统上下文（只参考不照抄数值）。"""
-    try:
-        events = EventLedger(LEDGER_PATH).load()
-        st = calc.compute(events)
-        fc = calc.forecast_cashflow(events, horizon_days=30)
-        return json.dumps({"state": st, "forecast": fc, "events_count": len(events)}, ensure_ascii=False)
-    except Exception:
-        return "{}"
+def _events() -> list[dict]:
+    return EventLedger(LEDGER_PATH).load()
 
 
 def _cashflow_text() -> dict:
     """真计算现金流回复（LLM 与规则共用，杜绝模型编数字）。"""
-    events = EventLedger(LEDGER_PATH).load()
-    return query_tools.cashflow_text(events)
+    return query_tools.cashflow_text(_events())
 
 
 def _record_one(direction: str, amount_cents: int, channel: str, category: str, note: str, counterparty: str = ""):
@@ -135,7 +129,7 @@ def _record_one(direction: str, amount_cents: int, channel: str, category: str, 
 
 
 def _rule_reply(text: str) -> dict:
-    """规则兜底（原逻辑）：记账 / 问现金流 / 接不上。"""
+    """规则兜底（无 LLM 时）：记账 / 问现金流 / 接不上。"""
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
         return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}
@@ -146,30 +140,48 @@ def _rule_reply(text: str) -> dict:
         ev, appended = _record_one(r["direction"], r["amount_cents"], r["channel"], r["category"], r["text"])
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    state = run_state(LEDGER_PATH, DB_PATH)["state"]
     dir_cn = "收入" if r["direction"] == "income" else "支出"
     if not appended:
-        return {"ok": True, "text": "这笔和账本里已有的记录重复了（dedupe 拦截），未重复入账。", "event": ev, "state": state}
-    return {"ok": True, "text": f"好的，已记{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}），证据 0.75 主动记录 → 事件账本。当前状态：{state['label']}。", "event": ev, "state": state}
+        return {"ok": True, "text": "这笔和账本里已有的记录重复了（dedupe 拦截），未重复入账。", "event": ev}
+    return {"ok": True, "text": f"好的，已记{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}），证据 0.75 主动记录 → 事件账本。"}
 
 
-def _apply_llm(parsed: dict, text: str) -> dict:
-    """LLM 主解析结果落地：记账 / 真实数据查询 / 纯聊天。
+def _run_actions(parsed: dict, text: str) -> dict:
+    """执行 LLM 选出的动作（真数据/真记账），返回分段文案 + 结构化结果（供合成回复与记忆）。"""
+    events = _events()
 
-    纪律：凡执行了 record 或 ask_*（真数据动作），回复只采用后端真数据文案
-    （不拼接 LLM 的 reply，防止它编造数值或承诺不存在的功能）；纯聊天才用 LLM reply。
-    """
-    events = EventLedger(LEDGER_PATH).load()
+    def h_cashflow(evs, act):
+        out = query_tools.cashflow_text(evs)
+        return {"text": out["text"], "payload": {"state": out.get("state"), "forecast": out.get("forecast")}}
+
+    def h_latest_income(evs, act):
+        ev = query_tools.latest_event(evs, "income")
+        return {"text": query_tools.latest_event_text(evs, "income"), "payload": {"event": ev}}
+
+    def h_latest_expense(evs, act):
+        ev = query_tools.latest_event(evs, "expense")
+        return {"text": query_tools.latest_event_text(evs, "expense"), "payload": {"event": ev}}
+
+    def h_spending(evs, act):
+        m = act.get("month")
+        s = query_tools.spending_month(evs, month=m)
+        return {"text": query_tools.spending_month_text(evs, month=m), "payload": s}
+
+    def h_recent(evs, act):
+        limit = int(act.get("limit") or 5)
+        return {"text": query_tools.recent_events_text(evs, limit=limit), "payload": {"recent": list(reversed(evs))[:limit]}}
+
     handlers = {
-        "ask_cashflow": lambda: query_tools.cashflow_text(events),
-        "ask_latest_income": lambda: {"text": query_tools.latest_event_text(events, "income")},
-        "ask_latest_expense": lambda: {"text": query_tools.latest_event_text(events, "expense")},
-        "ask_spending": lambda: {"text": query_tools.spending_month_text(events)},
-        "ask_recent": lambda: {"text": query_tools.recent_events_text(events)},
+        "ask_cashflow": h_cashflow,
+        "ask_latest_income": h_latest_income,
+        "ask_latest_expense": h_latest_expense,
+        "ask_spending": h_spending,
+        "ask_recent": h_recent,
     }
     parts: list[str] = []
+    results: list[dict] = []
+    executed = False
     any_record = False
-    any_data = False
     for a in parsed.get("actions", []):
         kind = a.get("kind")
         if kind == "record":
@@ -181,6 +193,7 @@ def _apply_llm(parsed: dict, text: str) -> dict:
             except (TypeError, ValueError):
                 continue
             any_record = True
+            executed = True
             try:
                 ev, appended = _record_one(
                     direction, amount, a.get("channel"), a.get("category"),
@@ -194,21 +207,15 @@ def _apply_llm(parsed: dict, text: str) -> dict:
                 f"好的，已记{dir_cn} {_yuan(amount)}（{ev.get('category') or '其他'} · {ch}）"
                 if appended else f"{_yuan(amount)} 与账本重复（dedupe 拦截），未重复入账。"
             )
+            results.append({"action": "record", "appended": appended, "direction": direction,
+                            "amount_cents": amount, "category": ev.get("category"), "channel": ch,
+                            "ts": str(ev.get("ts"))[:10], "note": ev.get("note", "")[:80]})
         elif kind in handlers:
-            any_data = True
-            parts.append(handlers[kind]()["text"])
-    body: dict = {"ok": True}
-    if any_record or any_data:
-        body["text"] = "\n".join(parts)
-    else:
-        extra = str(parsed.get("reply", "")).strip()
-        body["text"] = extra or "我还在学习这句怎么接——可以记一笔账，或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。"
-    if any_record:
-        try:
-            body["state"] = run_state(LEDGER_PATH, DB_PATH)["state"]
-        except Exception:
-            pass
-    return body
+            executed = True
+            out = handlers[kind](events, a)
+            parts.append(out["text"])
+            results.append({"action": kind, "data": out["payload"]})
+    return {"parts": parts, "executed": executed, "any_record": any_record, "results": results}
 
 
 @app.get("/api/capabilities")
@@ -219,10 +226,31 @@ def capabilities():
 
 @app.post("/api/chat")
 def chat(body: ChatIn):
-    """对话真链路：LLM 主解析（如配置）→ 规则兜底；金额与状态永远本地真算。"""
-    text = body.text.strip()
+    """多轮自由对话：会话记忆 + LLM 选动作 + 真执行 + 结果合成（LLM 只润色不编数）。"""
+    sid = body.session_id or uuid.uuid4().hex
+    session_mem.touch(sid)
+    memory = session_mem.context_of(sid)
+    prompt = f"[对话上下文]\n{memory}\n[用户现在说]\n{body.text}" if memory else body.text
+
     if llm_skill.is_configured():
-        parsed = llm_skill.parse_accounting(text, context=_ctx_summary())
+        parsed = llm_skill.parse_accounting(prompt)
         if parsed is not None:
-            return _apply_llm(parsed, text)
-    return _rule_reply(text)
+            run = _run_actions(parsed, body.text)
+            if run["executed"]:
+                results_json = json.dumps(run["results"], ensure_ascii=False, default=str)[:2200]
+                final = ""
+                try:
+                    final = llm_skill.compose_reply(body.text, results_json)
+                except Exception:
+                    final = ""
+                if not final or len(final) < 8:
+                    final = "\n".join(run["parts"])
+            else:
+                final = str(parsed.get("reply", "")).strip() or "我还在学习这句怎么接——可以记一笔账，或问我最近流水 / 现金流。"
+            session_mem.add_turn(sid, body.text, final, result_note=final[:120])
+            return {"ok": True, "text": final, "session_id": sid}
+
+    r = _rule_reply(body.text)
+    session_mem.add_turn(sid, body.text, r.get("text", ""))
+    r["session_id"] = sid
+    return r

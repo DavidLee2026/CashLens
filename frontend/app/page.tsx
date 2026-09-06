@@ -19,6 +19,7 @@ type Fc = {
   reason: string;
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
+type ChatReply = { ok: boolean; text: string; session_id?: string };
 
 const yuan = (c: number) =>
   `¥${(c / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -37,6 +38,17 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json() as Promise<T>;
+}
+
+/** 会话 id：localStorage 持久化，多轮追问共享同一上下文。 */
+function sessionId(): string {
+  if (typeof window === "undefined") return "";
+  let s = window.localStorage.getItem("cl_session");
+  if (!s) {
+    s = window.crypto?.randomUUID?.() ?? `s-${Date.now()}`;
+    window.localStorage.setItem("cl_session", s);
+  }
+  return s;
 }
 
 export default function Workbench() {
@@ -86,11 +98,14 @@ export default function Workbench() {
     setText("");
     setBusy(true);
     try {
-      const r = await j<{ ok: boolean; text: string }>("/api/chat", {
+      const r = await j<ChatReply>("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t }),
+        body: JSON.stringify({ text: t, session_id: sessionId() }),
       });
+      if (r.session_id && typeof window !== "undefined") {
+        window.localStorage.setItem("cl_session", r.session_id);
+      }
       setMsgs((m) => [...m, { role: "ai", text: r.text }]);
     } catch {
       setMsgs((m) => [...m, { role: "ai", text: "连不上本地后端：请先运行 cd backend && python3 -m uvicorn app.main:app --port 8001。" }]);

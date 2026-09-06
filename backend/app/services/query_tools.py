@@ -19,38 +19,51 @@ def _ch_cn(ch: str) -> str:
     return {"wechat": "微信", "alipay": "支付宝", "cash": "现金", "bank": "银行卡", "manual": "手动", "voice": "语音", "receipt": "票据"}.get(ch, ch or "手动")
 
 
+def latest_event(events: list[dict], kind: str) -> dict | None:
+    """最近一笔收入/支出事件（账本已按 ts 升序）。"""
+    cand = [e for e in events if e["type"] == kind]
+    return cand[-1] if cand else None
+
+
 def latest_event_text(events: list[dict], kind: str) -> str:
     """最近一笔收入/支出。kind ∈ {income, expense}。"""
-    cand = [e for e in events if e["type"] == kind]
-    if not cand:
+    last = latest_event(events, kind)
+    if last is None:
         name = "收入" if kind == "income" else "支出"
         return f"账本里还没有{name}记录——先说一笔试试（如「昨天微信收了 3000 尾款」）。"
-    last = cand[-1]  # ledger.load() 已按 ts 升序
     name = "收入" if kind == "income" else "支出"
     return (
         f"你最近一笔{name}是 {_yuan(last['amount_cents'])}"
-        f"（{last.get('category') or '其他'} · {_ch_cn(last.get('channel'))} · {str(last.get('ts'))[:10]}）。"
+        f"（{last.get('category') or '其他'} · {_ch_cn(last.get('channel'))} · {str(last.get('ts'))[:10]}"
+        + (f" · 对手方 {last['counterparty']}" if last.get("counterparty") else "")
+        + "）。"
     )
 
 
-def spending_month_text(events: list[dict], as_of=None) -> str:
-    """本月支出合计 + 分类 Top3（真聚合）。"""
+def spending_month(events: list[dict], month: str | None = None, as_of=None) -> dict:
+    """某月支出聚合（默认当前月）。返回结构化结果供回复与连续追问。"""
     now = as_of or datetime.now()
-    month = now.strftime("%Y-%m")
+    m = month or now.strftime("%Y-%m")
     by_cat: dict[str, int] = {}
     total = 0
     for e in events:
         if e["type"] != "expense":
             continue
-        if str(e.get("ts"))[:7] != month:
+        if str(e.get("ts"))[:7] != m:
             continue
         total += e["amount_cents"]
         by_cat[e.get("category") or "其他"] = by_cat.get(e.get("category") or "其他", 0) + e["amount_cents"]
-    if not by_cat:
-        return f"{month} 还没有支出记录。"
-    top = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)[:3]
-    detail = "，".join(f"{cat} {_yuan(v)}" for cat, v in top)
-    return f"{month} 支出合计 {_yuan(total)}：{detail}。" + ("（其余归入其他）" if len(by_cat) > 3 else "")
+    top = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)
+    return {"month": m, "total_cents": total, "top": [{"category": c, "amount_cents": v} for c, v in top[:3]], "top_count": len(by_cat)}
+
+
+def spending_month_text(events: list[dict], month: str | None = None, as_of=None) -> str:
+    """本月支出合计 + 分类 Top3（真聚合）。"""
+    s = spending_month(events, month=month, as_of=as_of)
+    if not s["top"]:
+        return f"{s['month']} 还没有支出记录。"
+    detail = "，".join(f"{r['category']} {_yuan(r['amount_cents'])}" for r in s["top"])
+    return f"{s['month']} 支出合计 {_yuan(s['total_cents'])}：{detail}。" + ("（其余归入其他）" if s["top_count"] > 3 else "")
 
 
 def recent_events_text(events: list[dict], limit: int = 5) -> str:

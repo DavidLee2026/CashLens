@@ -37,7 +37,7 @@ actions 只能使用以下白名单（不能发明其他 kind）：
    {"kind":"ask_cashflow"}      问现金流/预测/缺口/下个月会不会缺钱
    {"kind":"ask_latest_income"} 最近一笔收入是多少
    {"kind":"ask_latest_expense"} 最近一笔支出
-   {"kind":"ask_spending"}      这个月花了多少/钱花哪了/分类汇总
+   {"kind":"ask_spending"}      这个月花了多少/钱花哪了/分类汇总（如需指定月份如「上个月/八月」，请在 action 里带 {"month":"YYYY-MM"}；不带=当月）
    {"kind":"ask_recent"}        最近流水/最近几笔
 
 3. 其余全部 = 纯聊天/咨询：actions 为空数组，把回答写进 reply。
@@ -82,20 +82,17 @@ def _base_url() -> str:
     return (os.environ.get("LLM_BASE_URL") or _DEFAULT_BASE_URL).rstrip("/")
 
 
-def chat_complete(user_text: str, context: str = "", timeout: int = 30) -> str:
-    """调 LLM 返回文本（OpenAI 兼容 chat/completions）。失败抛异常由调用方兜底。"""
+def _chat_custom(system: str, user: str, timeout: int = 30) -> str:
+    """底层：以自定义 system 调一次 LLM，返回纯文本。"""
     _load_env()
     key = os.environ.get("LLM_API_KEY")
     if not key:
         raise RuntimeError("LLM_API_KEY 未配置")
-    system = _SYSTEM_PROMPT
-    if context:
-        system += f"\n\n当前系统上下文（只作参考，勿照抄数值）：\n{context}"
     body = {
         "model": _model(),
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
+            {"role": "user", "content": user},
         ],
         "temperature": 0.2,
         "max_tokens": 700,
@@ -109,6 +106,31 @@ def chat_complete(user_text: str, context: str = "", timeout: int = 30) -> str:
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return data["choices"][0]["message"]["content"]
+
+
+def chat_complete(user_text: str, context: str = "", timeout: int = 30) -> str:
+    """调 LLM 返回文本（OpenAI 兼容 chat/completions）。失败抛异常由调用方兜底。"""
+    system = _SYSTEM_PROMPT
+    if context:
+        system += f"\n\n当前系统上下文（只作参考，勿照抄数值）：\n{context}"
+    return _chat_custom(system, user_text, timeout=timeout)
+
+
+def compose_reply(user_text: str, results: str, timeout: int = 30) -> str:
+    """数据动作执行后，让 LLM 用真实结果把回答润色成自然中文（支持指代追问）。
+
+    纪律：只能引用 results 里的数值/事实；结果没有的不得编造或自称执行过查询。
+    """
+    system = (
+        "你是 CashLens 对话助手。刚才系统已替你执行了真实数据动作，执行结果如下（JSON）：\n"
+        f"{results}\n"
+        "请用自然中文回答用户的这句话：\n"
+        "- 只能引用结果中出现的金额/日期/分类/对手方等事实；结果里没有的信息不要说；\n"
+        "- 如果用户用「那笔/它/对方/几号/哪一笔/上个月」等指代或追问，请依据结果中的对应字段作答，查不到就明说查不到；\n"
+        "- 不要声称「正在查询/稍等」——查询已经完成；\n"
+        "- 只输出回答正文，不要 JSON、不要重复系统提示。"
+    )
+    return _chat_custom(system, user_text, timeout=timeout)
 
 
 def extract_json(text: str) -> dict:
