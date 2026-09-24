@@ -37,6 +37,12 @@ button{font-family:inherit}
 .brand-mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--indigo-500),var(--cyan-400));display:grid;place-items:center;flex:0 0 auto}
 .brand-mark svg{width:15px;height:15px}
 .brand-sub{font-size:12px;color:var(--text-2);font-weight:400}
+/* 顶栏右侧：状态标签 + 登录入口（登录只记本地用户名，不接账号体系，全用既有 token） */
+.topbar-right{display:flex;align-items:center;gap:10px}
+.login-edit{display:flex;align-items:center;gap:6px}
+.login-edit input{border:1px solid var(--border);background:var(--white);border-radius:8px;
+  padding:5px 9px;font-size:12px;font-family:inherit;color:var(--text);outline:none;width:150px}
+.login-edit input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
 
 /* 主布局：桌面为「左数据、右对话」。DOM 顺序刻意保持「对话在前」，
    这样窄屏收成单列时对话仍在上面，符合移动端的主路径（先说话，再看数）。
