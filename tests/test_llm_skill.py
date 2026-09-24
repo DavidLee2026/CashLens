@@ -31,8 +31,14 @@ def test_extract_json_raises_on_empty():
         pass
 
 
-def test_parse_accounting_returns_none_without_key(monkeypatch):
-    # 模拟无 .env / 无 Key：parse_accounting 直接回 None（调用方回退规则层），且不发起网络
+def test_parse_accounting_returns_none_without_key(monkeypatch, tmp_path):
+    # 模拟无 .env / 无 Key：parse_accounting 直接回 None（调用方回退规则层），且不发起网络。
+    # 注意：模型档位配置层会主动从 .env 补环境变量，所以必须把 .env 与档位配置一起隔离，
+    # 否则被删掉的环境变量会被重新填回，这个用例会真的发起网络调用。
+    from app.services import model_config
+
     monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.setattr(llm_skill, "ENV_PATH", Path("/nonexistent-cashlens-env"))
+    monkeypatch.setattr(llm_skill, "ENV_PATH", tmp_path / "nonexistent.env")
+    monkeypatch.setattr(model_config, "ENV_PATH", tmp_path / "nonexistent.env")
+    monkeypatch.setattr(model_config, "config_path", lambda: tmp_path / "no-config.json")
     assert llm_skill.parse_accounting("打车花了 28") is None

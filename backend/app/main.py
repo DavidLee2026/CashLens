@@ -13,11 +13,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import llm_skill, parser_rule, pending, query_tools, session_mem
+from .services import (invoice_tax, llm_skill, model_config, parser_rule, pending,
+                       query_tools, session_mem, timesheet)
 from .services.state_engine import EventLedger, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -101,6 +102,17 @@ class ChatIn(BaseModel):
 
     text: str
     session_id: str | None = None
+
+
+class ModelSelectIn(BaseModel):
+    """切换模型档位。未传的字段保持原值；api_key 只入不出。"""
+
+    tier: str
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    preset_id: str | None = None
+    declared_vision: bool | None = None
 
 
 def _yuan(cents: int) -> str:
@@ -219,8 +231,79 @@ def _run_actions(parsed: dict, text: str) -> dict:
 
 @app.get("/api/capabilities")
 def capabilities():
-    on = llm_skill.is_configured()
-    return {"llm": on, "model": (llm_skill._model() if on else None)}
+    view = model_config.public_view()
+    act = view["active"]
+    return {"llm": act["usable"], "model": (act["model"] if act["usable"] else None),
+            "tier": act["tier"], "vision": act["vision"]}
+
+
+@app.get("/api/models")
+def models():
+    """可选模型档位与当前选择。密钥只回传「是否已配置」，绝不回传原值。"""
+    return model_config.public_view()
+
+
+@app.post("/api/models/select")
+def models_select(body: ModelSelectIn):
+    """切换模型档位。运行中立即生效，无需重启后端。"""
+    try:
+        return model_config.select(tier=body.tier, base_url=body.base_url, model=body.model,
+                                   api_key=body.api_key, preset_id=body.preset_id,
+                                   declared_vision=body.declared_vision)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/api/models/test")
+def models_test():
+    """按当前档位做一次连通性自检。只发一句固定文本，不发送任何用户数据。"""
+    return model_config.probe()
+
+
+@app.post("/api/timesheet/summary")
+async def timesheet_summary(request: Request,
+                            name_col: int | None = None,
+                            hours_col: int | None = None,
+                            rate_col: int | None = None,
+                            project_col: int | None = None,
+                            header_row: int | None = None):
+    """工时 / 工分表 → 列映射建议 + 按人汇总的工资参考表。
+
+    请求体直接是 .xlsx 二进制（前端拖入文件后原样 POST 即可，无需 multipart）。
+    纯本机解析，无网络调用；金额以分返回。列名认不出时如实标注 needs_confirm，不猜列。
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="请求体为空：请以 xlsx 二进制作为 body 提交")
+    overrides: dict[str, int] = {}
+    for role, idx in (("name", name_col), ("hours", hours_col),
+                      ("rate", rate_col), ("project", project_col)):
+        if idx is not None:
+            overrides[role] = idx
+    try:
+        out = timesheet.analyze(body, overrides=overrides or None, header_row=header_row)
+    except Exception as e:  # noqa: BLE001 交给调用方看 400，不把栈打到响应里
+        raise HTTPException(status_code=400, detail=f"xlsx 解析失败：{type(e).__name__}")
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error", "解析失败"))
+    return out
+
+
+@app.get("/api/invoice/draft")
+def invoice_draft(since: str | None = None, until: str | None = None,
+                  tax_rate: float | None = None):
+    """开票信息生成：按客户聚合账本收入明细。
+
+    只做归集与呈现，不代开发票、不核定税目、不计算应缴税额；
+    开票状态与金额是否含税账本均无字段，一律标 unknown 交用户确认。
+    """
+    return invoice_tax.invoice_draft(_events(), since=since, until=until, tax_rate=tax_rate)
+
+
+@app.get("/api/tax/quarterly")
+def tax_quarterly(quarter: str | None = None, recent: int = 4):
+    """报税归集：按季度聚合账本收入（只陈述事实，不计算应纳税额、不给筹划建议）。"""
+    return invoice_tax.tax_quarterly(_events(), quarter=quarter, recent=recent)
 
 
 @app.get("/api/pending")

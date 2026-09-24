@@ -14,11 +14,11 @@ import re
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/services/llm_skill.py → 仓库根
-ENV_PATH = REPO_ROOT / ".env"
+from . import model_config
 
-_DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"  # 火山方舟（OpenAI 兼容）
-_DEFAULT_MODEL = "doubao-seed-2-0-lite-260428"
+REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/services/llm_skill.py → 仓库根
+ENV_PATH = REPO_ROOT / ".env"  # 保留：_load_env 兼容入口用
+# 模型端点与默认值统一由 model_config 提供（单一可信源），此处不再重复定义
 
 # 人格层 v1（2026-09-06 · A 财务管家为主 + C 证据口径为底座 · 规格见 02-脑暴/对话人格层规格-20260906.md）
 # 人格层只决定「reply 怎么说、什么话不说」；动作与 JSON 契约在 _OPERATION_PROMPT。
@@ -79,40 +79,35 @@ _SYSTEM_PROMPT = _PERSONA_PROMPT + "\n\n" + "====== 以下为操作层：本次�
 
 
 def _load_env() -> None:
-    """把仓库根 .env 读进环境（已存在的值不覆盖；只读，不输出任何值）。"""
-    if not ENV_PATH.exists():
-        return
-    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        k = k.strip()
-        if k and not os.environ.get(k):
-            os.environ[k] = v.strip().strip('"')
+    """读仓库根 .env 进环境。已迁移到 model_config，此处保留为兼容入口，避免两处默认值分叉。"""
+    model_config._load_env_file()
 
 
 def is_configured() -> bool:
-    _load_env()
-    return bool(os.environ.get("LLM_API_KEY"))
+    """当前档位是否可用。「不用模型」档一律视为不可用，调用方自然回退规则层。"""
+    return bool(model_config.active()["usable"])
 
 
 def _model() -> str:
-    return os.environ.get("LLM_MODEL") or _DEFAULT_MODEL
+    return model_config.active()["model"]
 
 
 def _base_url() -> str:
-    return (os.environ.get("LLM_BASE_URL") or _DEFAULT_BASE_URL).rstrip("/")
+    return model_config.active()["base_url"]
 
 
 def _chat_custom(system: str, user: str, timeout: int = 30) -> str:
-    """底层：以自定义 system 调一次 LLM，返回纯文本。"""
-    _load_env()
-    key = os.environ.get("LLM_API_KEY")
-    if not key:
-        raise RuntimeError("LLM_API_KEY 未配置")
+    """底层：以自定义 system 调一次 LLM，返回纯文本。
+
+    每次调用都重新读档位配置，所以运行中切换模型立即生效，无需重启后端。
+    """
+    act = model_config.active()
+    if act["tier"] == "none":
+        raise RuntimeError("当前档位为「不用模型」")
+    if not act["usable"]:
+        raise RuntimeError("当前档位配置不完整（缺端点地址、模型名或密钥）")
     body = {
-        "model": _model(),
+        "model": act["model"],
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -121,9 +116,10 @@ def _chat_custom(system: str, user: str, timeout: int = 30) -> str:
         "max_tokens": 700,
     }
     req = urllib.request.Request(
-        f"{_base_url()}/chat/completions",
+        f"{act['base_url']}/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {act['api_key'] or 'local'}"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
