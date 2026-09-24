@@ -68,9 +68,11 @@ python3 -m uvicorn app.main:app
 pnpm install && pnpm dev
 # 打开终端提示的本地地址即可对话记账 / 查现金流
 
-# 2b) Windows 用户：双击仓库根目录的 启动-CashLens.bat 一键启动
-#     脚本会自检 Python 与 pnpm、首次自动安装前端依赖、前后端各开一个窗口，
-#     等后端就绪后自动打开工作台；停止服务只需关闭那两个窗口。
+# 2b) 一键启动（不想敲命令时用）
+#     Windows：双击仓库根目录的 启动-CashLens.bat
+#     macOS：  双击仓库根目录的 启动-CashLens.command
+#     两者都会自检依赖、首次自动安装前端依赖、同时拉起前端与后端，等就绪后打开工作台；
+#     检测到已有实例在跑时会直接复用，不重复启动。
 
 # 3) 网页版创意阐述页：直接用浏览器打开 docs/index.html
 

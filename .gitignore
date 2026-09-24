@@ -41,6 +41,7 @@ node_modules/
 .opencode/node_modules/
 
 # ─── 本地运行产物 ───
+.logs/
 *.log
 *.db
 *.sqlite
