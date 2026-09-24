@@ -149,5 +149,10 @@ button{font-family:inherit}
 .amt-in{color:var(--income);font-weight:700}
 .amt-out{color:var(--risk);font-weight:700}
 .empty{color:var(--text-3);font-size:13px;text-align:center;padding:18px 0}
+/* 项目改名内联输入：沿用既有 token，不引入新色值 */
+.proj-edit{display:flex;align-items:center;gap:6px;margin:0 0 8px}
+.proj-edit input{flex:1;min-width:0;border:1px solid var(--border);background:var(--white);
+  border-radius:8px;padding:5px 9px;font-size:12px;font-family:inherit;color:var(--text);outline:none}
+.proj-edit input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
 .footnote{font-size:11px;color:var(--text-3);text-align:center;padding:18px 0 8px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

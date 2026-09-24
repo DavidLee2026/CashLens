@@ -1,6 +1,6 @@
 """状态引擎参数与常量（对应 02-脑暴/财务状态引擎设计-v0.2定稿.md）"""
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # v3：事件新增 project 字段（v2 事件无此字段，读取时按空串兼容，不需迁移）
 
 # 事件类型
 EVENT_TYPES = ("income", "expense", "refund", "transfer", "adjustment", "assumption", "resolution")
@@ -41,3 +41,11 @@ HEALTH_POSITIVE_TYPES = ("income", "refund")
 
 # 决策前置检查
 PREREQUISITES = ("cash_runway", "receivable_cycle")
+
+# ─── 项目维度（v3 新增）─────────────────────────────────
+# 设计约束（2026-09-24 拍板）：账本只存稳定 id（project_a / project_b ...），
+# 显示名放 data/projects.json 的映射表，重命名只改映射，账本一字不动（守住账本不可变）。
+PROJECT_ID_PREFIX = "project_"        # 默认 id 前缀
+DEFAULT_PROJECT_LABEL = "Project"     # 未命名项目显示名前缀，如 Project A
+UNASSIGNED_PROJECT = ""               # project 为空串 = 未归项目
+MAX_DEFAULT_PROJECTS = 26             # 默认名兜底上限（A 至 Z）
