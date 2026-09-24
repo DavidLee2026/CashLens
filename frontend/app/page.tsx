@@ -40,6 +40,37 @@ type ProjectsView = {
   naming_hint: string;
   disclaimer: string;
 };
+
+/** 拖进来的文件（rel_path 保留文件夹层级，第一层目录名就是项目名） */
+type FileItem = { name: string; rel_path: string; file: File };
+/** 浏览器拖放时拿到的文件系统条目（webkitGetAsEntry 未进标准类型，故自定义） */
+type FsEntry = {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+  file: (cb: (f: File) => void, err: (e: unknown) => void) => void;
+  createReader: () => {
+    readEntries: (cb: (entries: FsEntry[]) => void, err?: (e: unknown) => void) => void;
+  };
+};
+type IntakeBatch = {
+  source_folder: string;
+  project_id: string;
+  project_name: string;
+  project_hint: string;
+  draft_count: number;
+  identified_total_cents: number;
+  declared_total_cents: number;
+  reconcile_diff_cents?: number;
+  reconcile?: { checked: number; matched: number; mismatched: unknown[]; unreadable: unknown[] } | null;
+  errors: { file?: string; error: string }[];
+};
+type IntakeResult = {
+  ok: boolean;
+  batches: IntakeBatch[];
+  errors: { file?: string; error: string }[];
+  draft_total_cents: number;
+};
 type ChatReply = { ok: boolean; text: string; session_id?: string; pending?: PendingDraft[] };
 type ModelTier = {
   id: "cloud" | "local" | "none";
@@ -136,6 +167,10 @@ export default function Workbench() {
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
   const [projMsg, setProjMsg] = useState("");
+  // 导入：拖文件 / 拖整个文件夹（按文件夹名建项目）
+  const [dragActive, setDragActive] = useState(false);
+  const [intakeBusy, setIntakeBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   async function refresh() {
@@ -364,6 +399,88 @@ export default function Workbench() {
     }
   }
 
+  /** 递归展开拖进来的目录（拖整个文件夹时用，第一层目录名会成为项目名）。 */
+  async function readEntry(entry: FsEntry, prefix: string): Promise<FileItem[]> {
+    if (entry.isFile) {
+      const file = await new Promise<File>((res, rej) => entry.file(res, rej));
+      return [{ name: file.name, rel_path: `${prefix}${file.name}`, file }];
+    }
+    if (!entry.isDirectory) return [];
+    const reader = entry.createReader();
+    const all: FsEntry[] = [];
+    for (;;) {
+      const batch = await new Promise<FsEntry[]>((res, rej) => reader.readEntries(res, rej));
+      if (!batch.length) break;
+      all.push(...batch);
+    }
+    const out: FileItem[] = [];
+    for (const e of all) out.push(...(await readEntry(e, `${prefix}${entry.name}/`)));
+    return out;
+  }
+
+  /** 从拖放事件取文件；是文件夹就递归展开。 */
+  async function filesFromDrop(dt: DataTransfer): Promise<FileItem[]> {
+    const entries = Array.from(dt.items || [])
+      .map((it) => (it as unknown as { webkitGetAsEntry?: () => FsEntry | null }).webkitGetAsEntry?.() ?? null)
+      .filter((e): e is FsEntry => !!e);
+    if (entries.some((e) => e.isDirectory)) {
+      const out: FileItem[] = [];
+      for (const e of entries) out.push(...(await readEntry(e, "")));
+      return out;
+    }
+    return Array.from(dt.files).map((f) => ({ name: f.name, rel_path: f.name, file: f }));
+  }
+
+  /** File → base64（分块拼接，避免大文件一次性展开爆栈）。 */
+  async function fileToB64(file: File): Promise<string> {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < buf.length; i += CHUNK) {
+      bin += String.fromCharCode(...Array.from(buf.subarray(i, i + CHUNK)));
+    }
+    return window.btoa(bin);
+  }
+
+  /** 导入：上传 → 把摘要写进对话流 → 刷新面板。 */
+  async function uploadFiles(items: FileItem[]) {
+    if (!items.length || intakeBusy) return;
+    setIntakeBusy(true);
+    setDragActive(false);
+    setMsgs((m) => [...m, { role: "user", text: `（导入 ${items.length} 个文件）` }]);
+    try {
+      const files = await Promise.all(items.map(async (it) => ({
+        name: it.name,
+        rel_path: it.rel_path,
+        content_b64: await fileToB64(it.file),
+      })));
+      const r = await j<IntakeResult>("/api/intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files }),
+      });
+      const lines: string[] = [];
+      for (const b of r.batches) {
+        lines.push(`【${b.project_name}】生成 ${b.draft_count} 条待确认草稿，合计 ${yuan(b.identified_total_cents)}`);
+        if (b.declared_total_cents) {
+          const diff = b.reconcile_diff_cents ?? 0;
+          lines.push(`  表内总计 ${yuan(b.declared_total_cents)}，差额 ${yuan(diff)}${diff === 0 ? "（对得上）" : "（有没认出来的，请核对）"}`);
+        }
+        if (b.reconcile) {
+          lines.push(`  双源核对：${b.reconcile.matched}/${b.reconcile.checked} 张与表内金额一致`);
+        }
+        if (b.project_hint) lines.push(`  ${b.project_hint}`);
+        for (const e of b.errors) lines.push(`  ⚠️ ${e.file ?? ""}：${e.error}`);
+      }
+      setMsgs((m) => [...m, { role: "ai", text: lines.join("\n") || "没有可导入的内容。" }]);
+      refresh();
+    } catch (err) {
+      setMsgs((m) => [...m, { role: "ai", text: `导入失败：${err instanceof Error ? err.message : String(err)}` }]);
+    } finally {
+      setIntakeBusy(false);
+    }
+  }
+
   async function send() {
     const t = text.trim();
     if (!t || busy) return;
@@ -414,14 +531,48 @@ export default function Workbench() {
 
       <div className="main">
         <div className="grid">
-          {/* 对话区 */}
-          <section className="card convo" aria-label="对话记账">
+          {/* 对话区：支持拖入文件 / 整个文件夹 */}
+          <section
+            className="card convo"
+            aria-label="对话记账与票据导入"
+            onDragOver={(e) => { e.preventDefault(); if (!intakeBusy) setDragActive(true); }}
+            onDragLeave={(e) => { if (e.currentTarget === e.target) setDragActive(false); }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              if (intakeBusy) return;
+              const items = await filesFromDrop(e.dataTransfer);
+              await uploadFiles(items);
+            }}
+          >
+            {dragActive && (
+              <div className="drop-overlay" aria-hidden="true">
+                <b>松手即导入</b>
+                <span>图片 / PDF / Excel / CSV 都行；拖整个文件夹就按文件夹名建项目</span>
+              </div>
+            )}
             <div className="convo-head">
               <span className="t">说一句，钱就记下了</span>
-              <span className="muted">
-                {state ? `${state.events_count} 笔 · 本地账本 · ` : ""}
-                {llmOn ? "LLM 对话" : "规则层"}
-              </span>
+              <div className="head-right">
+                <span className="muted">
+                  {state ? `${state.events_count} 笔 · 本地账本 · ` : ""}
+                  {llmOn ? "LLM 对话" : "规则层"}
+                </span>
+                <button className="btn-mini" onClick={() => fileRef.current?.click()} disabled={!apiOk || intakeBusy}>
+                  {intakeBusy ? "导入中…" : "导入票据"}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  hidden
+                  accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.xlsx,.xlsm,.csv"
+                  onChange={async (e) => {
+                    const fs = Array.from(e.target.files ?? []);
+                    e.target.value = "";
+                    if (fs.length) await uploadFiles(fs.map((f) => ({ name: f.name, rel_path: f.name, file: f })));
+                  }}
+                />
+              </div>
             </div>
             <div className="log" ref={logRef}>
               {msgs.map((m, i) => (

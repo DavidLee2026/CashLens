@@ -15,16 +15,24 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from . import categories
+
 # 按分类给出税目候选提示。这不是核定结论，只帮用户少翻一次资料，必须人工确认。
+# 键 = app/services/categories.py 里的支出侧一级分类（2026-09-24 对齐，别再各写一份）
 _TAX_ITEM_HINTS: dict[str, list[str]] = {
-    "接单": ["信息技术服务", "现代服务"],
-    "服务": ["现代服务"],
-    "设计": ["文化创意服务", "设计服务"],
-    "咨询": ["鉴证咨询服务"],
-    "销售": ["货物销售"],
-    "餐饮": ["生活服务"],
-    "房租": ["不动产经营租赁"],
-    "广告": ["文化创意服务", "广告服务"],
+    "餐饮": ["生活服务", "餐饮服务"],
+    "交通": ["交通运输服务"],
+    "住宿": ["生活服务", "住宿服务"],
+    "购物": ["货物销售"],
+    "居住": ["不动产经营租赁"],
+    "教育": ["教育服务"],
+    "医疗": ["医疗服务"],
+    "娱乐": ["文化体育服务"],
+    "通讯": ["电信服务"],
+    "经营": ["现代服务", "信息技术服务", "文化创意服务", "广告服务"],
+    "社保税费": [],
+    "人情": [],
+    "待确认": [],
 }
 
 _TAX_BASIS_NOTE = ("账本未记录金额是否含税，因此不做价税拆分；"
@@ -106,9 +114,12 @@ def invoice_draft(events: list[dict], since: str | None = None, until: str | Non
     for g in groups.values():
         entry = dict(g)
         # 税目候选：取该客户各笔分类的去重候选，供用户确认，不是核定结论
+        # 分类名先过归一化：账本里可能存着旧分类（如「设计」「接单」「房租」），
+        # 要能映射到新分类体系后再取税目，否则老账目会取不到候选（2026-09-24）
         hint: list[str] = []
         for item in g["items"]:
-            for cand in _TAX_ITEM_HINTS.get(str(item.get("category") or "").strip(), []):
+            cat = categories.normalize_category(str(item.get("category") or ""))
+            for cand in _TAX_ITEM_HINTS.get(cat, []):
                 if cand not in hint:
                     hint.append(cand)
         entry["tax_item_candidates"] = hint

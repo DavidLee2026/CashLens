@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import uuid
@@ -17,8 +18,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import (invoice_tax, llm_skill, model_config, parser_rule, pending,
-                       projects, query_tools, session_mem, timesheet)
+from .services import (categories, intake, invoice_tax, llm_skill, model_config,
+                       parser_rule, pending, projects, query_tools, session_mem,
+                       timesheet)
 from .services.state_engine import EventLedger, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -392,6 +394,73 @@ def projects_summary(project: str | None = None):
     out = projects.summary(DATA_DIR, _events(), project=project)
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
+    return out
+
+
+@app.get("/api/categories")
+def categories_view():
+    """分类体系（唯一权威表）：支出 / 收入一级分类 + 报销别名 + 口语别名。
+
+    分类口径：按用途判，不按商户；判不出进「待确认」，不当类别统计。
+    """
+    return categories.public_view()
+
+
+class IntakeFileIn(BaseModel):
+    """一个待导入文件。content_b64 是文件内容的 base64（前端拖入后原样编码）。"""
+
+    name: str
+    rel_path: str = ""
+    content_b64: str
+
+
+class IntakeIn(BaseModel):
+    """批量导入：图片 / PDF / Excel / CSV，可按文件夹整批投喂。"""
+
+    files: list[IntakeFileIn]
+    project: str = ""
+
+
+# 单文件与整批的体量上限（防误拖整个目录把内存打满；超限如实报错，不静默截断）
+_INTAKE_MAX_FILE_BYTES = 30 * 1024 * 1024
+_INTAKE_MAX_FILES = 80
+
+
+@app.post("/api/intake")
+def intake_upload(body: IntakeIn):
+    """把用户拖进来的东西变成待确认草稿。
+
+    归属规则：显式指定 project > 文件夹名建项目 > 当前默认项目。
+    一律只生成草稿，需人工确认后才入账（合规红线：确认环节不得为体验取消）。
+    报销表以表内数字为准，嵌入图识别结果只用于核对。
+    """
+    if not body.files:
+        raise HTTPException(status_code=400, detail="没有文件：请拖入图片、PDF、Excel 或 CSV")
+    if len(body.files) > _INTAKE_MAX_FILES:
+        raise HTTPException(status_code=413,
+                            detail=f"一次最多 {_INTAKE_MAX_FILES} 个文件，本次 {len(body.files)} 个")
+
+    files: list[dict] = []
+    for f in body.files:
+        try:
+            blob = base64.b64decode(f.content_b64, validate=True)
+        except Exception:
+            raise HTTPException(status_code=422, detail=f"文件内容不是合法 base64：{f.name}")
+        if len(blob) > _INTAKE_MAX_FILE_BYTES:
+            raise HTTPException(status_code=413,
+                                detail=f"文件过大（上限 30MB）：{f.name}")
+        files.append({"name": Path(f.name).name, "rel_path": f.rel_path or f.name,
+                      "content": blob})
+
+    try:
+        out = intake.ingest(DATA_DIR, files, project_ref=body.project or None)
+    except Exception as e:  # noqa: BLE001 失败要报出来，不吞
+        raise HTTPException(status_code=500, detail=f"导入失败：{type(e).__name__}: {str(e)[:200]}")
+    out["pending"] = [{"id": d["id"], "direction": d["direction"],
+                       "amount_cents": d["amount_cents"], "category": d["category"],
+                       "project": d.get("project", ""),
+                       "project_name": _project_label(d.get("project", ""))}
+                      for d in pending.list_all(DATA_DIR)]
     return out
 
 
