@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string };
+type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string; project?: string; project_name?: string };
 type Msg = { role: "user" | "ai"; text: string; pending?: PendingDraft[] };
 type StateT = {
   label: string;
@@ -20,6 +20,26 @@ type Fc = {
   reason: string;
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
+/** 项目维度：账本只存稳定 id，显示名来自后端映射表，改名不会动账本。 */
+type ProjectRow = {
+  id: string;
+  name: string;
+  named: boolean;
+  created: string;
+  renamed_at: string;
+  income_cents: number;
+  expense_cents: number;
+  count: number;
+};
+type ProjectsView = {
+  ok: boolean;
+  project_count: number;
+  projects: ProjectRow[];
+  unassigned: { project: string; name: string; income_cents: number; expense_cents: number; count: number };
+  unnamed_project_ids: string[];
+  naming_hint: string;
+  disclaimer: string;
+};
 type ChatReply = { ok: boolean; text: string; session_id?: string; pending?: PendingDraft[] };
 type ModelTier = {
   id: "cloud" | "local" | "none";
@@ -111,6 +131,11 @@ export default function Workbench() {
   const [customUrl, setCustomUrl] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [customVision, setCustomVision] = useState(true);
+  // 项目维度：列表 + 内联改名（改名只改显示名映射，账本不动）
+  const [projView, setProjView] = useState<ProjectsView | null>(null);
+  const [renamingId, setRenamingId] = useState("");
+  const [renameText, setRenameText] = useState("");
+  const [projMsg, setProjMsg] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
 
   async function refresh() {
@@ -130,6 +155,12 @@ export default function Workbench() {
       setApiOk(true);
     } catch {
       setApiOk(false);
+    }
+    // 项目面板单独取：它失败不该把整个工作台一起拖黑（例如后端进程还是旧版本，没有 /api/projects）
+    try {
+      setProjView(await j<ProjectsView>("/api/projects"));
+    } catch {
+      setProjView(null);
     }
   }
 
@@ -298,7 +329,9 @@ export default function Workbench() {
       );
       setMsgs((m) => [
         ...m,
-        { role: "ai", text: acceptIt ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}）。` : "已忽略，这笔不入账。" },
+        { role: "ai", text: acceptIt
+            ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}）${p.project_name ? `，归入「${p.project_name}」` : ""}。`
+            : "已忽略，这笔不入账。" },
       ]);
       refresh();
     } catch {
@@ -309,6 +342,25 @@ export default function Workbench() {
         next.delete(p.id);
         return next;
       });
+    }
+  }
+
+  /** 项目改名：只改后端映射表里的显示名，账本里的事件一字不动。 */
+  async function saveRename() {
+    const name = renameText.trim();
+    if (!renamingId || !name) return;
+    try {
+      await j<{ ok: boolean }>("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: renamingId, name }),
+      });
+      setProjMsg(`已改名为「${name}」，账本记录不受影响。`);
+      setRenamingId("");
+      setRenameText("");
+      refresh();
+    } catch {
+      setProjMsg("改名失败：请确认后端在运行。");
     }
   }
 
@@ -381,6 +433,7 @@ export default function Workbench() {
                         <div className="act-row" key={p.id}>
                           <span className="num">
                             {p.direction === "income" ? "收入" : "支出"} {yuan(p.amount_cents)}（{p.category}）
+                            {p.project_name ? ` → ${p.project_name}` : ""}
                           </span>
                           <button className="btn-mini ok" disabled={actingIds.has(p.id)} onClick={() => act(p, true)}>
                             {actingIds.has(p.id) ? "处理中…" : "确认入账"}
@@ -524,6 +577,67 @@ export default function Workbench() {
 
           {/* 右侧面板 */}
           <aside className="side" aria-label="现金流面板">
+            {/* 项目维度：账本按项目归集，这里是项目的唯一入口 */}
+            <section className="card sect">
+              <div className="sect-head">
+                <h3>项目（按项目归集）</h3>
+              </div>
+              {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
+                <div className="empty">还没有项目。记账时说一句「这笔记到 919 昆明项目」，就建好了</div>
+              ) : (
+                <>
+                  {projView.projects.map((p) => (
+                    <div key={p.id}>
+                      <div className="ev">
+                        <div>
+                          <b>{p.name}</b>
+                          <span className="m">
+                            支出 {yuan(p.expense_cents)} · 收入 {yuan(p.income_cents)} · {p.count} 笔
+                          </span>
+                          {!p.named && <span className="m">默认名，建议改成这个项目的完整名称</span>}
+                        </div>
+                        <button
+                          className="btn-mini"
+                          onClick={() => {
+                            setRenamingId(p.id);
+                            setRenameText(p.name);
+                            setProjMsg("");
+                          }}
+                        >
+                          改名
+                        </button>
+                      </div>
+                      {renamingId === p.id && (
+                        <div className="proj-edit">
+                          <input
+                            value={renameText}
+                            onChange={(e) => setRenameText(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && saveRename()}
+                            placeholder="这个项目的完整名称，如「919 昆明项目」"
+                            aria-label="项目完整名称"
+                          />
+                          <button className="btn-mini ok" onClick={saveRename}>保存</button>
+                          <button className="btn-mini" onClick={() => setRenamingId("")}>取消</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {projView.unassigned.count > 0 && (
+                    <div className="ev">
+                      <div>
+                        <b>{projView.unassigned.name}</b>
+                        <span className="m">
+                          支出 {yuan(projView.unassigned.expense_cents)} · {projView.unassigned.count} 笔，还没归项目
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {projView.naming_hint && <div className="fc-note">{projView.naming_hint}</div>}
+                </>
+              )}
+              {projMsg && <div className="fc-note">{projMsg}</div>}
+            </section>
+
             <section className="card sect">
               <div className="sect-head">
                 <h3>财务状态（状态引擎 · 真）</h3>

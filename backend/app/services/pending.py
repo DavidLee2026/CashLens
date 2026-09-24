@@ -34,7 +34,7 @@ def _save(data_dir: str | Path, drafts: list[dict]) -> None:
 
 
 def create(data_dir: str | Path, *, direction: str, amount_cents: int, category: str,
-           channel: str, note: str, counterparty: str = "") -> dict:
+           channel: str, note: str, counterparty: str = "", project: str = "") -> dict:
     drafts = list_all(data_dir)
     draft = {
         "id": uuid.uuid4().hex[:12],
@@ -44,6 +44,7 @@ def create(data_dir: str | Path, *, direction: str, amount_cents: int, category:
         "channel": channel or "manual",
         "note": note or "",
         "counterparty": counterparty or "",
+        "project": project or "",
         "created": datetime.now().isoformat(timespec="seconds"),
     }
     drafts.append(draft)
@@ -59,12 +60,17 @@ def get(data_dir: str | Path, pid: str) -> dict | None:
 
 
 def accept(data_dir: str | Path, pid: str, append_fn) -> dict | None:
-    """确认入账：从草稿弹出并回调写账本。append_fn(direction, amount_cents, category, channel, note, counterparty) -> (event, appended)"""
+    """确认入账：从草稿弹出并回调写账本。
+
+    append_fn(direction, amount_cents, category, channel, note, counterparty, project) -> (event, appended)
+    project 用 .get 取，兼容 9/24 之前生成、还没有 project 字段的旧草稿。
+    """
     drafts = list_all(data_dir)
     for i, d in enumerate(drafts):
         if d["id"] == pid:
             ev, appended = append_fn(d["direction"], d["amount_cents"], d["category"],
-                                     d["channel"], d["note"], d["counterparty"])
+                                     d["channel"], d["note"], d.get("counterparty", ""),
+                                     d.get("project", ""))
             del drafts[i]
             _save(data_dir, drafts)
             return {"draft": d, "event": ev, "appended": appended}

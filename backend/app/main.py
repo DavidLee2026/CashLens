@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .services import (invoice_tax, llm_skill, model_config, parser_rule, pending,
-                       query_tools, session_mem, timesheet)
+                       projects, query_tools, session_mem, timesheet)
 from .services.state_engine import EventLedger, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +37,11 @@ app.add_middleware(
 
 
 class EventIn(BaseModel):
-    """一笔入账（amount_cents 为正整数；方向由 type 表达）。"""
+    """一笔入账（amount_cents 为正整数；方向由 type 表达）。
+
+    project 可传稳定 id（project_a）或项目显示名；留空则归入当前默认项目。
+    invoice_no 是发票号码，用于报销口径去重（同一项目内相同号码只计一次）；没有就留空，不推断。
+    """
 
     event_type: str
     amount_cents: int = Field(gt=0)
@@ -48,6 +52,8 @@ class EventIn(BaseModel):
     counterparty: str = ""
     note: str = ""
     confirmed: bool = False
+    project: str = ""
+    invoice_no: str = ""
 
 
 @app.get("/api/health")
@@ -57,20 +63,30 @@ def health():
 
 @app.post("/api/events")
 def add_event(ev: EventIn):
-    """写一笔到事件账本（dedupe 幂等），返回写结果 + 最新状态。"""
+    """写一笔到事件账本（dedupe 幂等），返回写结果 + 最新状态。
+
+    project 留空时归入当前默认项目（没有就建 Project A），并在返回里附一句名称提醒。
+    """
     ts = datetime.fromisoformat(ev.ts) if ev.ts else datetime.now()
+    pid, project_hint = projects.resolve_incoming(DATA_DIR, ev.project)
+    invoice_no = str(ev.invoice_no or "").strip()
     try:
         event = make_event(
             ts=ts, event_type=ev.event_type, amount_cents=ev.amount_cents,
             evidence_kind=ev.evidence_kind, channel=ev.channel, category=ev.category,
             counterparty=ev.counterparty, note=ev.note, confirmed=ev.confirmed,
+            project=pid,
+            extra={"invoice_no": invoice_no} if invoice_no else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     book = EventLedger(LEDGER_PATH)
     result = book.append(event, strict_dedupe=True)
     state = run_state(LEDGER_PATH, DB_PATH)["state"]
-    return {"appended": result["appended"], "event": event, "state": state}
+    out = {"appended": result["appended"], "event": event, "state": state}
+    if project_hint:
+        out["project_hint"] = project_hint
+    return out
 
 
 @app.get("/api/events")
@@ -128,24 +144,46 @@ def _cashflow_text() -> dict:
     return query_tools.cashflow_text(_events())
 
 
-def _append_event(direction: str, amount_cents: int, category: str, channel: str, note: str, counterparty: str = ""):
-    """真正写入事件账本（确认后调用）。返回 (event, appended)。"""
+def _append_event(direction: str, amount_cents: int, category: str, channel: str, note: str,
+                  counterparty: str = "", project: str = ""):
+    """真正写入事件账本（确认后调用）。返回 (event, appended)。project 在草稿生成时已解析好。"""
     ev = make_event(
         ts=datetime.now(), event_type=direction, amount_cents=amount_cents,
         evidence_kind="voice", channel=channel or "manual", category=category or "其他",
         counterparty=counterparty or "", note=note or "", confirmed=True,
+        project=project or "",
     )
     book = EventLedger(LEDGER_PATH)
     res = book.append(ev, strict_dedupe=True)
     return ev, res["appended"]
 
 
-def _draft_one(direction: str, amount_cents: int, category: str, channel: str, note: str, counterparty: str = "") -> dict:
-    """识别 → 只生成待确认草稿（不直接入账）。"""
-    return pending.create(
+def _project_label(pid: str) -> str:
+    """project id → 显示名；找不到或为空时回落成「未归项目」。"""
+    row = projects.get(DATA_DIR, pid) if pid else None
+    return str((row or {}).get("name") or projects.UNASSIGNED_LABEL)
+
+
+def _draft_one(direction: str, amount_cents: int, category: str, channel: str, note: str,
+               counterparty: str = "", project: str | None = None) -> dict:
+    """识别 → 只生成待确认草稿（不直接入账）。
+
+    project 可传 id 或显示名；留空则归入当前默认项目，并在草稿上附一句项目名提醒。
+    """
+    pid, hint = projects.resolve_incoming(DATA_DIR, project)
+    d = pending.create(
         DATA_DIR, direction=direction, amount_cents=amount_cents,
         category=category, channel=channel, note=note, counterparty=counterparty,
+        project=pid,
     )
+    if hint:
+        d["project_hint"] = hint
+    return d
+
+
+def _project_line(d: dict) -> str:
+    """草稿落哪个项目的那句话（优先用 resolve 时给的提醒原文）。"""
+    return str(d.get("project_hint") or f"归入项目「{_project_label(d.get('project', ''))}」。")
 
 
 def _rule_reply(text: str) -> dict:
@@ -160,7 +198,7 @@ def _rule_reply(text: str) -> dict:
     dir_cn = "收入" if r["direction"] == "income" else "支出"
     return {
         "ok": True,
-        "text": f"识别到{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}）——请确认后入账。",
+        "text": f"识别到{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}）——请确认后入账。{_project_line(d)}",
         "pending": [d],
     }
 
@@ -214,13 +252,16 @@ def _run_actions(parsed: dict, text: str) -> dict:
                 continue
             executed = True
             d = _draft_one(direction, amount, a.get("category"), a.get("channel"),
-                           a.get("note") or text, a.get("counterparty", ""))
+                           a.get("note") or text, a.get("counterparty", ""),
+                           a.get("project") or None)
             drafts.append(d)
             dir_cn = "收入" if direction == "income" else "支出"
-            parts.append(f"识别到{dir_cn} {_yuan(amount)}（{d['category']} · {d['channel']}）——请确认后入账。")
+            parts.append(f"识别到{dir_cn} {_yuan(amount)}（{d['category']} · {d['channel']}）——请确认后入账。{_project_line(d)}")
             results.append({"action": "record_draft", "status": "pending_confirm", "id": d["id"],
                             "direction": direction, "amount_cents": amount,
-                            "category": d["category"], "channel": d["channel"]})
+                            "category": d["category"], "channel": d["channel"],
+                            "project": d.get("project", ""),
+                            "project_name": _project_label(d.get("project", ""))})
         elif kind in handlers:
             executed = True
             out = handlers[kind](events, a)
@@ -306,6 +347,54 @@ def tax_quarterly(quarter: str | None = None, recent: int = 4):
     return invoice_tax.tax_quarterly(_events(), quarter=quarter, recent=recent)
 
 
+class ProjectIn(BaseModel):
+    """建项目 / 改项目名。id 留空 = 新建；带 id（或显示名）+ name = 重命名。"""
+
+    name: str = ""
+    id: str = ""
+
+
+@app.get("/api/projects")
+def projects_list():
+    """项目清单（含每个项目的收支汇总）+ 未归项目一行。
+
+    项目是账本事件的属性维度：真实项目（如 919 昆明项目），不是费用类别（打车/吃饭）。
+    """
+    return projects.list_projects(DATA_DIR, _events())
+
+
+@app.post("/api/projects")
+def projects_upsert(body: ProjectIn):
+    """建项目或重命名。
+
+    账本只存稳定 id，显示名存在 data/projects.json 映射表里；
+    因此重命名只改映射，账本一字不动（守住账本不可变）。
+    """
+    if body.id:
+        pid = projects.resolve(DATA_DIR, body.id)
+        if pid is None:
+            raise HTTPException(status_code=404, detail=f"项目不存在：{body.id}")
+        try:
+            row = projects.rename(DATA_DIR, pid, body.name)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"ok": True, "action": "renamed", "project": row}
+    return {"ok": True, "action": "created", "project": projects.create(DATA_DIR, body.name)}
+
+
+@app.get("/api/projects/summary")
+def projects_summary(project: str | None = None):
+    """按项目归集账本：收入 / 支出 / 净额 / 分类分解。
+
+    支出侧即报销口径：同一项目内发票号码相同的事件只计一次，剔除的如实列在 duplicates 里；
+    账本未记录发票号码的事件不参与去重（不推断）。
+    """
+    out = projects.summary(DATA_DIR, _events(), project=project)
+    if not out.get("ok"):
+        raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
+    return out
+
+
 @app.get("/api/pending")
 def pending_list():
     """待确认草稿列表（识别→确认→入账）。"""
@@ -355,7 +444,11 @@ def chat(body: ChatIn):
                 final = str(parsed.get("reply", "")).strip() or "我还在学习这句怎么接——可以记一笔账，或问我最近流水 / 现金流。"
             session_mem.add_turn(sid, body.text, final, result_note=final[:120])
             return {"ok": True, "text": final, "session_id": sid,
-                    "pending": [{k: d[k] for k in ("id", "direction", "amount_cents", "category", "channel")} for d in run["drafts"]]}
+                    "pending": [{"id": d["id"], "direction": d["direction"],
+                                 "amount_cents": d["amount_cents"], "category": d["category"],
+                                 "channel": d["channel"], "project": d.get("project", ""),
+                                 "project_name": _project_label(d.get("project", ""))}
+                                for d in run["drafts"]]}
 
     r = _rule_reply(body.text)
     session_mem.add_turn(sid, body.text, r.get("text", ""))

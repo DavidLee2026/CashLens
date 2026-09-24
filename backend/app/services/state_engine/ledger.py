@@ -1,8 +1,14 @@
 """事件账本（不可变，追加式 jsonl）
 
-对应 v0.2 规格 §二：finance_events.jsonl，schema_version=2。
+对应 v0.2 规格 §二：finance_events.jsonl。当前 schema_version=3：
+v3 在 v2 基础上只新增一个字段 project（项目维度），v2 旧事件读取时按空串兼容，不需迁移。
 金额一律用分（整数 amount_cents），杜绝浮点误差。
-去重键 dedupe_key = sha256(channel|amount_cents|YYYY-MM-DD|category|counterparty)。
+去重键 dedupe_key = sha256(project|channel|amount_cents|YYYY-MM-DD|category|counterparty)。
+
+⚠️ project 进去重键的理由（2026-09-24）：不同项目 = 不同归属 = 两笔合法事件。
+若不把 project 计入，同一天、同金额、同分类的两笔支出落在不同项目时，第二笔会被误判为重复而丢弃。
+⚠️ 兼容性：v2 写入的旧事件其 dedupe_key 已固化在记录里，不会被新算法重算，
+因此旧账目不会与新账目互相误判为重复（代价是跨版本的去重覆盖略降，已确认可接受）。
 """
 
 from __future__ import annotations
@@ -17,11 +23,12 @@ from .spec import EVENT_TYPES, SCHEMA_VERSION
 
 
 def _dedupe_key_of(event: dict) -> str:
-    """按 v0.2 规格生成去重键（渠道+金额+日期+分类+对手方）。"""
+    """去重键（项目 + 渠道 + 金额 + 日期 + 分类 + 对手方）。项目维度 v3 起计入。"""
     ts = _parse_ts(event.get("ts"))
     day = ts.date().isoformat()
     raw = "|".join(
         [
+            str(event.get("project", "") or ""),
             str(event.get("channel", "")),
             str(event.get("amount_cents", 0)),
             day,
@@ -50,9 +57,14 @@ def make_event(
     counterparty: str = "",
     note: str = "",
     confirmed: bool = False,
+    project: str = "",
     extra: dict | None = None,
 ) -> dict:
-    """构造一条规范事件（recorded_at 自动补当前时间，evidence 带权重）。"""
+    """构造一条规范事件（recorded_at 自动补当前时间，evidence 带权重）。
+
+    project 存的是稳定 id（如 project_a），不是显示名；显示名在 data/projects.json 里查。
+    空串表示未归项目（v2 旧事件读取时也是这个语义）。
+    """
     if event_type not in EVENT_TYPES:
         raise ValueError(f"未知事件类型: {event_type}")
     if amount_cents < 0:
@@ -73,6 +85,7 @@ def make_event(
         "category": category,
         "counterparty": counterparty,
         "note": note,
+        "project": str(project or ""),
         "evidence": {"kind": evidence_kind, "weight": weights[evidence_kind], "confirmed": bool(confirmed)},
     }
     if extra:

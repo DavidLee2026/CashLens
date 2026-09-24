@@ -544,7 +544,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="card">
         <div class="card-num">归拢 · 采集</div>
         <h3>说一句，就是记一笔</h3>
-        <p>1. 说一句：语音或文字记账（产品主打入口，分期推进），本地实弹转写已跑通，云端语音识别按复赛节奏接入；2. 拍一张：票据或截图，云端 LLM 视觉 API 识别，真实数电发票实弹已过；3. 导一份：微信、支付宝官方账单 CSV，或一张张项目工时 Excel，批量导入。所有数据汇入一本不可变的“事件账本”，官方导出才是正道，不做不稳定的平台自动同步。<span class="tag tag-fix">账单解析已实弹</span><span class="tag tag-fix">工时表解析端已实装 · 页面入口规划中</span></p>
+        <p>1. 说一句：语音或文字记账（产品主打入口，分期推进），本地实弹转写已跑通，云端语音识别按复赛节奏接入；2. 拍一张：票据或截图，云端 LLM 视觉 API 识别，真实数电发票实弹已过；3. 导一份：微信、支付宝官方账单 CSV，或一张张项目工时 Excel，批量导入。所有数据汇入一本不可变的“事件账本”，官方导出才是正道，不做不稳定的平台自动同步。<span class="tag tag-fix">账单解析已实弹</span><span class="tag tag-fix">工时表解析端已实装 · 页面入口规划中</span><span class="tag tag-ok">项目归集已实装</span></p>
       </div>
       <div class="card edge-income">
         <div class="card-num">照见 · 理解</div>
@@ -636,8 +636,9 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           </ul>
         </div>
         <div class="scene-col">
-          <h4>CashLens 怎么解决<br><span style="font-size:var(--font-size-12);color:var(--color-text-secondary);font-weight:var(--weight-regular)">前四项已在后端实装并跑过实测，末项属决策引擎、规划中</span></h4>
-          <div class="solve-item"><span class="s-tag">票据报销</span><p><b>报销票据归集</b>，发票拍照或 PDF 上传，金额、日期、商户自动识别，你确认后入账（证据 0.85）。<small>识别结果必须人工确认，机器加人，才计 0.85。数电发票 PDF 可全程本机解析，图像不出本机。</small><span class="tag tag-ok">已实装</span></p></div>
+          <h4>CashLens 怎么解决<br><span style="font-size:var(--font-size-12);color:var(--color-text-secondary);font-weight:var(--weight-regular)">项目归集、开票、报税、工时汇总四项后端已实装并跑过实测；票据识别在引擎层实弹，工作台上传入口规划中；末项属决策引擎、规划中</span></h4>
+          <div class="solve-item"><span class="s-tag">项目</span><p><b>按项目归集</b>，报销和收入都记到具体项目上（例如某个门店、某趟出差），月底各归各的，一眼看清哪个项目赚了、哪个项目垫了多少。<small>项目名随时可改，改名不影响已经记下的账；没指定项目的先放在一起，之后再归。</small><span class="tag tag-ok">已实装</span></p></div>
+          <div class="solve-item"><span class="s-tag">票据报销</span><p><b>报销票据归集</b>，发票拍照或 PDF 上传，金额、日期、商户自动识别，你确认后入账（证据 0.85）。<small>识别结果必须人工确认，机器加人，才计 0.85。数电发票 PDF 可全程本机解析，图像不出本机；识别通道在引擎层已实弹，工作台的上传入口还在规划中。</small><span class="tag tag-fix">引擎层已实弹 · 上传入口规划中</span></p></div>
           <div class="solve-item"><span class="s-tag">开票</span><p><b>开票信息生成</b>，按客户汇总账本里的收入明细，备好税目候选、金额与价税合计，开票记录可追溯。<small>税目只给候选、开票状态需你确认，不代开发票。</small><span class="tag tag-fix">后端已实装 · 工作台入口规划中</span></p></div>
           <div class="solve-item"><span class="s-tag">报税</span><p><b>报税收入归集</b>，季度收入自动归集，按分类、客户、月份三个维度拆开，不再临时翻流水。<small>只归集事实，不算应纳税额，不给筹划建议。</small><span class="tag tag-fix">后端已实装 · 工作台入口规划中</span></p></div>
           <div class="solve-item"><span class="s-tag">工时工资</span><p><b>工时 / 工分自动汇总</b>，把整张项目工时 Excel 拖进来，自动认列、按人汇总，出工资参考表。<small>列认不出时交你确认，不猜列；语音口述工时规划中。</small><span class="tag tag-fix">后端已实装 · 页面入口规划中</span></p></div>
@@ -651,6 +652,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
               <div class="row"><span class="k">阿明 40h × ¥30</span><span class="v num">¥1,200.00</span></div>
               <div class="row"><span class="k">小周 36h × ¥25</span><span class="v num">¥900.00</span></div>
               <div class="row"><span class="k">报销（4 笔已核对）</span><span class="v num">¥428.00</span></div>
+              <div class="row"><span class="k">归属项目</span><span class="v">项目 A（可改名为实际项目）</span></div>
               <div class="row"><span class="k">待开票</span><span class="v" style="color:var(--color-warning)">服务费 ¥5,000</span></div>
               <div class="row"><span class="k">报税</span><span class="v">季度申报临近 · 已自动归集</span></div>
             </div>
@@ -684,7 +686,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
       <div class="scene-block-foot">
         <a class="btn btn-ghost jump-demo" href="#demo" data-scene="smallbiz">到下方演示区，体验“月底一张表”→</a>
-        <span class="foot-note">对应能力：票据采集（拍照 + PDF 本机解析）· 开票信息生成 · 报税收入归集 · 工时表导入汇总。四项后端已实装并跑过实测，工作台页面入口规划中</span>
+        <span class="foot-note">对应能力：项目维度归集（工作台已上线）· 开票信息生成 · 报税收入归集 · 工时表导入汇总（此三项后端已实装，工作台入口规划中）· 票据识别（引擎层已实弹，后端入口规划中）</span>
       </div>
     </div>
 
@@ -1022,6 +1024,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
             { k: "阿明 · 40h × ¥30", v: '<span class="num">¥1,200.00</span>' },
             { k: "小周 · 36h × ¥25", v: '<span class="num">¥900.00</span>' },
             { k: "报销合计", v: '<span class="num">¥428.00</span> · 4 笔已核对无重复' },
+            { k: "归属项目", v: "项目 A（可改名成实际项目名）" },
             { k: "待办提醒", v: "本月累计需开票 ¥5,000" }]) },
         { u: "那就按 5000 开张服务费发票",
           a: "开票信息已备好：<br><br>" + mkCard([
