@@ -126,13 +126,14 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-/** 会话 id：localStorage 持久化，多轮追问共享同一上下文。 */
+/** 会话 id：localStorage 持久化，多轮追问共享同一上下文。
+ *  key 带 v2：数据清零时一并作废旧会话（旧 key 的历史上下文不再被读到）。 */
 function sessionId(): string {
   if (typeof window === "undefined") return "";
-  let s = window.localStorage.getItem("cl_session");
+  let s = window.localStorage.getItem("cl_session_v2");
   if (!s) {
     s = window.crypto?.randomUUID?.() ?? `s-${Date.now()}`;
-    window.localStorage.setItem("cl_session", s);
+    window.localStorage.setItem("cl_session_v2", s);
   }
   return s;
 }
@@ -167,6 +168,13 @@ export default function Workbench() {
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
   const [projMsg, setProjMsg] = useState("");
+  // 新建项目：内联表单，成功后刷新左侧项目面板
+  const [creatingProj, setCreatingProj] = useState(false);
+  const [newProjName, setNewProjName] = useState("");
+  // 登录：原型阶段只在本地记一个用户名，不接账号体系；不登录也能用全部功能
+  const [user, setUser] = useState("");
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [nameText, setNameText] = useState("");
   // 导入：拖文件 / 拖整个文件夹（按文件夹名建项目）
   const [dragActive, setDragActive] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
@@ -310,10 +318,21 @@ export default function Workbench() {
   }, []);
 
   useEffect(() => {
+    // 用户名只存在本地（原型阶段无账号体系，不登录也能用全部功能）
+    if (typeof window === "undefined") return;
+    try {
+      const u = window.localStorage.getItem("cl_user");
+      if (u) setUser(u);
+    } catch {
+      /* 忽略存储失败 */
+    }
+  }, []);
+
+  useEffect(() => {
     // 挂载后再从 localStorage 恢复历史（与服务端渲染解耦，修复 hydration mismatch）
     if (typeof window === "undefined") return;
     try {
-      const raw = window.localStorage.getItem("cl_msgs");
+      const raw = window.localStorage.getItem("cl_msgs_v2");
       if (raw) {
         const arr: unknown = JSON.parse(raw);
         if (Array.isArray(arr)) {
@@ -333,7 +352,7 @@ export default function Workbench() {
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
-          "cl_msgs",
+          "cl_msgs_v2",
           JSON.stringify(msgs.slice(-40).map((m) => ({ role: m.role, text: m.text })))
         );
       }
@@ -399,7 +418,46 @@ export default function Workbench() {
     }
   }
 
-  /** 递归展开拖进来的目录（拖整个文件夹时用，第一层目录名会成为项目名）。 */
+  /** 保存用户名：只写本地存储；清空后保存即视为退出登录。 */
+  function saveUser() {
+    const name = nameText.trim();
+    try {
+      if (name) {
+        window.localStorage.setItem("cl_user", name);
+      } else {
+        window.localStorage.removeItem("cl_user");
+      }
+    } catch {
+      /* 忽略存储失败 */
+    }
+    setUser(name);
+    setLoginOpen(false);
+    setNameText("");
+  }
+
+  /** 新建项目：只写后端映射表（账本只存稳定 id），建完刷新左侧面板。 */
+  async function createProject() {
+    const name = newProjName.trim();
+    if (!name) {
+      setProjMsg("给项目起个名字，例如「919 昆明项目」");
+      return;
+    }
+    try {
+      await j<{ ok: boolean }>("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      setProjMsg(`已新建「${name}」。记账时说一句就能归到它下面。`);
+      setCreatingProj(false);
+      setNewProjName("");
+      refresh();
+    } catch {
+      setProjMsg("新建失败：请确认后端在运行。");
+    }
+  }
+
+  /** 递归展开拖进来的目录（拖整个文件夹时，第一层目录名会成为项目名）。 */
   async function readEntry(entry: FsEntry, prefix: string): Promise<FileItem[]> {
     if (entry.isFile) {
       const file = await new Promise<File>((res, rej) => entry.file(res, rej));
@@ -494,7 +552,7 @@ export default function Workbench() {
         body: JSON.stringify({ text: t, session_id: sessionId() }),
       });
       if (r.session_id && typeof window !== "undefined") {
-        window.localStorage.setItem("cl_session", r.session_id);
+        window.localStorage.setItem("cl_session_v2", r.session_id);
       }
       setMsgs((m) => [...m, { role: "ai", text: r.text, pending: r.pending }]);
     } catch {
@@ -522,10 +580,37 @@ export default function Workbench() {
             </span>
             CashLens <span className="brand-sub">本地工作台 · 真数据</span>
           </div>
-          <span className={`tag ${state ? `t-${state.label}` : "t-unknown"}`}>
-            <span className="dot" />
-            {state ? LABEL_CN[state.label] ?? state.label : apiOk ? "载入中…" : "后端未连接"}
-          </span>
+          <div className="topbar-right">
+            <span className={`tag ${state ? `t-${state.label}` : "t-unknown"}`}>
+              <span className="dot" />
+              {state ? LABEL_CN[state.label] ?? state.label : apiOk ? "载入中…" : "后端未连接"}
+            </span>
+            {loginOpen ? (
+              <span className="login-edit">
+                <input
+                  value={nameText}
+                  onChange={(e) => setNameText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveUser();
+                    if (e.key === "Escape") setLoginOpen(false);
+                  }}
+                  placeholder="你的名字，如「小李」"
+                  aria-label="用户名"
+                  autoFocus
+                />
+                <button className="btn-mini ok" onClick={saveUser}>保存</button>
+                <button className="btn-mini" onClick={() => setLoginOpen(false)}>取消</button>
+              </span>
+            ) : (
+              <button
+                className="btn-mini"
+                onClick={() => { setNameText(user); setLoginOpen(true); }}
+                title={user ? "点击修改用户名；清空后保存即退出" : "输入一个用户名，只存在这台电脑上"}
+              >
+                {user || "登录"}
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -732,9 +817,33 @@ export default function Workbench() {
             <section className="card sect">
               <div className="sect-head">
                 <h3>项目（按项目归集）</h3>
+                <button
+                  className="btn-mini"
+                  onClick={() => { setCreatingProj(true); setNewProjName(""); setProjMsg(""); }}
+                  disabled={!apiOk}
+                >
+                  新建项目
+                </button>
               </div>
+              {creatingProj && (
+                <div className="proj-edit">
+                  <input
+                    value={newProjName}
+                    onChange={(e) => setNewProjName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createProject();
+                      if (e.key === "Escape") setCreatingProj(false);
+                    }}
+                    placeholder="项目全名，如「919 昆明项目」"
+                    aria-label="新项目名称"
+                    autoFocus
+                  />
+                  <button className="btn-mini ok" onClick={createProject}>创建</button>
+                  <button className="btn-mini" onClick={() => setCreatingProj(false)}>取消</button>
+                </div>
+              )}
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
-                <div className="empty">还没有项目。记账时说一句「这笔记到 919 昆明项目」，就建好了</div>
+                <div className="empty">还没有项目。点上面的「新建项目」，或记账时说一句「这笔记到 919 昆明项目」，就建好了</div>
               ) : (
                 <>
                   {projView.projects.map((p) => (
