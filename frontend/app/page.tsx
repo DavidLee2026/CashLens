@@ -21,6 +21,40 @@ type Fc = {
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
 type ChatReply = { ok: boolean; text: string; session_id?: string; pending?: PendingDraft[] };
+type ModelTier = {
+  id: "cloud" | "local" | "none";
+  label: string;
+  desc: string;
+  data_leaves_device: boolean;
+  cost: string;
+  active: boolean;
+  vendor?: string | null;
+  model?: string | null;
+  preset_id?: string;
+  preset_label?: string;
+  base_url?: string;
+  vision?: boolean;
+  configured?: boolean;
+  usable?: boolean;
+};
+type LocalPreset = {
+  id: string;
+  label: string;
+  vendor: string;
+  base_url: string;
+  model: string;
+  vision: boolean | null;
+  note?: string;
+};
+type ModelsView = {
+  tier: "cloud" | "local" | "none";
+  active: { tier: string; model: string; vision: boolean; usable: boolean };
+  tiers: ModelTier[];
+  local_presets: LocalPreset[];
+  warnings: string[];
+  api_key_configured: boolean;
+  privacy_note: string;
+};
 
 const yuan = (c: number) =>
   `¥${(c / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -68,24 +102,141 @@ export default function Workbench() {
   const [events, setEvents] = useState<Ev[]>([]);
   const [apiOk, setApiOk] = useState(true);
   const [llmOn, setLlmOn] = useState(false);
+  const [models, setModels] = useState<ModelsView | null>(null);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [modelMsg, setModelMsg] = useState("");
+  // 自定义本地端点的内联表单（不填就没法用，所以必须给入口）
+  const [customEditing, setCustomEditing] = useState(false);
+  const [customUrl, setCustomUrl] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  const [customVision, setCustomVision] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
 
   async function refresh() {
     try {
-      const [s, f, e, c] = await Promise.all([
+      const [s, f, e, c, m] = await Promise.all([
         j<{ state: StateT }>("/api/state"),
         j<Fc>("/api/forecast?horizon_days=30"),
         j<{ events: Ev[] }>("/api/events?limit=20"),
         j<{ llm: boolean }>("/api/capabilities"),
+        j<ModelsView>("/api/models"),
       ]);
       setState(s.state);
       setFc(f);
       setEvents(e.events);
       setLlmOn(!!c.llm);
+      setModels(m);
       setApiOk(true);
     } catch {
       setApiOk(false);
     }
+  }
+
+  /** 切换模型档位：运行中立即生效，不用重启后端。 */
+  async function pickModel(tier: ModelTier["id"]) {
+    if (modelBusy || !models || models.tier === tier) {
+      setPickOpen(false);
+      return;
+    }
+    setModelBusy(true);
+    setModelMsg("");
+    try {
+      const next = await j<ModelsView>("/api/models/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier }),
+      });
+      setModels(next);
+      setLlmOn(!!next.active.usable);
+      const label = next.tiers.find((t) => t.id === tier)?.label ?? tier;
+      setModelMsg(`已切到 ${label}`);
+      setPickOpen(false);
+    } catch {
+      setModelMsg("切换失败，请确认后端在运行");
+    } finally {
+      setModelBusy(false);
+    }
+  }
+
+  /** 选具体本地预设（Ollama 各家模型或自定义端点）。 */
+  async function pickLocalPreset(presetId: string) {
+    if (modelBusy) return;
+    // 选「自定义」不立即提交：先把当前值带进表单，让用户填完再存
+    if (presetId === "custom") {
+      const loc = models?.tiers.find((t) => t.id === "local");
+      setCustomUrl(loc?.base_url || "");
+      setCustomModel(loc?.model || "");
+      setCustomVision(loc?.vision !== false);
+      setCustomEditing(true);
+      return;
+    }
+    setModelBusy(true);
+    setModelMsg("");
+    try {
+      const next = await j<ModelsView>("/api/models/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: "local", preset_id: presetId }),
+      });
+      setModels(next);
+      setLlmOn(!!next.active.usable);
+      const preset = next.local_presets.find((p) => p.id === presetId);
+      setModelMsg(
+        next.active.usable
+          ? `已切到本地模型：${preset?.label ?? presetId}`
+          : "已选预设，但端点信息不完整，请先配置"
+      );
+      setCustomEditing(false);
+      setPickOpen(false);
+    } catch {
+      setModelMsg("切换失败，请确认后端在运行");
+    } finally {
+      setModelBusy(false);
+    }
+  }
+
+  /** 保存自定义本地端点并启用。 */
+  async function saveCustomEndpoint() {
+    if (modelBusy) return;
+    if (!customUrl.trim() || !customModel.trim()) {
+      setModelMsg("端点地址与模型名都要填");
+      return;
+    }
+    setModelBusy(true);
+    setModelMsg("");
+    try {
+      const next = await j<ModelsView>("/api/models/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tier: "local",
+          preset_id: "custom",
+          base_url: customUrl.trim(),
+          model: customModel.trim(),
+          declared_vision: customVision,
+        }),
+      });
+      setModels(next);
+      setLlmOn(!!next.active.usable);
+      setModelMsg("已启用自定义本地端点");
+      setCustomEditing(false);
+      setPickOpen(false);
+    } catch {
+      setModelMsg("保存失败，请确认后端在运行");
+    } finally {
+      setModelBusy(false);
+    }
+  }
+
+  /** 当前档位的短标签：界面只露一行，完整型号在菜单与 title 里。 */
+  function currentModelLabel(): string {
+    if (!models) return "模型加载中…";
+    const cur = models.tiers.find((t) => t.id === models.tier);
+    if (!cur) return models.tier;
+    if (cur.id === "none") return "不用模型";
+    if (cur.id === "local" && cur.preset_id === "custom") return cur.model || "自定义端点";
+    return cur.preset_label || cur.model || cur.label;
   }
 
   useEffect(() => {
@@ -257,7 +408,118 @@ export default function Workbench() {
                 {busy ? "处理中…" : "发送"}
               </button>
             </div>
-            <div className="hint">LLM 语义理解（后端已配 Key 时）+ 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。自由对话文本会上云（见隐私口径）。</div>
+            <div className="inputfoot">
+              <div className="hint">
+                LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。
+                {models?.tier === "cloud" && "当前档位为云端，自由对话文本与票据图像会上云。"}
+                {models?.tier === "local" && "当前用本地模型，数据不出本机。"}
+                {models?.tier === "none" && "当前不调用模型，全部本机处理。"}
+              </div>
+              <div className="modelrow">
+                <button
+                  className="model-pick"
+                  onClick={() => setPickOpen((v) => !v)}
+                  disabled={!apiOk || modelBusy}
+                  aria-haspopup="listbox"
+                  aria-expanded={pickOpen}
+                  title={models?.active.model ? `当前模型：${models.active.model}` : undefined}
+                >
+                  <span
+                    className={`dot ${
+                      models?.tier === "cloud" ? "cloud" : models?.tier === "none" ? "off" : ""
+                    }`}
+                  />
+                  {modelBusy ? "切换中…" : currentModelLabel()}
+                  <span className="caret" aria-hidden="true">▾</span>
+                </button>
+                {pickOpen && models && (
+                  <div className="model-menu" role="group" aria-label="选择模型档位">
+                    {models.tiers.map((t) => (
+                      <div key={t.id}>
+                        <button
+                          className={`model-item${t.active ? " on" : ""}`}
+                          aria-pressed={t.active}
+                          onClick={() => pickModel(t.id)}
+                        >
+                          <span className="mi-head">
+                            {t.label}
+                            {t.vendor && <span className="mi-vendor">{t.vendor}</span>}
+                          </span>
+                          <span className="mi-meta">
+                            <span>{t.data_leaves_device ? "数据出本机" : "数据不出本机"}</span>
+                            <span>{t.cost}</span>
+                            {t.id !== "none" && t.vision === false && (
+                              <span className="mi-warn">不支持图像</span>
+                            )}
+                          </span>
+                        </button>
+                        {t.id === "local" && (
+                          <>
+                            <div className="model-sub">
+                              {models.local_presets.map((p) => (
+                                <button
+                                  key={p.id}
+                                  className={`model-subitem${
+                                    t.active && t.preset_id === p.id && !customEditing ? " on" : ""
+                                  }`}
+                                  onClick={() => pickLocalPreset(p.id)}
+                                >
+                                  <span>{p.label}</span>
+                                  {p.vision === null && <span className="mi-warn">需确认</span>}
+                                  {p.vision === false && <span className="mi-warn">无图像</span>}
+                                </button>
+                              ))}
+                            </div>
+                            {customEditing && (
+                              <div className="model-form">
+                                <label>
+                                  <span>端点地址</span>
+                                  <input
+                                    value={customUrl}
+                                    onChange={(e) => setCustomUrl(e.target.value)}
+                                    placeholder="http://127.0.0.1:1234/v1"
+                                    aria-label="本地推理服务端点地址"
+                                  />
+                                </label>
+                                <label>
+                                  <span>模型名</span>
+                                  <input
+                                    value={customModel}
+                                    onChange={(e) => setCustomModel(e.target.value)}
+                                    placeholder="qwen2.5-vl:7b"
+                                    aria-label="模型名"
+                                  />
+                                </label>
+                                <label className="model-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={customVision}
+                                    onChange={(e) => setCustomVision(e.target.checked)}
+                                  />
+                                  该模型支持图像输入（不支持则票据识别不可用）
+                                </label>
+                                <button
+                                  className="btn-mini ok"
+                                  onClick={saveCustomEndpoint}
+                                  disabled={modelBusy}
+                                >
+                                  保存并使用
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    {models.warnings.length > 0 && (
+                      <div className="model-note">{models.warnings[0]}</div>
+                    )}
+                    <div className="model-msg">{models.privacy_note}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+            {modelMsg && <div className="hint">{modelMsg}</div>}
           </section>
 
           {/* 右侧面板 */}

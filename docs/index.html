@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CashLens · 给一个人就是一家公司的人，一个懂钱的 AI 财务团队</title>
-<meta name="description" content="CashLens——一人公司与小微经营者的多智能体财务系统：归拢散落的收支、照见现金流、在接单报价的决策点给有依据的话。2026 北大金融 AI 大赛参赛作品。">
+<title>CashLens · 一个人就是一家公司，让经营现金流看得清、撑得住</title>
+<meta name="description" content="CashLens，面向一人公司与小微经营者的经营现金流可视化与决策辅助工具：把散落的收支归拢成一本账，照见未来 30 天现金流，在接单报价的决策点给有依据的话。首届上海“人工智能＋消费”创新大赛（2026）参赛作品。">
 <style>
 /* ═══════════ Design Tokens v2.0（自 07-设计系统/CashLens-tokens.css 内联）═══════ */
 :root{
@@ -167,6 +167,20 @@ h1 .grad{background:var(--color-brand-grad);-webkit-background-clip:text;backgro
 h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold);margin:var(--space-3) 0 var(--space-4);letter-spacing:-.01em}
 .sec-intro{color:var(--color-text-secondary);font-size:var(--font-size-16);max-width:52em;margin-bottom:var(--space-10)}
 
+/* ═══════════ 双层写法：入口说人话 / 里面给依据 ═══════════ */
+/* 结构说明：每个板块先一句大白话（.plain-lead），再一行标注“技术层”的专业依据（.tech-line），下面是细节卡 */
+.plain-lead{font-size:var(--font-size-18);line-height:1.62;color:var(--color-text);max-width:40em;margin:var(--space-4) 0 var(--space-5)}
+.tech-line{
+  display:flex;align-items:flex-start;gap:var(--space-3);
+  font-size:var(--font-size-14);line-height:1.6;color:var(--color-text-secondary);
+  max-width:60em;margin:0 0 var(--space-8);
+}
+.tech-tag{
+  flex:none;font-family:var(--font-mono);font-size:var(--font-size-10);letter-spacing:.08em;
+  color:var(--color-brand);background:var(--color-brand-bg);
+  padding:3px 8px;border-radius:var(--radius-sm);margin-top:3px;
+}
+
 /* 白卡 */
 .grid{display:grid;gap:var(--space-6)}
 .grid-3{grid-template-columns:repeat(3,1fr)}
@@ -253,6 +267,7 @@ h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold
   padding:2px 10px;border-radius:var(--radius-pill);margin-left:var(--space-2)}
 .tag-ok{background:var(--color-income-bg);color:var(--color-income)}
 .tag-fix{background:var(--color-warning-bg);color:var(--color-warning)}
+.tag-plan{background:var(--color-surface-border);color:var(--color-text-secondary)}
 
 /* ═══════════ 演示区 ═══════════ */
 .demo-shell{
@@ -298,7 +313,7 @@ h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold
   font-size:var(--font-size-13);color:var(--color-text-secondary);line-height:1.5}
 .demo-scene .role{font-weight:var(--weight-semibold);color:var(--color-text);white-space:nowrap;
   background:var(--color-brand-bg);color:var(--color-brand);padding:2px 10px;border-radius:var(--radius-pill);font-size:var(--font-size-12)}
-/* ═══ 三种场景 · 大板块（WHO 区）═══ */
+/* ═══ 两种场景 · 大板块（WHO 区）═══ */
 .scene-block{background:var(--color-bg-elevated);border:1px solid var(--card-border);border-radius:var(--radius-xl);
   box-shadow:var(--shadow-sm);padding:var(--space-8);margin-bottom:var(--space-8)}
 .scene-block-head{display:flex;align-items:flex-start;gap:var(--space-4);flex-wrap:wrap;
@@ -330,7 +345,29 @@ h2{font-size:clamp(24px,3vw,32px);line-height:1.25;font-weight:var(--weight-bold
 .scene-sample .ss-cap{font-size:var(--font-size-11);color:var(--color-text-tertiary);margin-top:var(--space-3)}
 .scene-block-foot{margin-top:var(--space-6);display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center}
 .scene-block-foot .foot-note{font-size:var(--font-size-12);color:var(--color-text-tertiary)}
-@media (max-width:900px){.scene-block-body{grid-template-columns:1fr 1fr}.scene-block-body .scene-col:nth-child(3){grid-column:1/-1}}
+
+/* ═══════════ 工时表导入示意（小微场景 · 采集通道 A）═══════════ */
+.import-strip{
+  margin-top:var(--space-6);padding:var(--space-5);
+  background:var(--color-bg);border:1px solid var(--color-surface-border);border-radius:var(--radius-lg);
+  display:grid;grid-template-columns:1.15fr auto .85fr;gap:var(--space-5);align-items:center;
+}
+.import-head{grid-column:1/-1;display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.import-head h4{font-size:var(--font-size-16);font-weight:var(--weight-semibold)}
+.import-head .hint{font-size:var(--font-size-12);color:var(--color-text-secondary)}
+.drop-zone{
+  background:var(--color-bg-elevated);border:1.5px dashed var(--raw-gray-300);
+  border-radius:var(--radius-md);padding:var(--space-5) var(--space-4);text-align:center;
+}
+.drop-zone .dz-main{font-size:var(--font-size-14);font-weight:var(--weight-medium)}
+.drop-zone .dz-sub{display:block;font-size:var(--font-size-12);color:var(--color-text-secondary);margin-top:var(--space-2);line-height:1.55}
+.import-arrow{font-family:var(--font-mono);font-size:var(--font-size-20);color:var(--color-text-tertiary)}
+.import-map{background:var(--color-bg-elevated);border:1px solid var(--card-border);border-radius:var(--radius-md);padding:var(--space-4)}
+.import-map .im-title{font-size:var(--font-size-12);font-weight:var(--weight-semibold);color:var(--color-text-secondary);
+  margin-bottom:var(--space-2);letter-spacing:.04em}
+.import-map .im-cap{font-size:var(--font-size-11);color:var(--color-text-tertiary);margin-top:var(--space-2)}
+@media (max-width:900px){.scene-block-body{grid-template-columns:1fr 1fr}.scene-block-body .scene-col:nth-child(3){grid-column:1/-1}
+  .import-strip{grid-template-columns:1fr}.import-arrow{display:none}}
 @media (max-width:600px){.scene-block-body{grid-template-columns:1fr}.scene-block{padding:var(--space-6)}}
 
 .appear{animation:appear var(--dur-base) var(--ease-out) both}
@@ -364,6 +401,9 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   nav{display:none}
   section{padding:var(--space-12) 0}
   .evidence-bar{flex-direction:column}
+  .tech-line{flex-direction:column;gap:var(--space-2)}
+  .tech-tag{align-self:flex-start;margin-top:0}
+  .plain-lead{font-size:var(--font-size-16)}
 }
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -398,13 +438,14 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section class="hero">
   <div class="container hero-inner">
     <div>
-      <span class="eyebrow">2026 · 北大金融 AI 智能体创新大赛</span>
-      <h1>一个人就是一家公司。<br>CashLens 给你一个<span class="grad">懂钱的 AI 财务团队</span>。</h1>
-      <p class="hero-sub">对它说一句，钱就记下了——语音记账是 CashLens 的入口之一：本地实弹识别已跑通，云端接入按产品分期推进。微信、支付宝、票据、账单里散落的收支被自动归拢成一束光，照见你下个月会不会缺钱；在「这单接不接、报多少」的决策点，给你有依据的话，而不是拍脑袋。</p>
+      <span class="eyebrow">首届上海“人工智能＋消费”创新大赛（2026）· 创客组</span>
+      <h1>一个人就是一家公司。<br>CashLens 让<span class="grad">经营现金流</span>看得清、撑得住。</h1>
+      <p class="plain-lead">钱赚了不少，为什么手里还是没钱？这个单到底该不该接？报这个价，会不会把下个月的现金流拖垮？<br>这三句，是一个人开公司的人每天真的在问的。CashLens 一句一句替你算清楚。</p>
+      <p class="hero-sub">说一句、拍一张、导一份，微信账单、票据、项目工时 Excel，散在各处的数据归拢进一本账。往下是两件事：下个月会不会缺钱，这单接不接、报多少。</p>
+      <div class="tech-line"><span class="tech-tag">技术层</span><span>背后是财务状态引擎（证据强度分级、状态可升可降可重建）、CashPulse 现金流区间预测（90% 置信带）、接单报价决策引擎。语音记账本地实弹已跑通，云端接入按产品分期推进。</span></div>
       <div class="hero-facts">
         <div class="fact"><span class="num">1</span><span class="lbl">个编排引擎（五项实弹已过）</span></div>
-        <div class="fact"><span class="num">8</span><span class="lbl">个 MVP 清单 SKILL（规划定稿）</span></div>
-        <div class="fact"><span class="num">3</span><span class="lbl">个仓库落地 SKILL 示例（记账/接单/现金流预测）</span></div>
+        <div class="fact"><span class="num">可扩展</span><span class="lbl">SKILL 架构（Markdown 即方法论，可自加）</span></div>
         <div class="fact"><span class="num">本地</span><span class="lbl">账本与决策数据留在磁盘</span></div>
       </div>
       <div class="hero-cta">
@@ -461,23 +502,25 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section id="why">
   <div class="container">
     <div class="sec-eyebrow">WHY · 问题</div>
-    <h2>「一个人就是一家公司」的人，钱没人管</h2>
-    <p class="sec-intro">独立开发者、设计师、小微经营者——收入像天气，账本散落各处，但没有一个工具管到「决策」这一层。</p>
+    <h2>“一个人就是一家公司”的人，钱没人管</h2>
+    <p class="plain-lead">独立开发者、设计师、小店主，收入像天气，账散在五个 App 和一抽屉发票里。到了月底，只剩一句“这个月到底赚没赚”，没人答得上来。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span>财务状态引擎把散落的收支变成可计算的财务状态与 30/90 天现金流区间，而不是一张事后才看得见的报表。</span></div>
+    <p class="sec-intro">问题从来不是不会记账，而是记完了也没人告诉你下一步怎么办。多数工具停在记账和报表，管不到“决策”这一层。</p>
     <div class="grid grid-3">
       <div class="card edge-risk">
         <div class="card-num">01</div>
         <h3>收入像过山车 <a class="src-sup" href="#src-3">[3]</a></h3>
-        <p>这个月 3 万、下个月归零——却没人告诉你「下个月能不能撑住」、什么时候该备粮。</p>
+        <p>这个月 3 万、下个月归零，却没人告诉你下个月能不能撑住、什么时候该备粮。</p>
       </div>
       <div class="card edge-warning">
         <div class="card-num">02</div>
         <h3>钱散在五个地方 <a class="src-sup" href="#src-4">[4]</a></h3>
-        <p>微信、支付宝、银行、商户后台、一抽屉发票——月底对不上账，是常态。</p>
+        <p>微信、支付宝、银行、商户后台、一抽屉发票，月底对不上账是常态。</p>
       </div>
       <div class="card edge-cyan">
         <div class="card-num">03</div>
         <h3>报价靠感觉 <a class="src-sup" href="#src-5">[5]</a></h3>
-        <p>「这单接不接、报多少」拍脑袋定了价，回头发现连房租都没覆盖。</p>
+        <p>这单接不接、报多少，拍脑袋定了价，回头才发现连房租都没覆盖。</p>
       </div>
     </div>
     <div class="gap-row" style="margin-top:var(--space-8)">
@@ -485,7 +528,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="gap-item"><span class="x">✕</span>企业级财务软件，一个人用不起</div>
       <div class="gap-item"><span class="x">✕</span>通用 AI 拿不到你的真实流水，只会泛泛而谈 <a class="src-sup" href="#src-6">[6]</a></div>
     </div>
-    <p style="font-size:var(--font-size-12);color:var(--color-text-tertiary);margin-top:var(--space-6)">目标人群口径：中国灵活就业人员 2025 年约 2.8 亿、预计 2026 年 3.2 亿<a class="src-sup" href="#src-1">[1]</a>；登记在册个体工商户约 1.25 亿户（市场监管总局，2024 年 11 月）<a class="src-sup" href="#src-2">[2]</a>。人口规模 ≠ 可达市场——CashLens 服务的是其中「一人公司 / 独立开发者 / 小微经营者」子集，而非全部灵活就业人群。</p>
+    <p style="font-size:var(--font-size-12);color:var(--color-text-tertiary);margin-top:var(--space-6)">目标人群口径：全国登记在册个体工商户约 1.25 亿户（国家市场监督管理总局，截至 2024 年 9 月底）<a class="src-sup" href="#src-1">[1]</a>；全国一人有限责任公司（OPC）存量超 1600 万家<a class="src-sup" href="#src-2">[2]</a>。人口规模不等于可达市场，CashLens 服务的是其中“一人公司 / 独立开发者 / 小微经营者”子集，而非全部个体工商户。</p>
   </div>
 </section>
 
@@ -494,41 +537,45 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">WHAT · 产品</div>
     <h2>一层内核，三层能力</h2>
-    <p class="sec-intro">对话是唯一入口：说一句（语音）、拍一张票据、导一份账单，都能记一笔。背后是三件事——归拢、照见、建议。</p>
+    <p class="plain-lead">你不用学记账，也不用懂财务。说一句话、拍一张票、导一份账单，剩下的三步我们替你走：先把钱归拢，再把账照见，最后在决策点上给一句话。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span>事件账本（不可变）→ 财务状态引擎 → CashPulse 现金流区间预测 → 接单报价决策引擎，四层串成一条链路，每一层的结果都能回灌到上一层。</span></div>
+    <p class="sec-intro">对话是唯一入口：说一句（语音）、拍一张票据、导一份账单，都能记一笔。背后是三件事，归拢、照见、建议。</p>
     <div class="grid grid-3">
       <div class="card">
         <div class="card-num">归拢 · 采集</div>
-        <h3>语音优先：说话，就是记账</h3>
-        <p>① 说一句——语音/文字记账（产品主打入口，分期推进）：本地实弹转写已跑通，云端语音识别按复赛节奏接入；② 拍一张——票据/截图，豆包大模型视觉识别；③ 导一份——微信/支付宝官方账单 CSV 一键导入。所有收支汇入一本不可变的「事件账本」，官方导出才是正道，不做不稳定的平台自动同步。</p>
+        <h3>说一句，就是记一笔</h3>
+        <p>1. 说一句：语音或文字记账（产品主打入口，分期推进），本地实弹转写已跑通，云端语音识别按复赛节奏接入；2. 拍一张：票据或截图，云端 LLM 视觉 API 识别，真实数电发票实弹已过；3. 导一份：微信、支付宝官方账单 CSV，或一张张项目工时 Excel，批量导入。所有数据汇入一本不可变的“事件账本”，官方导出才是正道，不做不稳定的平台自动同步。<span class="tag tag-fix">账单解析已实弹</span><span class="tag tag-fix">工时表解析端已实装 · 页面入口规划中</span></p>
       </div>
       <div class="card edge-income">
         <div class="card-num">照见 · 理解</div>
-        <h3>财务状态引擎，不是记了多少账</h3>
-        <p>把流水变成财务画像 + 30/90 天现金流区间预测 + 待唤醒动作。状态可升可降、会过期、能从账本重建——「记了一笔」不等于「现金流健康」。</p>
+        <h3>不看记了多少笔，看钱撑不撑得住</h3>
+        <p>把流水变成财务画像 + 30/90 天现金流区间预测 + 待唤醒动作。状态可升可降、会过期、能从账本重建，所以“记了一笔”不等于“现金流健康”。</p>
       </div>
       <div class="card edge-warning">
         <div class="card-num">建议 · 决策</div>
-        <h3>在决策点，给有依据的话</h3>
-        <p>「这单接不接、报多少」——结合现金垫底、历史回款周期、时间成本给出报价区间与理由；缺口提前 30 天预警，变「怕断粮」为「提前备粮」。</p>
+        <h3>在决策点上，给一句有依据的话</h3>
+        <p>这单接不接、报多少，结合现金垫底、历史回款周期、时间成本给出报价区间与理由；缺口提前 30 天预警，把“怕断粮”变成“提前备粮”。</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════ 三种人 ═══════════ -->
+<!-- ═══════════ 两种人 ═══════════ -->
 <section id="users" style="border-bottom:1px solid var(--color-surface-border)">
   <div class="container">
-    <div class="sec-eyebrow">WHO · 三种人</div>
-    <h2>同一种「没人管钱」，三种完全不同的账</h2>
-    <p class="sec-intro">CashLens 不做「通用记账」——它把同一套内核（事件账本 + 财务状态引擎 + 决策引擎），按三种人的钱、三种人的问题，分别翻译成他们每天要做的决策。</p>
+    <div class="sec-eyebrow">WHO · 两种人</div>
+    <h2>同一种“没人管钱”，两种完全不同的账</h2>
+    <p class="plain-lead">一个人干活的人，每天问的是“这单接不接、报多少”；开着店、带着几个人的老板，每天问的是“这批货进不进、工钱和发票怎么算”。问题不一样，要算的账也不一样。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span>同一套内核（事件账本 + 财务状态引擎 + 决策引擎），按两种人的钱、两种人的问题，分别翻译成他们每天要做的决策。<b>本页标注“规划中”的能力尚未实装；标注“后端已实装”的能力可经接口调用，工作台页面入口规划中。</b></span></div>
+    <p class="sec-intro">CashLens 不做通用记账。下面两栏，左边是他们真实的钱长什么样，右边是我们怎么接。</p>
 
     <!-- ══ 板块 01：OPC 一人公司 ══ -->
     <div class="scene-block">
       <div class="scene-block-head">
         <span class="scene-no">01</span>
         <div>
-          <h3>独立开发者 · OPC 一人公司<span class="ask">每天真正在问的是：「这单接不接？报多少？」</span></h3>
-          <div class="scene-tag">一个人就是一家公司：设计师、开发者、顾问、插画师、文案——收入靠一个个项目，钱和「公司」是同一个账户。</div>
+          <h3>独立开发者 · OPC 一人公司<span class="ask">每天真正在问的是：这单接不接？报多少？</span></h3>
+          <div class="scene-tag">一个人就是一家公司：设计师、开发者、顾问、插画师、文案，收入靠一个个项目，钱和“公司”是同一个账户。</div>
         </div>
         <span class="scene-pill core">产品最核心受众</span>
       </div>
@@ -536,7 +583,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         <div class="scene-col">
           <h4>他们的钱，长这样</h4>
           <ul class="pain-list">
-            <li>收入是脉冲式：一单几万、一歇几周——进账没有节奏，月初不知道自己月底有多少。</li>
+            <li>收入是脉冲式：一单几万、一歇几周，进账没有节奏，月初不知道自己月底有多少。</li>
             <li>支出公私不分：设备、软件订阅、社保、日常开销混在一个账户里，成本永远算不清。</li>
             <li>客户欠款没人催：谁的钱拖了多久、哪家总逾期，靠脑子记，报价时全凭感觉。</li>
             <li>报税季手忙脚乱：季度末才临时翻流水，收入归集靠 Excel 手工拼。</li>
@@ -544,27 +591,27 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         </div>
         <div class="scene-col">
           <h4>CashLens 怎么解决</h4>
-          <div class="solve-item"><span class="s-tag">接单报价</span><p><b>接单报价决策</b>——接单前自动查三件事：未来 30 天现金垫底够不够、这个客户历史回款周期多长、这单要占用多少档期；然后给一个报价区间和理由。<small>把「拍脑袋定价」变成「有依据的定价」——这是 CashLens 最强的代差能力。</small></p></div>
-          <div class="solve-item"><span class="s-tag">CashPulse</span><p><b>现金流预测</b>——按你的收入节奏预测未来 30/90 天区间（带置信带），缺口提前预警：变「怕断粮」为「提前备粮」。</p></div>
-          <div class="solve-item"><span class="s-tag">记忆体</span><p><b>假设检验闭环</b>——报价时说「3 天回款」，账本发现该客户实际要 3 周？自动标记偏差，下次报价自动参考。</p></div>
-          <div class="solve-item"><span class="s-tag">报税</span><p><b>报税节点提醒</b>——收入自动按季度归集，到点提醒，不再临时翻流水。</p></div>
+          <div class="solve-item"><span class="s-tag">接单报价</span><p><b>接单报价决策</b>，接单前自动查三件事：未来 30 天现金垫底够不够、这个客户历史回款周期多长、这单要占用多少档期；然后给一个报价区间和理由。<small>把“拍脑袋定价”变成“有依据的定价”，这是 CashLens 最强的代差能力。</small><span class="tag tag-fix">SKILL 已有 · 闭环开发中</span></p></div>
+          <div class="solve-item"><span class="s-tag">CashPulse</span><p><b>现金流预测</b>，按你的收入节奏预测未来 30/90 天区间（带置信带），缺口提前预警，把“怕断粮”变成“提前备粮”。</p></div>
+          <div class="solve-item"><span class="s-tag">记忆体</span><p><b>假设检验闭环</b>，报价时说“3 天回款”，账本发现该客户实际要 3 周，就自动标记偏差，下次报价自动参考。<span class="tag tag-plan">规划中</span></p></div>
+          <div class="solve-item"><span class="s-tag">报税</span><p><b>报税收入归集</b>，收入自动按季度归集，按分类、客户、月份拆开，不再临时翻流水。<small>到点主动提醒尚未实装。</small><span class="tag tag-fix">归集已实装 · 提醒规划中</span></p></div>
         </div>
         <div class="scene-col">
           <h4>产品里的一次真实决策</h4>
           <div class="scene-sample">
-            <div class="ss-title">「有个设计单 ¥5,000 / 2 周，接不接？」</div>
+            <div class="ss-title">有个设计单 ¥5,000 / 2 周，接不接？</div>
             <div class="card-mini">
               <div class="row"><span class="k">垫底检查</span><span class="v" style="color:var(--color-warning)">30 天后缺口约 ¥2,400</span></div>
               <div class="row"><span class="k">回款认知</span><span class="v">该客户历史 3 周，非 3 天（已纠偏）</span></div>
               <div class="row"><span class="k">档期占用</span><span class="v">14 天</span></div>
-              <div class="row"><span class="k">报价建议</span><span class="v"><b class="num">¥5,500 – ¥7,000</b> · 建议首付 50%</span></div>
+              <div class="row"><span class="k">报价建议</span><span class="v"><b class="num">¥5,500 – ¥7,000</b> 建议首付 50%</span></div>
             </div>
             <div class="ss-cap">示意：由财务状态引擎 + 决策引擎生成</div>
           </div>
         </div>
       </div>
       <div class="scene-block-foot">
-        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="opc">到下方演示区，体验「接不接这单」→</a>
+        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="opc">到下方演示区，体验“接不接这单”→</a>
         <span class="foot-note">对应 MVP SKILL：接单报价决策 · 现金流预测 · 智能分类 · 报税提醒</span>
       </div>
     </div>
@@ -574,8 +621,8 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="scene-block-head">
         <span class="scene-no">02</span>
         <div>
-          <h3>小微经营者 · 小店 / 工作室<span class="ask">每天真正在问的是：「这批货进不进？工钱、报销、发票怎么算？」</span></h3>
-          <div class="scene-tag">夫妻店、工作室、小批发、美业餐饮：有 2–20 个员工或合作者，有票有账有客户，却雇不起会计。</div>
+          <h3>小微经营者 · 小店 / 工作室<span class="ask">每天真正在问的是：这批货进不进？工钱、报销、发票怎么算？</span></h3>
+          <div class="scene-tag">夫妻店、工作室、小批发、美业餐饮：有 2 到 20 个员工或合作者，有票有账有客户，却雇不起会计。</div>
         </div>
         <span class="scene-pill paid">B 端付费潜力</span>
       </div>
@@ -584,16 +631,17 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           <h4>他们的钱，长这样</h4>
           <ul class="pain-list">
             <li>一摊多角色账：员工工时工分、报销发票、进货款、日营收，混在一起手工算。</li>
-            <li>发票是硬刚需：客户要开票、自己报销要票、季度报税要归集——一票都不能丢。</li>
+            <li>发票是硬刚需：客户要开票、自己报销要票、季度报税要归集，一票都不能丢。</li>
             <li>月底结算靠 Excel 来回传：工时 × 单价 × 加班，人情账和账本永远分不清。</li>
           </ul>
         </div>
         <div class="scene-col">
-          <h4>CashLens 怎么解决</h4>
-          <div class="solve-item"><span class="s-tag">工时工资</span><p><b>工时 / 工分自动汇总</b>——说一句「阿明 40 小时、小周 36 小时」或导入整张工时 Excel，月底自动出工资表。</p></div>
-          <div class="solve-item"><span class="s-tag">票据报销</span><p><b>报销票据归集</b>——发票拍照或 PDF 上传，豆包大模型视觉识别金额/日期/商户，你确认后入账（证据 0.85）。<small>识别结果必须人工确认——机器 + 人，才计 0.85。</small></p></div>
-          <div class="solve-item"><span class="s-tag">开票</span><p><b>开票信息生成</b>——按客户开票资料备好税目、金额、价税合计，开票记录与报销一一可追溯。</p></div>
-          <div class="solve-item"><span class="s-tag">进货 / 报税</span><p><b>进货决策 + 报税节点提醒</b>——进货翻译为接单决策的「进货版」；季度增值税收入自动归集。</p></div>
+          <h4>CashLens 怎么解决<br><span style="font-size:var(--font-size-12);color:var(--color-text-secondary);font-weight:var(--weight-regular)">前四项已在后端实装并跑过实测，末项属决策引擎、规划中</span></h4>
+          <div class="solve-item"><span class="s-tag">票据报销</span><p><b>报销票据归集</b>，发票拍照或 PDF 上传，金额、日期、商户自动识别，你确认后入账（证据 0.85）。<small>识别结果必须人工确认，机器加人，才计 0.85。数电发票 PDF 可全程本机解析，图像不出本机。</small><span class="tag tag-ok">已实装</span></p></div>
+          <div class="solve-item"><span class="s-tag">开票</span><p><b>开票信息生成</b>，按客户汇总账本里的收入明细，备好税目候选、金额与价税合计，开票记录可追溯。<small>税目只给候选、开票状态需你确认，不代开发票。</small><span class="tag tag-fix">后端已实装 · 工作台入口规划中</span></p></div>
+          <div class="solve-item"><span class="s-tag">报税</span><p><b>报税收入归集</b>，季度收入自动归集，按分类、客户、月份三个维度拆开，不再临时翻流水。<small>只归集事实，不算应纳税额，不给筹划建议。</small><span class="tag tag-fix">后端已实装 · 工作台入口规划中</span></p></div>
+          <div class="solve-item"><span class="s-tag">工时工资</span><p><b>工时 / 工分自动汇总</b>，把整张项目工时 Excel 拖进来，自动认列、按人汇总，出工资参考表。<small>列认不出时交你确认，不猜列；语音口述工时规划中。</small><span class="tag tag-fix">后端已实装 · 页面入口规划中</span></p></div>
+          <div class="solve-item"><span class="s-tag">进货决策</span><p><b>进货决策</b>，把进货翻译为接单决策的进货版：这批货压多少现金、多久回本。<span class="tag tag-plan">规划中</span></p></div>
         </div>
         <div class="scene-col">
           <h4>产品里的一次月底结算</h4>
@@ -610,55 +658,33 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           </div>
         </div>
       </div>
-      <div class="scene-block-foot">
-        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="smallbiz">到下方演示区，体验「月底一张表」→</a>
-        <span class="foot-note">对应 MVP SKILL：票据采集（表格导入 + 拍照）· 智能分类 · 报税提醒</span>
-      </div>
-    </div>
 
-    <!-- ══ 板块 03：家庭 / 多平台消费者 ══ -->
-    <div class="scene-block">
-      <div class="scene-block-head">
-        <span class="scene-no">03</span>
-        <div>
-          <h3>家庭 · 多平台消费者<span class="ask">每天真正在问的是：「这个月花哪了？会不会超支？」</span></h3>
-          <div class="scene-tag">网购 + 生活消费分布在微信、支付宝、拼多多、抖音、银行卡——月底对上账就是胜利的家庭。</div>
+      <!-- 工时表导入示意：小微场景的采集入口（后端已实装，页面入口规划中） -->
+      <div class="import-strip">
+        <div class="import-head">
+          <h4>月底那张工资表，是拖进去出来的</h4>
+          <span class="tag tag-fix">后端已实装 · 页面入口规划中</span>
+          <span class="hint">解析端点已可用并跑过实测：自动认表头、认列、按人汇总；拖拽上传的页面入口尚未上线</span>
         </div>
-        <span class="scene-pill lite">高频 · 轻量</span>
-      </div>
-      <div class="scene-block-body">
-        <div class="scene-col">
-          <h4>他们的钱，长这样</h4>
-          <ul class="pain-list">
-            <li>账单散落五处：微信、支付宝、拼多多、抖音、银行卡——同一笔消费可能在两边出现。</li>
-            <li>超支总是最后知道：冲动消费的月底惊觉，是「这个月怎么又超了」。</li>
-            <li>两个人花的、一个人记：家庭共管账目，靠口头对账。</li>
-          </ul>
+        <div class="drop-zone" role="img" aria-label="工时表导入示意：把项目工时 Excel 拖入虚线区域，可多张">
+          <div class="dz-main">把项目工时 Excel 拖到这里</div>
+          <span class="dz-sub">一次可以拖多张；也可以点选文件。项目表各写各的格式也没关系。</span>
         </div>
-        <div class="scene-col">
-          <h4>CashLens 怎么解决</h4>
-          <div class="solve-item"><span class="s-tag">账单聚合</span><p><b>多渠道账单一键导入 + 对账去重</b>——官方 CSV 导入（微信 128 笔 + 支付宝 96 笔），跨平台重复自动合并，账本留痕可查。</p></div>
-          <div class="solve-item"><span class="s-tag">AI 分类</span><p><b>自动分类 + 一句话改类</b>——分错的说一句就改，分类规则你自己定。</p></div>
-          <div class="solve-item"><span class="s-tag">预算红线</span><p><b>预算红线 + 缺口预警</b>——进度 96% 时提前 9 天告诉你，而不是月底才知道。</p></div>
-          <div class="solve-item"><span class="s-tag">语音</span><p><b>语音记账</b>——买菜路上说一句「超市买了 85」就记上了，连 App 都不用打开。</p></div>
-        </div>
-        <div class="scene-col">
-          <h4>产品里的一次超支拦截</h4>
-          <div class="scene-sample">
-            <div class="ss-title">「我这个月是不是要超支了？」</div>
-            <div class="card-mini">
-              <div class="row"><span class="k">本月预算</span><span class="v num">¥9,000</span></div>
-              <div class="row"><span class="k">已用进度</span><span class="v num" style="color:var(--color-warning)">96% · 今天 9/25</span></div>
-              <div class="row"><span class="k">预计</span><span class="v num" style="color:var(--color-warning)">月底超支约 ¥600</span></div>
-              <div class="row"><span class="k">建议</span><span class="v">未来一周可缓：购物类 ¥340</span></div>
-            </div>
-            <div class="ss-cap">示意：提前 9 天预警，而不是月底才知道</div>
+        <div class="import-arrow" aria-hidden="true">→</div>
+        <div class="import-map">
+          <div class="im-title">导入前先确认列映射</div>
+          <div class="card-mini">
+            <div class="row"><span class="k">员工列</span><span class="v">第 2 列 · 姓名</span></div>
+            <div class="row"><span class="k">工时 / 工分列</span><span class="v">第 4 列</span></div>
+            <div class="row"><span class="k">单价列</span><span class="v">第 5 列</span></div>
           </div>
+          <div class="im-cap">列能自动认出来就直接汇总；认不出的才请你指认，不猜列。汇总出的是工资参考表。</div>
         </div>
       </div>
+
       <div class="scene-block-foot">
-        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="family">到下方演示区，体验「超支拦截」→</a>
-        <span class="foot-note">对应 MVP SKILL：账单导入 · 智能分类 · 预算红线 · 语音记账</span>
+        <a class="btn btn-ghost jump-demo" href="#demo" data-scene="smallbiz">到下方演示区，体验“月底一张表”→</a>
+        <span class="foot-note">对应能力：票据采集（拍照 + PDF 本机解析）· 开票信息生成 · 报税收入归集 · 工时表导入汇总。四项后端已实装并跑过实测，工作台页面入口规划中</span>
       </div>
     </div>
 
@@ -669,24 +695,26 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section id="innovation" class="innovation">
   <div class="container">
     <div class="sec-eyebrow">INNOVATION · 核心创新</div>
-    <h2>三个创新，指向同一个差异：<br>财务决策层的「可信」</h2>
-    <p class="sec-intro">不是又一个记账工具——是把你散落的钱变成能支撑决策的证据。</p>
+    <h2>三个创新，指向同一个差异：<br>财务决策层的“可信”</h2>
+    <p class="plain-lead">它说的数字，你敢不敢照着做决定？下面三件事，就是让这句话站得住的全部理由。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span>财务状态引擎（证据强度分级、防幻觉）、CashPulse（90% 置信区间预测、样本不足如实标注）、假设检验闭环（决策假设回灌账本）。</span></div>
+    <p class="sec-intro">不是又一个记账工具，是把你散落的钱变成能支撑决策的证据。</p>
 
     <div class="grid grid-3" style="margin-bottom:var(--space-6)">
       <div class="card">
-        <h3>① 财务状态引擎<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">证据驱动 · 防幻觉</span></h3>
-        <p style="margin-bottom:var(--space-3)">每次收支按证据强度分级入账，只有真实证据才能改变财务状态——系统不猜测你的健康度。</p>
+        <h3>1. 财务状态引擎<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">证据驱动 · 防幻觉</span></h3>
+        <p style="margin-bottom:var(--space-3)">每次收支按证据强度分级入账，只有真实证据才能改变财务状态，系统不猜测你的健康度。</p>
         <div class="card-mini">
           <div class="row"><span class="k">流水自动到账</span><span class="v num">1.00</span></div>
           <div class="row"><span class="k">票据识别 + 人工确认</span><span class="v num">0.85</span></div>
           <div class="row"><span class="k">自然语言主动记账</span><span class="v num">0.75</span></div>
-          <div class="row"><span class="k">用户自报「没问题」</span><span class="v num">0.10</span></div>
+          <div class="row"><span class="k">用户自报“没问题”</span><span class="v num">0.10</span></div>
           <div class="row"><span class="k">系统推测</span><span class="v num" style="color:var(--color-risk)">0.00</span></div>
         </div>
       </div>
       <div class="card edge-income">
-        <h3>② CashPulse 预测<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">区间预测 · 绝不玄学</span></h3>
-        <p style="margin-bottom:var(--space-3)">基于你的历史收入节奏，输出未来 30/90 天现金流<b>区间</b>（90% 置信带），可信度低时明示「现金流不明」——而不是给一个假装精确的数字。</p>
+        <h3>2. CashPulse 预测<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">区间预测 · 绝不玄学</span></h3>
+        <p style="margin-bottom:var(--space-3)">基于你的历史收入节奏，输出未来 30/90 天现金流<b>区间</b>（90% 区间按历史波动以正态近似估算，样本不足时如实标注不可信），可信度低时明示“现金流不明”，而不是给一个假装精确的数字。</p>
         <div class="card-mini">
           <div class="row"><span class="k">下月预计余额</span><span class="v num">¥3,200 ± 4,600</span></div>
           <div class="row"><span class="k">缺口预警</span><span class="v num" style="color:var(--color-warning)">第 18 天 预计 ¥-2,400</span></div>
@@ -694,8 +722,8 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         </div>
       </div>
       <div class="card edge-warning">
-        <h3>③ 假设检验闭环<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">记忆体 · 越用越准</span></h3>
-        <p style="margin-bottom:var(--space-3)">每次决策记录「当初假设」，账本自动检验偏差——报价时以为 3 天回款、实际 3 周，偏差会被标记，下次报价自动参考。</p>
+        <h3>3. 假设检验闭环<br><span style="font-size:var(--font-size-13);color:var(--color-text-secondary);font-weight:var(--weight-regular)">记忆体 · 越用越准</span><span class="tag tag-plan">规划中</span></h3>
+        <p style="margin-bottom:var(--space-3)">每次决策记录“当初假设”，账本自动检验偏差。报价时以为 3 天回款、实际 3 周，偏差会被标记，下次报价自动参考。</p>
         <div class="card-mini">
           <div class="row"><span class="k">当初假设</span><span class="v">回款 3 天</span></div>
           <div class="row"><span class="k">实际检验</span><span class="v num" style="color:var(--color-warning)">3 周</span></div>
@@ -703,7 +731,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         </div>
       </div>
     </div>
-    <p class="quote">一次分析，持续陪伴——这是「财务记忆体」的复利，也是与记账工具的分水岭。</p>
+    <p class="quote">一次分析，持续陪伴。这是“财务记忆体”的复利，也是与记账工具的分水岭。</p>
   </div>
 </section>
 
@@ -712,14 +740,15 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">HOW IT WORKS · 核心闭环</div>
     <h2>采集 → 理解 → 建议 → 反馈</h2>
-    <p class="sec-intro">四个动作循环往复，结果回灌下一步——闭环跑起来，系统才越来越懂你的钱。</p>
+    <p class="plain-lead">你说一句话出去，一句建议回来。中间走四步，四步转一圈就是一圈复利。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span>事件账本 → 财务状态引擎 → 决策引擎 → 假设检验回灌，四个动作循环往复，结果回灌下一步。</span></div>
     <div class="flow">
-      <div class="flow-step"><div class="step-no">STEP 1</div><h4>采集</h4><p>说一句 / 拍一张 / 导一份，三通道任选，成本趋近于零。</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="step-no">STEP 1</div><h4>采集</h4><p>说一句 / 拍一张 / 导一份（账单或工时表），三通道任选，成本趋近于零。</p><span class="flow-arrow">→</span></div>
       <div class="flow-step"><div class="step-no">STEP 2</div><h4>理解</h4><p>事件账本 → 财务状态引擎：画像、区间、可信度。</p><span class="flow-arrow">→</span></div>
-      <div class="flow-step"><div class="step-no">STEP 3</div><h4>建议</h4><p>决策点给依据：接单报价、缺口预警、报税提醒。</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="step-no">STEP 3</div><h4>建议</h4><p>决策点给依据：接单报价、缺口预警；报税提醒属规划。</p><span class="flow-arrow">→</span></div>
       <div class="flow-step"><div class="step-no">STEP 4</div><h4>反馈</h4><p>周报 + 假设检验回灌账本，修正下一次建议。</p></div>
     </div>
-    <div class="decision-sample">💡 一个真实决策点：「这单 ¥5,000、2 周交付，接不接？」——先查 <b>未来 30 天现金垫底够不够</b>，再结合该客户<b>历史回款周期</b>给出报价区间与理由。</div>
+    <div class="decision-sample">💡 一个真实决策点：“这单 ¥5,000、2 周交付，接不接？”先查 <b>未来 30 天现金垫底够不够</b>，再结合该客户<b>历史回款周期</b>给出报价区间与理由。</div>
   </div>
 </section>
 
@@ -727,8 +756,9 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section id="arch" style="background:var(--color-bg-elevated);border-top:1px solid var(--color-surface-border);border-bottom:1px solid var(--color-surface-border)">
   <div class="container">
     <div class="sec-eyebrow">ARCHITECTURE · 多智能体</div>
-    <h2>1 个引擎 + 33 个 SKILL（方法论规划库）= 一个财务团队</h2>
-    <p class="sec-intro">不是 33 个机器人常驻——那是堆 Agent。而是一个编排引擎（大脑）按需激活 33 本「员工手册」（SKILL）：仓库已落地记账 / 接单决策 / 现金流预测 3 个示例，其余按 MVP → Phase 2/3 渐进补齐。记一笔只激活几个，复杂决策才让多位专家并行审议。</p>
+    <h2>1 个编排引擎 + 33 个 SKILL（方法论规划库）</h2>
+    <p class="plain-lead">说人话：不是养 33 个机器人，是一个大脑，遇到什么事就叫醒哪本“员工手册”。记一笔用不上专家团，复杂的报价决策才叫上几位一起审。</p>
+    <p class="sec-intro">SKILL 是方法论文件（Markdown），不是常驻进程。仓库已落地记账 / 接单决策 / 现金流预测 3 个示例，其余按 MVP → Phase 2/3 渐进补齐。</p>
     <div class="engine-core">编排引擎 · opencode 范式（1 个大脑，思考 → 选 SKILL → 调工具 → 观察 → 再思考）</div>
     <div class="agents" style="margin-bottom:var(--space-6)">
       <div class="agent"><div class="a-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/></svg></div><h4>记账员</h4><p>采集 · 分类 · 入账</p></div>
@@ -749,22 +779,23 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">PROOF · 实弹证据（R38：AI 自报不可信）</div>
     <h2>用真实票据验证，而不是嘴上说说</h2>
-    <p class="sec-intro">每一个能力都用真实数据跑过——以下是最近的两次实弹记录，如实呈现，包括发现的问题。</p>
+    <p class="plain-lead">我们不说“技术领先”，只说跑过什么、错在哪、打算怎么修。</p>
+    <p class="sec-intro">核心工程链路已实测，以下是三项代表性实弹记录，如实呈现，包括发现的问题与修复结果。其余标注“规划中”的能力尚未实装。</p>
     <div class="grid grid-2">
       <div>
-        <h3 style="font-size:var(--font-size-18)">① 豆包大模型视觉识别 · 真实数电发票 <span class="tag tag-ok">2026-09-04 实弹</span></h3>
+        <h3 style="font-size:var(--font-size-18)">1. 云端 LLM 视觉识别 · 真实数电发票 <span class="tag tag-ok">2026-09-04 实弹</span></h3>
         <table class="proof-tbl">
           <tr><th>字段</th><th>识别结果</th><th>判定</th></tr>
           <tr><td>金额（价税合计 ¥530.00）</td><td class="num">530.0</td><td class="ok">正确</td></tr>
           <tr><td>开票日期 2026-08-26</td><td class="num">2026-08-26</td><td class="ok">正确</td></tr>
           <tr><td>商户（销售方）</td><td>上海·餐饮商户（隐私打码）</td><td class="ok">正确</td></tr>
           <tr><td>分类 / 明细</td><td>餐饮 · 餐饮费 ¥500 + 6% 税</td><td class="ok">正确</td></tr>
-          <tr><td>发票号码（20 位）</td><td class="num">漏读 1 位</td><td class="warn">已列入修复</td></tr>
+          <tr><td>发票号码（20 位）</td><td class="num">当时漏读 1 位</td><td class="ok">09-24 已修复</td></tr>
         </table>
-        <p class="proof-note">票据识别走豆包大模型（Doubao Seed 视觉理解 API）——用一张真实电子发票端到端实测：核心字段全对；发票号码 20 位漏读 1 位的缺陷已如实记录，修复方案 = 号码格式校验 + 低置信局部重识别。隐私口径：票据图像经豆包 API 云端识别（产品内明示）；语音转写与账本数据留在本地。</p>
+        <p class="proof-note">票据识别默认走第三方云端 LLM 视觉 API，产品内明示，图像出本机时逐次提示；也可以切到本地模型（图像不出本机）或完全不用模型，档位在工作台里随时可换。用一张真实电子发票端到端实测，核心字段全对；发票号码 20 位漏读 1 位的缺陷如实记录后已修复，做法见下方第 3 项。数电发票 PDF 另有本机解析通道，可全程不出本机；语音转写与账本数据留在本地。</p>
       </div>
       <div>
-        <h3 style="font-size:var(--font-size-18)">② 引擎五项能力实测 <span class="tag tag-ok">2026-08-28 实弹</span></h3>
+        <h3 style="font-size:var(--font-size-18)">2. 引擎五项能力实测 <span class="tag tag-ok">2026-08-28 实弹</span></h3>
         <table class="proof-tbl">
           <tr><th>判定项</th><th>结果</th></tr>
           <tr><td>SKILL 注入（财务 SKILL 自动触发）</td><td class="ok">通过</td></tr>
@@ -773,10 +804,22 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           <tr><td>FastAPI 后端直连引擎</td><td class="ok">通过</td></tr>
           <tr><td>子代理并行审议（记账/现金流/风控）</td><td class="ok">通过</td></tr>
         </table>
-        <p class="proof-note">「多智能体」不是纸面叙事：复杂决策时引擎按需并行实例化多位专家子代理并汇总联合审议——工程层已实证。</p>
+        <p class="proof-note">“多智能体”不是纸面叙事：复杂决策时引擎按需并行实例化多位专家子代理并汇总联合审议，工程层已实证。</p>
       </div>
     </div>
-    <p class="quote" style="margin-top:var(--space-8)">纪律：AI 自报不可信。每个 SKILL 都要配 golden case 与真实数据实弹验证——这条纪律从第一天就写在开发规范里。</p>
+
+    <div class="card" style="margin-top:var(--space-8)">
+      <h3>3. 小微能力补课与本地模型档 <span class="tag tag-ok">2026-09-24 实弹</span></h3>
+      <table class="proof-tbl">
+        <tr><th>实弹项</th><th>做法</th><th>结果</th></tr>
+        <tr><td>发票号码漏位修复</td><td>20 位硬校验 + 用 PDF 自带文本层做双源交叉核对</td><td class="ok">19/19 通过</td></tr>
+        <tr><td>工时 Excel 导入汇总</td><td>纯标准库解析 xlsx，自动认表头与列，按人汇总</td><td class="ok">端到端通过</td></tr>
+        <tr><td>开票 / 报税归集</td><td>账本同源聚合：按客户、按季度两个维度</td><td class="ok">端到端通过</td></tr>
+        <tr><td>本地模型档（数据不出本机）</td><td>本机视觉模型识别同一张真实发票</td><td class="ok">6 字段全对</td></tr>
+      </table>
+      <p class="proof-note">以上各项都在本机完成，无网络调用。号码这条最关键：漏位是云端识别的稳定缺陷，修复不靠反复重试模型，而是加两道确定性关卡。一是格式硬校验，20 位不匹配就不得自动入账；二是用数电发票 PDF 自带的版式文本层做双源交叉核对，只在两源恰好差一个 0 时采纳文本层值，候选不唯一一律转人工。真实票据复测已拿回完整 20 位号码，且图像全程未出本机。本地模型档用本机视觉模型识别同一张发票，金额、日期、商户、分类与 20 位号码全部正确（单张样本，不作强弱结论），它的意义是把数据流向交给用户选择。工时表与归集同理：认不出的列交用户确认，只出参考表与事实归集，不猜、不替用户下结论。</p>
+    </div>
+    <p class="quote" style="margin-top:var(--space-8)">纪律：AI 自报不可信。每个 SKILL 都要配 golden case 与真实数据实弹验证，这条纪律从第一天就写在开发规范里。</p>
   </div>
 </section>
 
@@ -785,7 +828,8 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">ROADMAP · 开发路线（当前为原型/早期验证阶段）</div>
     <h2>三步走：先把闭环做真，再把产品做广</h2>
-    <p class="sec-intro">以下为规划路线，非交付承诺——每一步都遵循「先实弹验证再对外宣称」（R38 纪律）。</p>
+    <p class="plain-lead">先能用，再好用，再让别人也用得上。一步一步来，不跳步。</p>
+    <p class="sec-intro">以下为规划路线，非交付承诺，每一步都遵循“先实弹验证再对外宣称”（R38 纪律）。</p>
     <div class="grid grid-3">
       <div class="card">
         <div class="card-num">现在 → 2026 Q3</div>
@@ -810,13 +854,14 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 <section id="demo">
   <div class="container">
     <div class="sec-eyebrow">LIVE · 场景演示</div>
-    <h2>三种场景，各走一遍</h2>
-    <p class="sec-intro">上面对应的三种人，在这里各有一段可点的剧本——跟着走一遍，看 CashLens 如何应答每一步。也可以自己输入，或用麦克风说一句（语音识别：本地打开 + 启动识别服务时为本地实弹链路；线上页为浏览器语音识别兜底。音频不留存）。</p>
-    <div class="demo-shell" role="region" aria-label="CashLens 三种场景演示">
+    <h2>两种场景，各走一遍</h2>
+    <p class="plain-lead">上面说的两种人，这里各有一段能点的剧本。跟着走一遍，看它每一步怎么答。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span>语音识别：本地地址下走本地实弹链路，线上页为浏览器语音识别兜底，音频不留存。</span></div>
+    <p class="sec-intro">也可以自己输入，或用麦克风说一句，试试你平时会说的话。</p>
+    <div class="demo-shell" role="region" aria-label="CashLens 两种场景演示">
       <div class="demo-tabs" role="tablist" aria-label="选择使用场景">
         <button class="demo-tab active" type="button" role="tab" aria-selected="true" data-scene="opc">OPC 一人公司</button>
         <button class="demo-tab" type="button" role="tab" aria-selected="false" data-scene="smallbiz">小微经营者</button>
-        <button class="demo-tab" type="button" role="tab" aria-selected="false" data-scene="family">家庭日常</button>
       </div>
       <div class="demo-scene"><span class="role" id="sceneRole"></span><span id="sceneText"></span></div>
       <div class="demo-chat" id="chatLog" aria-live="polite"></div>
@@ -831,7 +876,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         <button class="btn btn-primary" type="button" id="btnSend" style="display:none">发送</button>
       </div>
       <div class="mic-hint" id="micHint" role="status" aria-live="polite"></div>
-      <div class="demo-tip">三种人，三种用法：点上方切换场景，再点剧本里的句子一步步体验；也可以自己输入，或用麦克风说一句。演示不保存任何数据。</div>
+      <div class="demo-tip">两种人，两种用法：点上方切换场景，再点剧本里的句子一步步体验；也可以自己输入，或用麦克风说一句。演示不保存任何数据。</div>
     </div>
   </div>
 </section>
@@ -844,21 +889,21 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <details class="sources">
       <summary>数据与判断依据（共 6 条 · 2026-08 调研核实 · 证据驱动是我们的产品纪律，也是本页纪律）</summary>
       <ol>
-        <li id="src-1">灵活就业规模：2025 年约 2.8 亿、预计 2026 年 3.2 亿（占就业人口逾四成）——联合早报转引报告，2026-06。<a href="https://www.zaobao.com/news/china/story20260607-9169767">来源 ↗</a></li>
-        <li id="src-2">个体工商户：登记在册约 1.25 亿户（2024 年 11 月）——国家市场监管总局，中国政府网发布。<a href="https://www.gov.cn/zhengce/jiedu/tujie/202411/content_6985570.htm">来源 ↗</a></li>
-        <li id="src-3">痛点「收入不稳定」：MDPI《Being Pushed or Pulled》(2025) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
-        <li id="src-4">痛点「现金流不可见 / 钱散多处」：Springer《Cash Flow Forecasting for Self-employed》(2024) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
-        <li id="src-5">痛点「报价靠感觉 / 被压价」：Sage《Discounted Prices, Discounted Respect?》(2023) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
-        <li id="src-6">「记账 App 只出报表、国内无人做一人公司财务决策层」：2026-08 竞品实时核查（10+ 产品原文核实）。<a href="https://post.smzdm.com/p/avg6gn6p/">记账 App 横评来源 ↗</a></li>
+        <li id="src-1">个体工商户：全国登记在册约 1.25 亿户（截至 2024 年 9 月底），国家市场监督管理总局，中国政府网发布。<a href="https://www.gov.cn/zhengce/jiedu/tujie/202411/content_6985570.htm">来源 ↗</a></li>
+        <li id="src-2">一人有限责任公司（OPC）：全国存量超 1600 万家，国家市场监督管理总局统计；另据中关村人才协会《中国OPC发展趋势报告》，截至 2025 年 6 月全国已突破 1600 万家。</li>
+        <li id="src-3">痛点“收入不稳定”：MDPI《Being Pushed or Pulled》(2025) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
+        <li id="src-4">痛点“现金流不可见 / 钱散多处”：Springer《Cash Flow Forecasting for Self-employed》(2024) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
+        <li id="src-5">痛点“报价靠感觉 / 被压价”：Sage《Discounted Prices, Discounted Respect?》(2023) 等学术文献，CashLens 调研档案 2026-08 交叉核实。</li>
+        <li id="src-6">“记账 App 停在报表层，通用 AI 拿不到真实流水”：2026-08 竞品实时核查（10+ 产品原文核实，含网商银行百灵2.0、税友亿企赢、金蝶、高德问店）。差异化定位为服务没有账的个体经营者，不作“无人做决策层”的断言。<a href="https://post.smzdm.com/p/avg6gn6p/">记账 App 横评来源 ↗</a></li>
       </ol>
     </details>
     <div class="foot-inner">
     <div>
       <div class="foot-slogan">把散落的钱，聚成一束光。</div>
-      <div style="font-size:var(--font-size-14);color:var(--color-text-secondary);margin-top:var(--space-2)">CashLens · 多智能体财务系统 · 面向一人公司与小微经营者</div>
+      <div style="font-size:var(--font-size-14);color:var(--color-text-secondary);margin-top:var(--space-2)">CashLens · 多智能体经营现金流可视化与决策辅助工具 · 面向一人公司与小微经营者</div>
     </div>
     <div class="foot-meta">
-      2026 北大金融 AI 智能体创新大赛 · 参赛作品<br>
+      首届上海“人工智能＋消费”创新大赛（2026）· 参赛作品<br>
       参赛者：李维逸<br>
       财务状态引擎 / CashPulse 预测 / 假设检验闭环<br>
       本地优先 · 证据驱动 · 可复现
@@ -918,53 +963,60 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   var SCENES = {
     opc: {
       role: "OPC 一人公司 · 独立开发者",
-      desc: "收入靠接单、报价靠感觉、最怕下月断粮——看 CashLens 怎么把「接单报价」变成有依据的决策。",
+      desc: "收入靠接单，报价靠感觉，最怕下个月断粮。看 CashLens 把“接不接、报多少”变成一句有依据的话。",
       steps: [
         { u: "昨天微信收了 3000 尾款",
           a: "好的，已记收入（微信 · 接单尾款 · 主动记录）：<br><br>" + mkCard([
             { k: "类型 / 金额", v: '收入 <span class="num" ' + C_INC + '>+¥3,000.00</span>' },
             { k: "分类 / 渠道", v: "接单尾款 · 微信" },
             { k: "证据", v: "0.75 主动记录 → 事件账本" }]) +
-          "<br>已标记为「该客户尾款」，回款周期开始自动跟踪。" },
+          "<br>已标记为“该客户尾款”，回款周期开始自动跟踪。" },
         { u: "我下个月现金流怎么样？",
           a: "基于过去 3 个月收入节奏，未来 30 天<b>预计</b>现金流：<br><br>" + mkCard([
             { k: "期末预计余额", v: '<span class="num" ' + C_INC + '>+¥3,200</span>' },
-            { k: "预计区间（90%）", v: '<span class="num">-¥800 ~ +¥7,400</span>' },
+            { k: "预计区间（90% · 示意）", v: '<span class="num">-¥800 ~ +¥7,400</span>' },
             { k: "最近缺口点", v: '<span class="num" ' + C_WARN + '>第 18 天 约 -¥2,400</span>' },
             { k: "依据", v: "历史 3 个月收入节奏 + 未来固定支出" }]) +
-          "<br>CashPulse 区间预测——可信度低时如实标「现金流不明」，绝不假装精确。" },
+          "<br>CashPulse 区间预测：可信度低时如实标“现金流不明”，绝不假装精确。" },
         { u: "来了个设计单，5000 块，2 周交付，接不接？",
           a: "接单决策引擎先做前置检查，再给建议：<br><br>" + mkCard([
-            { k: "前置① 现金垫底", v: '未来 30 天预计缺口 <b class="num" ' + C_WARN + '>¥2,400</b> → uncertain，需先确认垫底' },
-            { k: "前置② 回款认知", v: "该客户历史回款 <b>3 周</b>，你按 3 天预估 → 已纠偏" },
+            { k: "前置 1 · 现金垫底", v: '未来 30 天预计缺口 <b class="num" ' + C_WARN + '>¥2,400</b>，uncertain，需先确认垫底' },
+            { k: "前置 2 · 回款认知", v: "该客户历史回款 <b>3 周</b>，你按 3 天预估，已纠偏" },
             { k: "时间成本", v: "2 周交付 ≈ 占用 14 天档期" },
-            { k: "报价建议", v: '<b class="num">¥5,500 – ¥7,000</b> · 中位 ¥6,200' }]) +
+            { k: "报价建议", v: '<b class="num">¥5,500 – ¥7,000</b> 中位 ¥6,200' }]) +
           "<br>理由：缺口要覆盖进报价；建议首付 50% 或缩短账期，把 3 周回款风险摊薄。" },
         { u: "好，就报 6200，谈成后按 3 周回款算",
           a: "已记录本次决策与假设：<br><br>" + mkCard([
             { k: "决策", v: "接单 · 报价 ¥6,200" },
             { k: "当初假设", v: "回款周期 3 周" },
-            { k: "假设检验", v: "到账后自动比对——偏差会标记，影响下次报价参考" }]) +
-          "<br>这是「财务记忆体」：一次分析，持续陪伴。" }
+            { k: "假设检验", v: "到账后自动比对，偏差会标记，影响下次报价参考" }]) +
+          "<br>这是“财务记忆体”：一次分析，持续陪伴。" }
       ]
     },
     smallbiz: {
       role: "小微经营者 · 小店 / 工作室",
-      desc: "开票、报销、工时工分——员工的钱和发票不能糊涂，月底要能一张表说清。",
+      desc: "开票、报销、工时工分，员工的钱和发票不能糊涂，月底要一张表说清。",
       steps: [
         { u: "这周工时：阿明 40 小时、小周 36 小时",
           a: "已记录本周工时：<br><br>" + mkCard([
-            { k: "阿明", v: '<span class="num">40h</span> · 待月底结算' },
-            { k: "小周", v: '<span class="num">36h</span> · 待月底结算' },
-            { k: "合计", v: '<span class="num">76h</span> · 自动并入工资表' },
-            { k: "备选", v: "整张工时 Excel 也可一键导入" }]) },
+            { k: "阿明", v: '<span class="num">40h</span> 待月底结算' },
+            { k: "小周", v: '<span class="num">36h</span> 待月底结算' },
+            { k: "合计", v: '<span class="num">76h</span> 自动并入工资表' },
+            { k: "备选", v: "整张项目工时 Excel 拖进来也行，按员工自动汇总" }]) },
+        { u: "我这儿有三张项目工时表，怎么给你？",
+          a: "把 Excel 拖进来，或点选文件，两种都行。导入前先给你看列映射，确认了才入账：<br><br>" + mkCard([
+            { k: "员工列", v: "第 2 列 · 姓名" },
+            { k: "工时 / 工分列", v: "第 4 列" },
+            { k: "单价列", v: "第 5 列" },
+            { k: "确认之后", v: "三张表合并去重 → 按员工汇总 → 工资参考表" }]) +
+          "<br>项目表各写各的格式也能认，认不出的那几列由你点一下确认。" },
         { u: "我这儿有张打车发票，报销一下",
-          a: "票据已识别（豆包大模型视觉）：<br><br>" + mkCard([
+          a: "票据已识别（云端 LLM 视觉）：<br><br>" + mkCard([
             { k: "类型", v: "支出 · 报销" },
             { k: "金额", v: '<span class="num" ' + C_RISK + '>¥28.00</span>' },
             { k: "商户 / 日期", v: "滴滴出行 · 2026-09-02" },
             { k: "证据", v: "机器识别 0.85 — 请你确认后入账" }]) +
-          "<br>证据纪律：机器识别 + 人确认才计 0.85；未确认只算「接触」（0.00）。" },
+          "<br>证据纪律：机器识别 + 人确认才计 0.85；未确认只算“接触”（0.00）。" },
         { u: "月底了，工资和报销一起算一下",
           a: "月度结算单：<br><br>" + mkCard([
             { k: "阿明 · 40h × ¥30", v: '<span class="num">¥1,200.00</span>' },
@@ -979,37 +1031,6 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
             { k: "去向", v: "开票记录入账本 · 报税节点自动提醒" }]) +
           "<br>报税提醒已挂上：季度增值税申报临近，收入已自动归集。" }
       ]
-    },
-    family: {
-      role: "家庭 · 多平台消费者",
-      desc: "钱散在微信、支付宝、拼多多、抖音——月底对上账就是胜利。看它怎么把账单变成明白账。",
-      steps: [
-        { u: "我把这个月的账单都导进来了",
-          a: "已导入并对账：<br><br>" + mkCard([
-            { k: "微信账单", v: '<span class="num">128</span> 笔' },
-            { k: "支付宝账单", v: '<span class="num">96</span> 笔' },
-            { k: "对账去重", v: "合并 3 笔跨平台重复（账本留痕）" },
-            { k: "本月合计", v: '支出 <b class="num">¥8,642</b> · 收入 <b class="num">¥12,300</b>' }]) },
-        { u: "我这个月钱都花哪了？",
-          a: "AI 自动分类：<br><br>" + mkCard([
-            { k: "餐饮", v: '<span class="num">32%</span> · ¥2,765' },
-            { k: "购物", v: '<span class="num">28%</span> · ¥2,420' },
-            { k: "交通 / 日用", v: '<span class="num">18%</span> · ¥1,556' },
-            { k: "其它", v: '<span class="num">22%</span> · ¥1,901' }]) +
-          "<br>分类规则可自定：哪笔分错了，说一句就改。" },
-        { u: "我这个月是不是要超支了？",
-          a: "预算红线检查：<br><br>" + mkCard([
-            { k: "本月预算", v: '<span class="num">¥9,000</span>' },
-            { k: "已用进度", v: '<span class="num">96%</span> · ¥8,642（今天 9/25）' },
-            { k: "预计", v: '按目前节奏月底将超支约 <b class="num" ' + C_WARN + '>¥600</b>' },
-            { k: "建议", v: "未来一周可缓的支出：购物类约 ¥340" }]) +
-          "<br>提前 9 天预警，而不是月底才知道——这是缺口预警的价值。" },
-        { u: "拼多多那条裤子退了 89",
-          a: "好的，已记一笔退款：<br><br>" + mkCard([
-            { k: "类型 / 金额", v: '收入（退款）<span class="num" ' + C_INC + '>+¥89.00</span>' },
-            { k: "分类", v: "购物 · 冲正" },
-            { k: "预算联动", v: "本月超支缺口同步缩小 ¥89" }]) }
-      ]
     }
   };
 
@@ -1022,7 +1043,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     sceneText.textContent = s.desc;
     chatLog.innerHTML = "";
     playIndex = 0;
-    addBubble("你好，我是 CashLens 财务管家——把散落的收支归拢成看得懂的账、提前看出现金流缺口、在接单报价时给有依据的建议。点下方剧本里的句子，一步步看我陪你走完这个月的关键几件事。", "ai");
+    addBubble("你好，我是 CashLens。你把散在各处的钱交给我，我帮你盯三件事：钱花在哪、下个月会不会缺钱、这单该不该接。点下面的句子，走一遍你一个月里最要紧的几件事。", "ai");
     renderSteps();
   }
 
@@ -1057,7 +1078,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   }
 
   // ── 意图匹配：输入/语音与场景剧本对上时，就答库里的剧本文案 ──
-  // 实弹教训：用户直接说剧本里的句子，不该走「记一笔」通用解析（无金额问题更不该报「没听懂金额」）
+  // 实弹教训：用户直接说剧本里的句子，不该走“记一笔”通用解析（无金额问题更不该报“没听懂金额”）
   function bigrams(s) {
     var clean = s.replace(/\s+/g, "");
     var out = {};
@@ -1092,7 +1113,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     return bestScore >= 0.6 && best ? best : null;
   }
   function sceneNameOf(k) {
-    var m = { opc: "OPC 一人公司", smallbiz: "小微经营者", family: "家庭日常" };
+    var m = { opc: "OPC 一人公司", smallbiz: "小微经营者" };
     return m[k] || k;
   }
 
@@ -1121,7 +1142,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
   // ── 自由输入兜底：任何场景下都能自己说一句记账 ──
   // 金额解析：阿拉伯数字（28 / 45.5）与中文数字（三千 / 三千五 / 一万二 / 五百零三）都支持
-  // 实弹教训：本地语音识别回的是「三千元」而非「3000」，只认阿拉伯数字会漏记——中文金额必须能记账
+  // 实弹教训：本地语音识别回的是“三千元”而非“3000”，只认阿拉伯数字会漏记——中文金额必须能记账
   function cnToAmount(s) {
     var D = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
     var U = { 十: 10, 百: 100, 千: 1000 };
@@ -1183,8 +1204,8 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     return Math.round((result + section + tail + frac) * 100) / 100;
   }
   // ═══════════ 金额识别（句级语义判定，替代局部窗口猜测）═══════════
-  // 前几轮数字 bug 的共同根因：用「数字前后几格」局部猜测是否金额，越补越碎、改一处坏一处。
-  // 改为两段式：1) 枚举句中所有数字候选并归一化；2) 先判整句是否「金钱事件」（动词/渠道/货币单位/记账祈使），再对候选按证据打分取最高者。
+  // 前几轮数字 bug 的共同根因：用“数字前后几格”局部猜测是否金额，越补越碎、改一处坏一处。
+  // 改为两段式：1) 枚举句中所有数字候选并归一化；2) 先判整句是否“金钱事件”（动词/渠道/货币单位/记账祈使），再对候选按证据打分取最高者。
   var MONEY_VERBS = ["支付", "收到", "收款", "进账", "入账", "到账", "转账", "付款", "退款", "报销", "充值", "扣款", "结算", "消费", "花费", "花", "付", "收", "买", "卖", "转", "赚", "借", "还", "缴", "报", "工资", "房租", "货款", "尾款", "报酬", "稿费", "分红", "押金", "定金", "价格", "报价", "多少钱", "记录", "记账"];
   var CHANNEL_WORDS = ["微信", "支付宝", "现金", "银行卡", "银行", "零钱"];
   var MONEY_UNIT_RE = /(?:元|块|块钱|万元|人民币)/;
@@ -1209,11 +1230,11 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     var s = 0;
     var before1 = sp.start > 0 ? text.charAt(sp.start - 1) : "";
     if (before1 === "周" || before1 === "期" || before1 === "拜" || before1 === "第") { return -99; } // 周三/星期三/礼拜三/第三 是序数或星期，不是金额
-    var afterClean = text.slice(sp.end).replace(/^[\s,，。.．、!！?？:：;；'"”’「」『』()（）]*/, "");
-    if (sp.v === 1 && afterClean.charAt(0) === "下") { return -99; }          // 「记录一下」的"一"不是金额
+    var afterClean = text.slice(sp.end).replace(/^[\s,，。.．、!！?？:：;；'"”’“”『』()（）]*/, "");
+    if (sp.v === 1 && afterClean.charAt(0) === "下") { return -99; }          // “记录一下”的"一"不是金额
     if (/^(?:元|块|块钱|万元|人民币)/.test(afterClean)) { s += 3; }          // 数字紧跟货币单位
     if (afterClean === "") { s += 1; }                                        // 数字在句尾
-    if (afterClean.indexOf("套餐") === 0) { s += 1; }                         // 「299 套餐」= 价格名词
+    if (afterClean.indexOf("套餐") === 0) { s += 1; }                         // “299 套餐”= 价格名词
     var near = text.slice(Math.max(0, sp.start - 4), Math.min(text.length, sp.end + 4));
     for (var i = 0; i < MONEY_VERBS.length; i++) { if (near.indexOf(MONEY_VERBS[i]) > -1) { s += 2; break; } }
     if (afterClean !== "" && afterClean.indexOf("套餐") !== 0 && COUNTER_CHAR.indexOf(afterClean.charAt(0)) > -1) { s -= 2; } // 紧跟量词减分
@@ -1229,7 +1250,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       if (sc > bestScore) { bestScore = sc; best = spans[i]; }
     }
     if (!best) { return 0; }
-    if (money) { return bestScore >= 1 ? best.v : 0; }   // 句内有金钱信号 → 取证据最高的候选（≥1 才认，避免「花了10分钟」临界误判）
+    if (money) { return bestScore >= 1 ? best.v : 0; }   // 句内有金钱信号 → 取证据最高的候选（≥1 才认，避免“花了10分钟”临界误判）
     return bestScore >= 1 ? best.v : 0;                  // 无显式信号 → 仅当句尾/带单位等强证据才认金额
   }
   function parse(text) {
@@ -1284,13 +1305,13 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       if (hit.key === curScene) { playStepAt(hit.key, hit.i); return; }
       var otherU = SCENES[hit.key].steps[hit.i].u;
       addBubble(esc(text), "user");
-      addBubble("这句是「" + sceneNameOf(hit.key) + "」场景剧本里的话（" + esc(otherU) + "）。当前演示按场景隔离——点上方「" + sceneNameOf(hit.key) + "」标签再问，我会用那个场景的上下文回答。", "ai");
+      addBubble("这句是“" + sceneNameOf(hit.key) + "”场景剧本里的话（" + esc(otherU) + "）。当前演示按场景隔离。点上方“" + sceneNameOf(hit.key) + "”标签再问，我会用那个场景的上下文回答。", "ai");
       return;
     }
     // 意图分流 2：带金额 → 当记账处理
     var r = parse(text);
     if (!r.amount || r.amount <= 0) {
-      addBubble("这句话我先接不上——目前演示支持两类：带金额的记账（如「打车花了 28」、说「三千」也行），或当前场景剧本里的问题（上方句子直接说或点一下都行）。也可以切到另外两种人试试。", "ai");
+      addBubble("这句话我先接不上。目前演示支持两类：带金额的记账（如“打车花了 28”、说“三千”也行），或当前场景剧本里的问题（上方句子直接说或点一下都行）。也可以切到另外两种人试试。", "ai");
       return;
     }
     addBubble(esc(text), "user");
@@ -1332,7 +1353,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       inputText.style.display = "";
       btnSend.style.display = "";
       inputText.focus();
-      if (micHint) { micHint.textContent = "键盘模式：输入记账或问题后点「发送」"; }
+      if (micHint) { micHint.textContent = "键盘模式：输入记账或问题后点“发送”"; }
     }
   }
   btnMode.addEventListener("click", function () { setMode(modeVoice ? "text" : "voice"); });
@@ -1349,13 +1370,13 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       holdZone.setAttribute("aria-label", "按住说话，松开结束");
       if (micHint) {
         micHint.textContent = state === "off"
-          ? "语音在 file:// 方式下不可用：请启动本地服务后用 http://localhost:8000/ 打开"
-          : "按住「说话」说一句记账或问题，松开即识别；点左边图标可切换打字";
+          ? "语音在本地文件方式下不可用：请启动本地识别服务后，通过本地地址打开本页"
+          : "按住“说话”说一句记账或问题，松开即识别；点左边图标可切换打字";
       }
     }
   }
 
-  // ── 语音链路：本地（localhost → Qwen3-ASR）／线上（浏览器语音兜底）──
+  // ── 语音链路：本地（本地 ASR 服务）／线上（浏览器语音兜底）──
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var isFile = location.protocol === "file:";
   var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
@@ -1385,16 +1406,16 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (j.ok && j.text) { asrDone(j.text); }
-        else { addBubble("本地识别没出结果" + (j.error ? "（" + j.error + "）" : "") + "——按住再说一次，或打字也可以。", "ai"); }
+        else { addBubble("本地识别没出结果" + (j.error ? "（" + j.error + "）" : "") + "，按住再说一次，或打字也可以。", "ai"); }
       })
-      .catch(function () { addBubble("连不上本地识别服务——请确认已启动：python3 backend/asr_server.py。", "ai"); });
+      .catch(function () { addBubble("连不上本地识别服务，请确认本地识别服务已启动。", "ai"); });
   }
 
   function asrDone(text) {
     inputText.value = text || "";
-    setMode("text");                 // 识别结果先落到输入框，切到键盘模式由人确认后再「发送」
+    setMode("text");                 // 识别结果先落到输入框，切到键盘模式由人确认后再“发送”
     inputText.focus();
-    addBubble("识别结果：「" + esc(text) + "」——确认无误就点「发送」（要改可直接改文字）。", "ai");
+    addBubble("识别结果：“" + esc(text) + "”，确认无误就点“发送”（要改可直接改文字）。", "ai");
   }
 
   function stopLocalRec(cancelled) {
@@ -1410,7 +1431,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     aCtx = null; aStream = null; aSrc = null; aProc = null; aChunks = [];
     setMicUI("idle");
     if (cancelled) { addBubble("已取消，未记录。", "ai"); return; }
-    if (total < 1600) { addBubble("说话时间太短——按住再说一次，说完再松开。", "ai"); return; }
+    if (total < 1600) { addBubble("说话时间太短，按住再说一次，说完再松开。", "ai"); return; }
     addBubble("录音完成，正在识别…", "ai");
     sendToAsr(toWavBlob(all, sr));
   }
@@ -1418,7 +1439,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   function startRec() {
     if (recording || recOn) { return; }
     if (isFile) {
-      addBubble("当前是 file:// 方式，语音不可用。请启动本地服务体验语音记账：<br><span style='font-family:var(--font-mono);font-size:var(--font-size-12);background:var(--color-bg);padding:2px 6px;border-radius:4px'>cd 09-代码 && python3 backend/asr_server.py</span><br>再用浏览器打开 <span style='font-family:var(--font-mono);font-size:var(--font-size-12)'>http://localhost:8000/</span> 体验。", "ai");
+      addBubble("当前是本地文件方式，语音不可用。请启动本地识别服务后，通过本地地址打开本页体验语音记账。", "ai");
       setMode("text");
       return;
     }
@@ -1426,7 +1447,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       recording = true; setMicUI("rec");
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         recording = false; setMicUI("idle");
-        addBubble("当前浏览器不支持录音——建议用 Chrome/Safari 打开。", "ai"); return;
+        addBubble("当前浏览器不支持录音，建议用 Chrome/Safari 打开。", "ai"); return;
       }
       navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
         if (!recording) { s.getTracks().forEach(function (t) { t.stop(); }); return; } // 按下即松：放弃
@@ -1439,7 +1460,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         // 注意：开始录音时绝不在此弹气泡——气泡会把聊天区顶高、把按钮顶出指针位置触发 pointerleave，录音会被误取消（实弹教训）
       }).catch(function () {
         recording = false; setMicUI("idle");
-        addBubble("无法访问麦克风——请在地址栏左侧允许后重试；也可点左边图标打字。", "ai");
+        addBubble("无法访问麦克风，请在地址栏左侧允许后重试；也可点左边图标打字。", "ai");
       });
       return;
     }
@@ -1451,17 +1472,17 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       rec.onresult = function (e) { tGot = true; asrDone(e.results[0][0].transcript); };
       rec.onend = function () {
         recOn = false; setMicUI("idle");
-        if (!tGot) { addBubble("没听清——按住再说一次，或点左边图标打字。", "ai"); }
+        if (!tGot) { addBubble("没听清，按住再说一次，或点左边图标打字。", "ai"); }
       };
       rec.onerror = function (ev) {
         recOn = false; setMicUI("idle");
         if (ev.error === "aborted") { return; }
-        addBubble("语音识别失败（" + ev.error + "）——直接打字也可以。", "ai");
+        addBubble("语音识别失败（" + ev.error + "），直接打字也可以。", "ai");
       };
-      try { rec.start(); } catch (e) { recOn = false; setMicUI("idle"); addBubble("无法启动语音识别——请用 Chrome 或直接打字。", "ai"); }
+      try { rec.start(); } catch (e) { recOn = false; setMicUI("idle"); addBubble("无法启动语音识别，请用 Chrome 或直接打字。", "ai"); }
       return;
     }
-    addBubble("当前环境不支持语音——请用 Chrome 打开，或点左边图标打字。", "ai");
+    addBubble("当前环境不支持语音，请用 Chrome 打开，或点左边图标打字。", "ai");
   }
   function stopRec() {
     if (isLocal) { stopLocalRec(false); }
@@ -1474,7 +1495,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
   // 按住说话：Pointer Events —— 按下开始并锁定指针，抬起/系统取消 结束
   // 实弹教训：按住期间页面任何布局变化（气泡弹出顶高聊天区）都会让按钮移出指针位置、触发 pointerleave 自动取消
-  // → 录音中只在输入栏显示状态（变红「松开 结束」），不弹泡；并用 setPointerCapture 把指针锁定在按钮上，轻微移出也不误取消
+  // → 录音中只在输入栏显示状态（变红“松开 结束”），不弹泡；并用 setPointerCapture 把指针锁定在按钮上，轻微移出也不误取消
   holdZone.addEventListener("pointerdown", function (e) {
     e.preventDefault();
     if (e.pointerType === "mouse" && e.button !== 0) { return; }
