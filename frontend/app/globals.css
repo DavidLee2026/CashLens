@@ -39,14 +39,17 @@ button{font-family:inherit}
 .brand-sub{font-size:12px;color:var(--text-2);font-weight:400}
 
 /* 主布局：桌面为「左数据、右对话」。DOM 顺序刻意保持「对话在前」，
-   这样窄屏收成单列时对话仍在上面，符合移动端的主路径（先说话，再看数）。 */
+   这样窄屏收成单列时对话仍在上面，符合移动端的主路径（先说话，再看数）。
+   ⚠️ 必须同时显式写 grid-row:1：DOM 里 .side 排在 .convo 之后，而它的列号更小，
+   按 Grid 自动放置规则（列号回退则行号 +1）会被挤到第二行，
+   表现就是左列空白、数据卡片掉到对话下方。窄屏单列时再还原为 auto。 */
 .main{max-width:1160px;margin:0 auto;padding:20px}
 .grid{display:grid;grid-template-columns:360px minmax(0,1.25fr);gap:18px;align-items:start}
-.convo{grid-column:2}
-.side{grid-column:1}
+.convo{grid-column:2;grid-row:1}
+.side{grid-column:1;grid-row:1}
 @media (max-width:980px){
   .grid{grid-template-columns:1fr}
-  .convo,.side{grid-column:auto}
+  .convo,.side{grid-column:auto;grid-row:auto}
 }
 
 /* 卡片 */
