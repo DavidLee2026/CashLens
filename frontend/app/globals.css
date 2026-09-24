@@ -133,8 +133,12 @@ button{font-family:inherit}
 .btn-mini:disabled{opacity:.5;cursor:not-allowed}
 .btn-mini.ok:disabled:hover{background:var(--income-bg);color:var(--income)}
 
-/* 右侧面板 */
-.side{display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 130px);overflow-y:auto;padding:2px}
+/* 左侧数据面板：四块内容合成一张卡片（外层用 .card），块与块之间用分隔线，
+   不再让每块各自成为一张独立卡片。 */
+.side{display:flex;flex-direction:column;gap:0;max-height:calc(100vh - 130px);overflow-y:auto;padding:0}
+.side .sect{padding:16px;background:transparent;border:none;border-top:1px solid var(--border);
+  border-radius:0;box-shadow:none}
+.side .sect:first-child{border-top:none}
 .sect{padding:16px}
 .sect h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin-bottom:12px}
 .sect-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}

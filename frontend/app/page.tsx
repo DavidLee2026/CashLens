@@ -812,9 +812,9 @@ export default function Workbench() {
           </section>
 
           {/* 右侧面板 */}
-          <aside className="side" aria-label="现金流面板">
+          <aside className="card side" aria-label="现金流面板">
             {/* 项目维度：账本按项目归集，这里是项目的唯一入口 */}
-            <section className="card sect">
+            <section className="sect">
               <div className="sect-head">
                 <h3>项目（按项目归集）</h3>
                 <button
@@ -898,7 +898,7 @@ export default function Workbench() {
               {projMsg && <div className="fc-note">{projMsg}</div>}
             </section>
 
-            <section className="card sect">
+            <section className="sect">
               <div className="sect-head">
                 <h3>财务状态（状态引擎 · 真）</h3>
               </div>
@@ -920,7 +920,7 @@ export default function Workbench() {
               </div>
             </section>
 
-            <section className="card sect">
+            <section className="sect">
               <div className="sect-head">
                 <h3>未来 30 天现金流（90% 区间）</h3>
               </div>
@@ -949,7 +949,7 @@ export default function Workbench() {
               )}
             </section>
 
-            <section className="card sect">
+            <section className="sect">
               <div className="sect-head">
                 <h3>最近事件</h3>
               </div>
