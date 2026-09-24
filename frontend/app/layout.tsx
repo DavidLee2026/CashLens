@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CashLens · 本地工作台",
-  description: "CashLens 多智能体财务系统 —— 真数据对话工作台（本地优先）",
+  description: "CashLens 多智能体经营现金流分析工具，真数据对话工作台（本地优先）",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

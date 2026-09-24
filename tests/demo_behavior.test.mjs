@@ -28,7 +28,7 @@ class El {
 }
 
 const els = {};
-const tabs = ["opc", "smallbiz", "family"].map((k) => { const e = new El(); e.dataset.scene = k; return e; });
+const tabs = ["opc", "smallbiz"].map((k) => { const e = new El(); e.dataset.scene = k; return e; });
 globalThis.window = globalThis;
 globalThis.window.SpeechRecognition = undefined;
 globalThis.window.webkitSpeechRecognition = undefined;
