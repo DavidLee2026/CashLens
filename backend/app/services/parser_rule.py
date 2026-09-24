@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+from . import categories
+
 # ── 数字表 ──
 _CN_D = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _CN_U = {"十": 10, "百": 100, "千": 1000}
@@ -25,18 +27,9 @@ _COUNTER_AFTER = "个名位次天点号分秒里台件杯份张岁层月周年�
 _ASK_WORDS = ["现金流", "缺钱", "够不够", "下个月", "会不会", "状态", "健康", "预测", "撑住", "断粮"]
 _INCOME_WORDS = ["客户支付", "收到", "收款", "回款", "收", "尾款", "工资", "入账", "进账", "退款", "红包", "报酬", "项目款", "货款", "结算"]
 _EXPENSE_WORDS = ["买", "花", "付", "充值", "打车", "咖啡", "奶茶", "餐", "吃", "超市", "房租", "水电", "电影", "机票", "酒店", "报销"]
-_CAT_RULES = [
-    ("餐饮", ["咖啡", "奶茶", "餐", "吃", "外卖", "饭店", "早餐", "午餐", "晚餐", "吃喝"]),
-    ("交通", ["打车", "地铁", "公交", "加油", "高铁", "机票", "停车"]),
-    ("购物", ["买", "超市", "购物", "淘", "拼多多", "京东", "衣服", "裤子"]),
-    ("房租", ["房租", "租金"]),
-    ("娱乐", ["电影", "游戏", "会员"]),
-]
-_IN_CAT_RULES = [
-    ("接单", ["尾款", "项目", "接单", "报酬", "货款", "结算", "套餐", "模板", "设计"]),
-    ("工资", ["工资"]),
-    ("退款", ["退款", "退货"]),
-]
+# 分类规则已统一到 app/services/categories.py（唯一权威表），此处不再各写一份。
+# 旧版这里有一份 _CAT_RULES / _IN_CAT_RULES，与 llm_skill 提示词、parse_bill_csv 三处口径不一致，
+# 2026-09-24 收口：规则层、提示词、账单归一化、票据识别共用同一张分类表。
 
 
 def cn_to_amount(s: str) -> float:
@@ -168,12 +161,9 @@ def analyze(text: str) -> dict:
         return {"kind": "fallback", "text": text}
     is_income = any(w in text for w in _INCOME_WORDS)
     # 无收入词命中 → 默认按支出记录（与 demo 规则口径一致）
-    rules = _IN_CAT_RULES if is_income else _CAT_RULES
-    cat = "其他"
-    for cname, words in rules:
-        if any(w in text for w in words):
-            cat = cname
-            break
+    # 分类统一走 categories：判不出落「待确认」，不再是「其他」
+    cat = (categories.match_income_category(text) if is_income
+           else categories.match_category(text))
     channel = "manual"
     for cname, ch in _CHANNELS.items():
         if cname in text:

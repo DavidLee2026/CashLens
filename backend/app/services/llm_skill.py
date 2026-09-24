@@ -14,7 +14,7 @@ import re
 import urllib.request
 from pathlib import Path
 
-from . import model_config
+from . import categories, model_config
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/services/llm_skill.py → 仓库根
 ENV_PATH = REPO_ROOT / ".env"  # 保留：_load_env 兼容入口用
@@ -50,7 +50,9 @@ actions 只能使用以下白名单（不能发明其他 kind）：
 1. record 记账：{"kind":"record","direction":"income|expense","amount_cents":整数金额(以分计),"channel":"wechat|alipay|bank|cash|receipt|voice|manual","category":"见分类表","counterparty":"对手方(可空)","note":"要点"}
    - 金额以分为单位：299 元 = 29900；一句话可含多笔（每笔一个 record action）。
    - 方向：有显式收入信号（收到/客户支付/进账/尾款到账/退款）→ income；否则 expense。
-   - 分类表：接单 / 工资 / 餐饮 / 交通 / 房租 / 购物 / 娱乐 / 其他（尽量选接近的）。
+   - 支出分类表：__EXPENSE_CATS__（判不出就选「待确认」，绝不编新分类）。
+   - 收入分类表：__INCOME_CATS__。
+   - 分类按用途判，不按商户判（同一家便利店，买早餐算餐饮、买纸巾算购物）。
    - 「报销 X 元」含义 = 垫付的支出：记 expense（如交通/餐饮），note 注明"报销垫付"，不要记成收入。
    - 记账流程 = 识别 → 待确认 → 用户确认后入账：你生成 record 后系统会创建「待确认草稿」，用户点确认才真正入账（证据 0.75）。不要在 reply 声称「已入账/已记录完成」，应说「已识别，请确认」。
 
@@ -64,15 +66,22 @@ actions 只能使用以下白名单（不能发明其他 kind）：
 3. 其余全部 = 纯聊天/咨询：actions 为空数组，把回答写进 reply。
 
 【产品能力白名单 —— 回答功能/导入/报销问题时只准引用以下事实，禁止承诺不存在的功能】
-- 记账：口述/语音一句话记账（当前对话就是）；微信/支付宝官方账单 CSV 解析能力已就绪（后端/脚本通道）。
-- CSV 导入：用户可说明导出「微信/支付宝官方账单 CSV」；解析通道已有，但工作台页面拖拽上传尚未上线——如实告知「目前界面还没有拖拽入口，CSV 解析在后台通道/后续版本」，不要假装页面能传文件。
-- 票据/发票：票据/截图 OCR 识别通道存在，识别结果需人工确认（证据 0.85）；报销应当保留发票/票据凭证（不能只口头说就当有票）。
+- 记账：口述/语音一句话记账（当前对话就是）。
+- 导入票据：工作台支持把图片（JPG/PNG）、PDF 发票、Excel 报销表、CSV 账单拖进对话区，也可以拖整个文件夹（第一层文件夹名会成为项目名）。导入结果一律先落「待确认草稿」，用户确认后才入账。
+- Excel 报销表：以表内数字为准；表里嵌入的截图会同时被识别，与表内金额做双源核对，对不上会指出来（机器不覆盖人写的数）。
+- 票据/发票：票据/截图识别通道存在，识别结果需人工确认（证据 0.85）；报销应当保留发票/票据凭证（不能只口头说就当有票）。
+- 分类：按用途判，不按商户判（同一家便利店，买早餐算餐饮、买纸巾算购物）；判不出进「待确认」，不当类别统计。
 - 实时查询：最近流水、最近一笔收入/支出、本月支出分类、现金流 30 天区间（真数据）。
-- 尚无：工作台页面拖拽上传、多用户/登录。
+- 尚无：多用户/登录。
 
 【动作纪律】
 - 绝不编造任何账目金额或现金流数值；与账有关的问题优先选数据查询 action，让系统给真数。
 - 语气与表达由人格层负责，此处不再重复；reply 保持简短即可。"""
+
+# 分类表由 categories 单一来源注入，提示词里不再手写一份分类清单（2026-09-24 收口）
+_OPERATION_PROMPT = (_OPERATION_PROMPT
+                     .replace("__EXPENSE_CATS__", categories.expense_category_line())
+                     .replace("__INCOME_CATS__", categories.income_category_line()))
 
 # 运行时拼装：人格层（谁在说话）在前，操作层（做什么动作）在后，单条 system 消息。
 _SYSTEM_PROMPT = _PERSONA_PROMPT + "\n\n" + "====== 以下为操作层：本次回复必须遵守 ======\n\n" + _OPERATION_PROMPT

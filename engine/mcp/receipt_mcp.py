@@ -303,6 +303,46 @@ def parse_from_text_layer(text: str, source_path: str) -> dict:
 
 
 # ─── 核心：图片/PDF → 结构化交易 ────────────────────────
+def _extract_json(text: str) -> dict:
+    """从模型输出里抠出 JSON 对象。
+
+    容忍两件实测会遇到的事（2026-09-24）：
+      1. markdown 围栏包裹
+      2. JSON 后面还跟了一句解释（原实现直接 json.loads 会抛 Extra data 崩掉）
+    """
+    s = str(text or "").strip()
+    if s.startswith("```"):
+        s = s.strip("`")
+        if s.startswith("json"):
+            s = s[4:]
+    s = s.strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    i, j = s.find("{"), s.rfind("}")
+    if i >= 0 and j > i:
+        return json.loads(s[i:j + 1])
+    raise ValueError("模型输出里找不到 JSON 对象")
+
+
+def _pdf_text_fallback(local_text: str | None, image_path: str, why: str) -> dict | None:
+    """模型通道失败时的兜底：带文本层的 PDF 改用本机文本层解析。
+
+    起因（2026-09-24 实测）：本地模型档下把 PDF 当图片发给 Ollama，返回
+    `invalid image input`，整张数电发票读不出来。数电发票自带版式文本层，
+    本机直读即可，不该因为模型通道不支持 PDF 就整体失败。
+    只对带文本层的 PDF 生效，其它情况返回 None（保持原来的报错行为）。
+    """
+    if not local_text:
+        return None
+    out = parse_from_text_layer(local_text, image_path)
+    note = str(out.get("note") or "").strip()
+    out["note"] = (note + f"（模型通道失败，已回退本机文本层：{why[:80]}）").strip()
+    out["_fallback"] = "pdf_text_layer"
+    return out
+
+
 def recognize_receipt(image_path: str, local_only: bool = False) -> dict:
     """读图片或 PDF → 结构化交易 JSON。
 
@@ -345,7 +385,10 @@ def recognize_receipt(image_path: str, local_only: bool = False) -> dict:
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
             ]
         }],
-        "max_tokens": 2000
+        "max_tokens": 2000,
+        # 固定采样温度：票据识别要的是确定性，不是创造力。
+        # 实测（2026-09-24）同一张图两次跑出不同结果，就是没定这个值导致的。
+        "temperature": 0,
     }
     req = urllib.request.Request(
         f"{cfg['base_url']}/chat/completions",
@@ -358,13 +401,7 @@ def recognize_receipt(image_path: str, local_only: bool = False) -> dict:
         with urllib.request.urlopen(req, timeout=90) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         content = data["choices"][0]["message"]["content"]
-        # 提取 JSON（去掉可能的 markdown 包裹）
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.strip("`")
-            if content.startswith("json"):
-                content = content[4:]
-        result = json.loads(content)
+        result = _extract_json(content)
         result["_raw_image"] = image_path
         result["_model_tier"] = cfg["tier"]
         # 只有云端档数据才出本机；本地模型档不上传
@@ -373,9 +410,11 @@ def recognize_receipt(image_path: str, local_only: bool = False) -> dict:
         _apply_invoice_checks(result, local_text)
         return result
     except urllib.error.HTTPError as e:
-        return {"error": f"API HTTP {e.code}: {e.read().decode()[:200]}"}
+        detail = f"API HTTP {e.code}: {e.read().decode()[:200]}"
+        return _pdf_text_fallback(local_text, image_path, detail) or {"error": detail}
     except Exception as e:
-        return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+        detail = f"{type(e).__name__}: {str(e)[:200]}"
+        return _pdf_text_fallback(local_text, image_path, detail) or {"error": detail}
 
 
 # ─── MCP stdio 协议 ─────────────────────────────────────

@@ -59,6 +59,17 @@ def get(data_dir: str | Path, pid: str) -> dict | None:
     return None
 
 
+def update(data_dir: str | Path, pid: str, **fields) -> dict | None:
+    """就地更新一条草稿的附加字段（date / source / image 等导入来源信息）。"""
+    drafts = list_all(data_dir)
+    for d in drafts:
+        if d["id"] == pid:
+            d.update(fields)
+            _save(data_dir, drafts)
+            return d
+    return None
+
+
 def accept(data_dir: str | Path, pid: str, append_fn) -> dict | None:
     """确认入账：从草稿弹出并回调写账本。
 
