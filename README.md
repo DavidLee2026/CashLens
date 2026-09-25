@@ -69,10 +69,11 @@ pnpm install && pnpm dev
 # 打开终端提示的本地地址即可对话记账 / 查现金流
 
 # 2b) 一键启动（不想敲命令时用）
-#     Windows：双击仓库根目录的 启动-CashLens.bat
-#     macOS：  双击仓库根目录的 启动-CashLens.command
-#     两者都会自检依赖、首次自动安装前端依赖、同时拉起前端与后端，等就绪后打开工作台；
-#     检测到已有实例在跑时会直接复用，不重复启动。
+#     macOS：双击仓库根目录的 启动-CashLens.command
+#     它会自检依赖、首次自动安装前端依赖、同时拉起前端与后端，等就绪后打开工作台；
+#     端口已有实例时先校验那是不是本仓库这一份（看账本路径与 /api/categories 版本）：
+#     是本仓库的就复用，是别的副本就让路到 8002 起，避免「新版前端配旧副本后端」；
+#     Windows：暂不提供一键脚本（旧脚本因端口硬编码 8001、无副本校验已移除），按上面第 1、2 步启动。
 
 # 3) 网页版创意阐述页：直接用浏览器打开 docs/index.html
 
@@ -80,7 +81,7 @@ pnpm install && pnpm dev
 python3 scripts/batch_recognize.py samples/
 
 # 5) 测试
-python3 -m pytest tests/            # 后端单测（当前 139 个用例）
+python3 -m pytest tests/            # 后端单测（当前 152 个用例）
 node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 ```
 
