@@ -127,6 +127,7 @@ const STAGE_LABELS: [keyof IntakeStages, string][] = [
 /** 流式导入的进度事件（NDJSON 一行一个，对应后端 POST /api/intake/stream）。 */
 type IntakeEvent =
   | { stage: "start"; index: number; total: number; file: string; rel_path: string }
+  | { stage: "tick"; index: number; total: number; file: string; elapsed: number; note: string }
   | { stage: "file_done"; index: number; total: number; file: string; project_name: string;
       draft_count: number; identified_total_cents: number; stages?: IntakeStages; errors?: string[] }
   | { stage: "file_failed"; index: number; total: number; file: string; error: string }
@@ -664,6 +665,19 @@ export default function Workbench() {
             blocks = blocks.slice(0, ev.index - 1);
             blocks.push({ file: ev.file, done: false, stages: blank() });
             paint(`正在读文件（${ev.index}/${ev.total}）：${ev.file}`);
+          } else if (ev.stage === "tick") {
+            /* 心跳：后端还在跑这个文件（真机实测一张报销表要 239 秒）。
+               显示**真实已等秒数**与正在做的动作，不显示假百分比；
+               它同时让这条流的连接不会长时间静默而被掐断（否则只会看到 network error）。 */
+            const secs = ev.elapsed >= 60
+              ? `${Math.floor(ev.elapsed / 60)} 分 ${Math.round(ev.elapsed % 60)} 秒`
+              : `${Math.round(ev.elapsed)} 秒`;
+            blocks[ev.index - 1] = {
+              file: ev.file, done: false,
+              stages: { read: "读取中…", recognized: "—", processed: "—",
+                        how: `${ev.note}（已 ${secs}）` },
+            };
+            paint(`正在读文件（${ev.index}/${ev.total}）：${ev.file} · 已 ${secs}`);
           } else if (ev.stage === "file_done") {
             blocks[ev.index - 1] = { file: ev.file, done: true, stages: ev.stages ?? blank() };
             paint(ev.index < ev.total
@@ -815,7 +829,7 @@ export default function Workbench() {
             {dragActive && (
               <div className="drop-overlay" aria-hidden="true">
                 <b>松手即导入</b>
-                <span>图片 / PDF / Excel / CSV 都行；拖整个文件夹就按文件夹名建项目</span>
+                <span>图片 / PDF / Excel / CSV 都行；拖整个文件夹就按文件夹名建项目（拖进来不会弹浏览器的上传确认）</span>
               </div>
             )}
             {/* 头部（「钱的事，说给我听」+「N 笔 · 本地账本 · LLM 对话」）已按 David 要求去掉：
@@ -892,6 +906,11 @@ export default function Workbench() {
                     <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); dirRef.current?.click(); }}>
                       整个文件夹
                       <span className="am-sub">按文件夹名自动建项目，里面有多少张都收</span>
+                      {/* 浏览器对「上传整个目录」有强制确认框，页面关不掉（安全设置，
+                          页面不该能偷偷枚举你的目录）。所以如实说清，并给出免确认的另一条路。 */}
+                      <span className="am-sub">
+                        浏览器会问一次「上传此文件夹下的所有文件？」，点「上传」即可；不想多这一步就把文件夹直接拖进对话区
+                      </span>
                     </button>
                   </div>
                 )}
@@ -1077,20 +1096,23 @@ export default function Workbench() {
                 </button>
               </div>
               {creatingProj && (
-                <div className="proj-edit">
-                  <input
-                    value={newProjName}
-                    onChange={(e) => setNewProjName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") createProject();
-                      if (e.key === "Escape") setCreatingProj(false);
-                    }}
-                    placeholder="项目全名，如「919 昆明项目」"
-                    aria-label="新项目名称"
-                    autoFocus
-                  />
-                  <button className="btn-mini ok" onClick={createProject}>创建</button>
-                  <button className="btn-mini" onClick={() => setCreatingProj(false)}>取消</button>
+                /* 浮层：新建表单不占文档流，左栏高度不受影响（否则点开就变高） */
+                <div className="proj-pop new">
+                  <div className="proj-edit">
+                    <input
+                      value={newProjName}
+                      onChange={(e) => setNewProjName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") createProject();
+                        if (e.key === "Escape") setCreatingProj(false);
+                      }}
+                      placeholder="项目全名，如「919 昆明项目」"
+                      aria-label="新项目名称"
+                      autoFocus
+                    />
+                    <button className="btn-mini ok" onClick={createProject}>创建</button>
+                    <button className="btn-mini" onClick={() => setCreatingProj(false)}>取消</button>
+                  </div>
                 </div>
               )}
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
@@ -1098,7 +1120,7 @@ export default function Workbench() {
               ) : (
                 <>
                   {projView.projects.map((p) => (
-                    <div key={p.id}>
+                    <div key={p.id} className="proj-item">
                       <div className="ev">
                         <div>
                           <b>{p.name}</b>
@@ -1134,45 +1156,51 @@ export default function Workbench() {
                         </div>
                       </div>
                       {deletingId === p.id && (
-                        <div className="proj-del">
-                          <div className="pd-title">
-                            删除「{p.name}」？
-                            {p.count > 0 ? `它名下已有 ${p.count} 笔账单。` : "它名下还没有账单。"}
-                          </div>
-                          <div className="pd-opt">
-                            <button className="btn-mini" onClick={() => deleteProject(p.id, false, p.name)}>
-                              {p.count > 0 ? "只删项目" : "删除项目"}
-                            </button>
-                            <span>
-                              {p.count > 0
-                                ? `账本记录不动，这 ${p.count} 笔回到「未归项目」，数字不会消失。`
-                                : "账本里没有它的记录，删掉即可。"}
-                            </span>
-                          </div>
-                          {p.count > 0 && (
-                            <div className="pd-opt">
-                              <button className="btn-mini danger" onClick={() => deleteProject(p.id, true, p.name)}>
-                                连账单一起删
-                              </button>
-                              <span>这 {p.count} 笔同时作废，界面与统计都不再计入。</span>
+                        /* 浮层：删除选择块不占文档流（原先会把左栏顶高一大截） */
+                        <div className="proj-pop row">
+                          <div className="proj-del">
+                            <div className="pd-title">
+                              删除「{p.name}」？
+                              {p.count > 0 ? `它名下已有 ${p.count} 笔账单。` : "它名下还没有账单。"}
                             </div>
-                          )}
-                          <div className="pd-opt">
-                            <button className="btn-mini" onClick={() => setDeletingId("")}>取消</button>
+                            <div className="pd-opt">
+                              <button className="btn-mini" onClick={() => deleteProject(p.id, false, p.name)}>
+                                {p.count > 0 ? "只删项目" : "删除项目"}
+                              </button>
+                              <span>
+                                {p.count > 0
+                                  ? `账本记录不动，这 ${p.count} 笔回到「未归项目」，数字不会消失。`
+                                  : "账本里没有它的记录，删掉即可。"}
+                              </span>
+                            </div>
+                            {p.count > 0 && (
+                              <div className="pd-opt">
+                                <button className="btn-mini danger" onClick={() => deleteProject(p.id, true, p.name)}>
+                                  连账单一起删
+                                </button>
+                                <span>这 {p.count} 笔同时作废，界面与统计都不再计入。</span>
+                              </div>
+                            )}
+                            <div className="pd-opt">
+                              <button className="btn-mini" onClick={() => setDeletingId("")}>取消</button>
+                            </div>
                           </div>
                         </div>
                       )}
                       {renamingId === p.id && (
-                        <div className="proj-edit">
-                          <input
-                            value={renameText}
-                            onChange={(e) => setRenameText(e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && saveRename()}
-                            placeholder="这个项目的完整名称，如「919 昆明项目」"
-                            aria-label="项目完整名称"
-                          />
-                          <button className="btn-mini ok" onClick={saveRename}>保存</button>
-                          <button className="btn-mini" onClick={() => setRenamingId("")}>取消</button>
+                        /* 浮层：改名表单不占文档流，位置就贴着这一行 */
+                        <div className="proj-pop row">
+                          <div className="proj-edit">
+                            <input
+                              value={renameText}
+                              onChange={(e) => setRenameText(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && saveRename()}
+                              placeholder="这个项目的完整名称，如「919 昆明项目」"
+                              aria-label="项目完整名称"
+                            />
+                            <button className="btn-mini ok" onClick={saveRename}>保存</button>
+                            <button className="btn-mini" onClick={() => setRenamingId("")}>取消</button>
+                          </div>
                         </div>
                       )}
                     </div>

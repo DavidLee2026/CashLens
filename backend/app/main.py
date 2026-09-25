@@ -10,7 +10,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -622,6 +624,24 @@ def intake_upload(body: IntakeIn):
     return out
 
 
+# 心跳间隔：单个文件可能跑好几分钟（2026-09-25 真机实测：一张报销表 239 秒），
+# 期间一个字节都不发的话，浏览器或中间代理会按空闲超时把连接掐掉 —— 前端只会看到
+# 「导入失败：network error」，而后端其实还在正常跑。所以边等边推心跳。
+_INTAKE_TICK_SECONDS = 3
+
+
+def _tick_note(name: str) -> str:
+    """心跳里那句「现在在干什么」：只描述这个文件类型真实发生的动作，不编造百分比。"""
+    low = name.lower()
+    if low.endswith((".xlsx", ".xls", ".csv")):
+        return "报销表：逐行取值，并逐张核对表内嵌入图（这个类型最慢，请稍等）"
+    if low.endswith(".pdf"):
+        return "PDF：先在本机读文本层，读不到才发给模型"
+    if low.endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")):
+        return "图片：发给模型服务商识别"
+    return "正在识别这个文件"
+
+
 @app.post("/api/intake/stream")
 def intake_stream(body: IntakeIn):
     """与 `/api/intake` 同一套逻辑，但**逐行推送真实进度**（NDJSON，一行一个 JSON）。
@@ -629,6 +649,9 @@ def intake_stream(body: IntakeIn):
     为什么要有它：一次导入十几张票要跑几分钟。若只在最后回一句结果，用户全程干等，
     分不清是在跑还是卡住了。这里每处理一个文件推两行，前端立刻能看到：
     - `{"stage":"start"}`     —— 开始处理第 i 个（前端显示「正在读文件 i/n：xxx」）
+    - `{"stage":"tick"}`      —— 这个文件还在跑，附**真实已等秒数**与正在做的动作。
+      它的作用是让流别长时间静默：真机实测一张报销表要 239 秒，静默超过一定时间
+      会被浏览器 / 代理按空闲超时掐断，用户只看到「network error」。心跳只报真实信息。
     - `{"stage":"file_done"}` —— 这个文件已读完、草稿已生成（含金额与条数）
     - `{"stage":"file_failed"}` —— 单个文件失败，不中断整批，如实报出来
     - `{"stage":"all_done"}`  —— 按项目合并后的汇总（前端把它换成正式结果）
@@ -645,8 +668,29 @@ def intake_stream(body: IntakeIn):
             yield json.dumps({"stage": "start", "index": i, "total": total,
                               "file": f["name"], "rel_path": f["rel_path"]},
                              ensure_ascii=False) + "\n"
+            t0 = time.monotonic()
             try:
-                out = intake.ingest(DATA_DIR, [f], project_ref=body.project or None)
+                # 把耗时的 ingest 放进工作线程，主线程每几秒推一行心跳。
+                # 这样「进度」是真的（已等秒数），而不是预先算好的假百分比。
+                pool = ThreadPoolExecutor(max_workers=1)
+                try:
+                    fut = pool.submit(intake.ingest, DATA_DIR, [f],
+                                      project_ref=body.project or None)
+                    while not fut.done():
+                        time.sleep(_INTAKE_TICK_SECONDS)
+                        if fut.done():
+                            break
+                        yield json.dumps({
+                            "stage": "tick", "index": i, "total": total,
+                            "file": f["name"],
+                            "elapsed": round(time.monotonic() - t0, 1),
+                            "note": _tick_note(f["name"]),
+                        }, ensure_ascii=False) + "\n"
+                    out = fut.result()      # 异常在这里抛出，走下面的 file_failed，语义不变
+                finally:
+                    # wait=False：用户中途关掉页面时，别让这条已经断了的请求把线程拖住
+                    # （worker 会把当前这个文件跑完，不影响其他请求）
+                    pool.shutdown(wait=False)
                 bs = out.get("batches") or []
                 batches += bs
                 first = bs[0] if bs else {}

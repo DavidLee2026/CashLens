@@ -56,6 +56,8 @@ button{font-family:inherit}
 @media (max-width:980px){
   .grid{grid-template-columns:1fr}
   .convo,.side{grid-column:auto;grid-row:auto}
+  /* 单列堆叠时左栏不再对聊天区取齐，否则会多出一屏高的空白 */
+  .side{min-height:0}
 }
 
 /* 卡片 */
@@ -180,9 +182,13 @@ button{font-family:inherit}
    不再让每块各自成为一张独立卡片。 */
 /* 左栏不再自己滚动（去掉右边缘那条内部滚动条）：内容比窗口高时改由整页滚动，
    这样第 4 张卡片（最近事件）不会被藏起来，也不会同时出现两条滚动条。 */
-.side{display:flex;flex-direction:column;gap:0;padding:0}
+/* 左栏高度与对话区**对齐且恒定**：用 min-height（不是 height），所以内容多了也不会被
+   截断、不会出现内部滚动条（卡片不会被藏住），页面整体还能继续往下滚。
+   起因（David 2026-09-25）：左栏原先完全由内容撑高 —— 点「新建项目」就变高、
+   建完项目又比右栏矮，两列顶端一直在跳。 */
+.side{display:flex;flex-direction:column;gap:0;padding:0;min-height:calc(100vh - 118px)}
 .side .sect{padding:16px;background:transparent;border:none;border-top:1px solid var(--border);
-  border-radius:0;box-shadow:none}
+  border-radius:0;box-shadow:none;position:relative}
 .side .sect:first-child{border-top:none}
 .sect{padding:16px}
 .sect h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin-bottom:12px}
@@ -241,6 +247,15 @@ button{font-family:inherit}
 /* 左栏只有 ~250px 宽：按钮与说明并排会把说明挤成窄条，改成按钮在上、说明占满整行 */
 .pd-opt{display:flex;flex-direction:column;align-items:flex-start;gap:3px;
   font-size:11px;color:var(--text-2);line-height:1.5}
+/* 项目卡片里的三个编辑器（新建 / 改名 / 删除确认）一律做成**浮层**，不占文档流：
+   点开、取消、建完都不改变左栏高度，两列因此始终等高（配合上面的 min-height）。
+   浮层锚在按钮或所在项目行下方，带阴影浮在内容之上，不挤压下面的卡片。 */
+.proj-item{position:relative}
+.proj-pop{position:absolute;z-index:30;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 10px 26px rgba(10,37,64,.16);padding:12px}
+.proj-pop.new{top:48px;left:16px;right:16px}
+.proj-pop.row{top:calc(100% - 2px);left:0;right:0}
+.proj-pop .proj-edit,.proj-pop .proj-del{margin:0}
 .btn-mini.danger{background:var(--risk-bg);border-color:var(--risk);color:var(--risk)}
 .btn-mini.danger:hover{background:var(--risk);border-color:var(--risk);color:var(--white)}
 .footnote{font-size:11px;color:var(--text-3);text-align:center;padding:18px 0 8px}

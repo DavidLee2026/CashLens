@@ -5,7 +5,9 @@
 而 `_file_detail` 是 0 条草稿时唯一告诉用户「为什么没读到」的地方（信息透明度的落点）。
 """
 
+import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
@@ -130,3 +132,82 @@ def test_file_stages_fills_all_four_for_unsupported_file():
     assert "暂不支持这种文件类型" in st["how"]
     assert "unknown" not in " ".join(st.values())          # 内部值不甩给用户
     assert "已跳过" in st["how"] and "不影响其他文件" in st["how"]
+
+
+# ─── 心跳：慢文件期间不能让这条流长时间静默 ──────────────────────
+# 起因（2026-09-25 真机实测）：一张报销表跑了 239 秒、期间零字节输出，
+# 连接被按空闲超时掐断，用户只看到「导入失败：network error」，而后端其实还在正常跑。
+
+def _drain(resp):
+    """把流式响应的 NDJSON 逐行解出来（Starlette 会把同步生成器包成异步迭代器）。"""
+    import asyncio
+
+    async def go():
+        out = []
+        async for chunk in resp.body_iterator:
+            text = chunk.decode() if isinstance(chunk, bytes) else chunk
+            for line in text.splitlines():
+                if line.strip():
+                    out.append(json.loads(line))
+        return out
+
+    return asyncio.run(go())
+
+
+def test_stream_pushes_heartbeat_while_a_file_is_slow(monkeypatch):
+    """慢文件必须边跑边推心跳（带真实已等秒数），否则连接静默太久会被掐断。"""
+    import app.main as main
+
+    def slow_ingest(data_dir, files, project_ref=None):
+        time.sleep(0.08)
+        return {"batches": []}
+
+    monkeypatch.setattr(main.intake, "ingest", slow_ingest)
+    monkeypatch.setattr(main, "_INTAKE_TICK_SECONDS", 0.02)
+    body = main.IntakeIn(files=[main.IntakeFileIn(
+        name="云南报销.xlsx", rel_path="p/云南报销.xlsx", content_b64="")])
+
+    events = _drain(main.intake_stream(body))
+    stages = [e["stage"] for e in events]
+
+    assert stages[0] == "start" and stages[-1] == "all_done"
+    ticks = [e for e in events if e["stage"] == "tick"]
+    assert len(ticks) >= 2, f"心跳太少，流会长时间静默：{stages}"
+    assert all(e["index"] == 1 and e["file"] == "云南报销.xlsx" for e in ticks)
+    assert ticks[0]["elapsed"] >= 0 and ticks[-1]["elapsed"] >= ticks[0]["elapsed"]
+    assert "已等" not in ticks[0]["note"] and "报销表" in ticks[0]["note"]
+    # 心跳也不许泄露内部值（与四段反馈同一口径）
+    assert "unknown" not in " ".join(e["note"] for e in ticks)
+
+
+def test_stream_survives_every_file_failing(monkeypatch):
+    """单个文件炸掉不能把整批带崩，也不能让这条流半路断掉（要照常收到 all_done）。"""
+    import app.main as main
+
+    def boom(data_dir, files, project_ref=None):
+        raise ValueError("模型服务超时")
+
+    monkeypatch.setattr(main.intake, "ingest", boom)
+    monkeypatch.setattr(main, "_INTAKE_TICK_SECONDS", 0.02)
+    body = main.IntakeIn(files=[
+        main.IntakeFileIn(name="a.jpg", rel_path="p/a.jpg", content_b64=""),
+        main.IntakeFileIn(name="b.jpg", rel_path="p/b.jpg", content_b64=""),
+    ])
+
+    events = _drain(main.intake_stream(body))
+    failed = [e for e in events if e["stage"] == "file_failed"]
+    assert [e["index"] for e in failed] == [1, 2]
+    assert "模型服务超时" in failed[0]["error"]
+    assert events[-1]["stage"] == "all_done"          # 两个都失败，收尾照样发出来
+
+
+def test_tick_note_says_what_is_really_happening():
+    """心跳那句「在干什么」按文件类型说真话，且不甩内部值。"""
+    from app.main import _tick_note
+
+    assert "报销表" in _tick_note("云南报销.xlsx")
+    assert "报销表" in _tick_note("账单.CSV")          # 大小写不敏感
+    assert "PDF" in _tick_note("发票.pdf")
+    assert "图片" in _tick_note("微信图片_20260924123115.JPG")
+    fallback = _tick_note("说明.unknown")
+    assert "unknown" not in fallback and "正在识别" in fallback
