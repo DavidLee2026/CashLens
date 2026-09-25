@@ -42,6 +42,8 @@ node_modules/
 
 # ─── 本地运行产物 ───
 .logs/
+# 无头浏览器截图验证用的临时 Chrome 配置目录（29M，勿入库）
+.tmp-chrome/
 *.log
 *.db
 *.sqlite

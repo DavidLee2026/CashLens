@@ -21,6 +21,11 @@ from pathlib import Path
 
 from .spec import EVENT_TYPES, SCHEMA_VERSION
 
+# 作废记录（type=void）：不是财务事件，因此不放进 spec.EVENT_TYPES，
+# 也永远不经过 make_event（避免被当成收支参与计算）。它只干一件事：
+# 把 targets 里的事件标记为作废，load() 读的时候把它们滤掉。
+VOID_TYPE = "void"
+
 
 def _dedupe_key_of(event: dict) -> str:
     """去重键（项目 + 渠道 + 金额 + 日期 + 分类 + 对手方）。项目维度 v3 起计入。"""
@@ -119,16 +124,55 @@ class EventLedger:
                 return True
         return False
 
+    def append_void(self, targets, reason: str = "", project: str = "") -> dict:
+        """追加一条作废记录，把 targets 里的事件标记为作废。
+
+        「删项目连同数据」在事件溯源里的正确写法：**不重写历史**，而是再追加一条
+        「这些事件作废」的记录，由 load() 在读的时候滤掉。因此界面与统计的表现
+        与"删除"完全一致，而账本本身始终是追加式的：可审计、可回溯、误删可救。
+        """
+        ids = [str(t) for t in (targets or []) if str(t)]
+        if not ids:
+            return {"void_event_id": "", "voided": 0}
+        rec = {
+            "schema_version": SCHEMA_VERSION,
+            "event_id": uuid.uuid4().hex,
+            "recorded_at": datetime.now().isoformat(timespec="seconds"),
+            "type": VOID_TYPE,
+            "targets": ids,
+            "reason": str(reason or ""),
+            "project": str(project or ""),
+        }
+        with open(self.path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return {"void_event_id": rec["event_id"], "voided": len(ids)}
+
     def load(self) -> list[dict]:
-        """读全部事件（去重键优先保留先写者），按 ts 升序返回。"""
+        """读全部事件（去重键优先保留先写者），按 ts 升序返回。
+
+        作废记录自己不作为事件返回，但它 targets 里的事件会被滤掉 —— 全部下游
+        （状态、预测、归集、对话）都经过这里，所以作废对它们一致生效。
+        """
         if not self.path.exists():
             return []
-        events = []
-        seen = set()
+        raw = []
         for line in self.path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
-            ev = json.loads(line)
+            raw.append(json.loads(line))
+
+        voided = set()
+        for rec in raw:
+            if rec.get("type") == VOID_TYPE:
+                voided.update(str(t) for t in (rec.get("targets") or []))
+
+        events = []
+        seen = set()
+        for ev in raw:
+            if ev.get("type") == VOID_TYPE:
+                continue
+            if str(ev.get("event_id")) in voided:
+                continue
             key = ev.get("dedupe_key") or ev.get("event_id")
             if key in seen:
                 continue
