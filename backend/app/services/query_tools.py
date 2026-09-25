@@ -89,7 +89,7 @@ def cashflow_text(events: list[dict]) -> dict:
     if low < 0:
         gap = f"最坏情形 {_yuan(-low)} 缺口"
     if fc.get("insufficient"):
-        band = f"期末预计 {_yuan(med)}（数据不足，区间暂不可信——多记或导入几笔后自动变宽）"
+        band = f"当前已知净额 {_yuan(med)}（{fc.get('reason', '数据不足，暂不外推')}）"
     else:
         band = f"期末预计 {_yuan(med)}，区间 {_yuan(low)} ~ {_yuan(high)}（{gap}）"
     text = (
