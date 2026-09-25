@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string; project?: string; project_name?: string };
-type Msg = { role: "user" | "ai"; text: string; pending?: PendingDraft[] };
+/** 一个文件处理过程的四个阶段（顺序固定，见 STAGE_LABELS）。 */
+type IntakeStages = { read: string; recognized: string; processed: string; how: string };
+/** 对话里的一块进度：一个文件 + 它的四个阶段。 */
+type ProgressBlock = { file: string; done: boolean; stages: IntakeStages };
+type Msg = {
+  role: "user" | "ai"; text: string; pending?: PendingDraft[];
+  progress?: boolean; blocks?: ProgressBlock[];
+};
 type StateT = {
   label: string;
   financial_health: number;
@@ -112,10 +119,44 @@ type ModelsView = {
 const yuan = (c: number) =>
   `¥${(c / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** 处理过程的四个阶段：顺序与标签集中在这里，前端不再各处硬写。 */
+const STAGE_LABELS: [keyof IntakeStages, string][] = [
+  ["read", "读取"], ["recognized", "识别"], ["processed", "处理"], ["how", "方式"],
+];
+
+/** 流式导入的进度事件（NDJSON 一行一个，对应后端 POST /api/intake/stream）。 */
+type IntakeEvent =
+  | { stage: "start"; index: number; total: number; file: string; rel_path: string }
+  | { stage: "file_done"; index: number; total: number; file: string; project_name: string;
+      draft_count: number; identified_total_cents: number; stages?: IntakeStages; errors?: string[] }
+  | { stage: "file_failed"; index: number; total: number; file: string; error: string }
+  | { stage: "all_done"; batches: IntakeBatch[] };
+
+/** 导入结果汇总：一个项目一段（沿用原有文案与口径，流式和非流式共用）。 */
+function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[] {
+  const lines: string[] = [];
+  for (const b of batches) {
+    if (b.draft_count > 0) {
+      lines.push(`【${b.project_name}】生成 ${b.draft_count} 条待确认草稿，合计 ${yuan(b.identified_total_cents)}`);
+    }
+    if (b.declared_total_cents) {
+      const diff = b.reconcile_diff_cents ?? 0;
+      lines.push(`  表内总计 ${yuan(b.declared_total_cents)}，差额 ${yuan(diff)}${diff === 0 ? "（对得上）" : "（有没认出来的，请核对）"}`);
+    }
+    if (b.reconcile) {
+      lines.push(`  双源核对：${b.reconcile.matched}/${b.reconcile.checked} 张与表内金额一致`);
+    }
+    if (b.project_hint) lines.push(`  ${b.project_hint}`);
+    // 流式导入时错误已经逐文件内联报过（见 uploadFiles），这里别再重复一遍
+    if (includeErrors) for (const e of b.errors) lines.push(`  ⚠️ ${e.file ?? ""}：${e.error}`);
+  }
+  return lines;
+}
+
 const CHANNEL_CN: Record<string, string> = { wechat: "微信", alipay: "支付宝", cash: "现金", bank: "银行卡", manual: "手动", voice: "语音", receipt: "票据" };
 const LABEL_CN: Record<string, string> = {
   unknown: "现金流不明",
-  learning: "学习中",
+  learning: "数据积累中", // 原为「学习中」：放顶栏时看不明白，语义是引擎还在积累你的经营节奏
   fragile: "现金流脆弱",
   review_due: "需复查",
   stable: "稳健",
@@ -182,7 +223,6 @@ export default function Workbench() {
   const [fc, setFc] = useState<Fc | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [apiOk, setApiOk] = useState(true);
-  const [llmOn, setLlmOn] = useState(false);
   const [models, setModels] = useState<ModelsView | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
@@ -197,6 +237,10 @@ export default function Workbench() {
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
   const [projMsg, setProjMsg] = useState("");
+  // 删除项目：点 × 先出选择（只删项目 / 连同账单一起删），不直接删
+  const [deletingId, setDeletingId] = useState("");
+  // 关于弹窗：版本 / 产品 / 开发者 / 联系方式（底部灰色小按钮打开）
+  const [aboutOpen, setAboutOpen] = useState(false);
   // 新建项目：内联表单，成功后刷新左侧项目面板
   const [creatingProj, setCreatingProj] = useState(false);
   const [newProjName, setNewProjName] = useState("");
@@ -213,10 +257,13 @@ export default function Workbench() {
   const dirRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   async function refresh() {
     try {
-      const [s, f, e, c, m] = await Promise.all([
+      // 第 4 个（capabilities）保留为「后端还在吗」的探活调用；LLM 可不可用由下方模型按钮体现，
+      // 不再单独显示（原来顶栏那行「N 笔 · 本地账本 · LLM 对话」已被 David 要求去掉）。
+      const [s, f, e, , m] = await Promise.all([
         j<{ state: StateT }>("/api/state"),
         j<Fc>("/api/forecast?horizon_days=30"),
         j<{ events: Ev[] }>("/api/events?limit=20"),
@@ -226,7 +273,6 @@ export default function Workbench() {
       setState(s.state);
       setFc(f);
       setEvents(e.events);
-      setLlmOn(!!c.llm);
       setModels(m);
       setApiOk(true);
     } catch {
@@ -255,7 +301,6 @@ export default function Workbench() {
         body: JSON.stringify({ tier }),
       });
       setModels(next);
-      setLlmOn(!!next.active.usable);
       const label = next.tiers.find((t) => t.id === tier)?.label ?? tier;
       setModelMsg(`已切到 ${label}`);
       setPickOpen(false);
@@ -287,7 +332,6 @@ export default function Workbench() {
         body: JSON.stringify({ tier: "local", preset_id: presetId }),
       });
       setModels(next);
-      setLlmOn(!!next.active.usable);
       const preset = next.local_presets.find((p) => p.id === presetId);
       setModelMsg(
         next.active.usable
@@ -325,7 +369,6 @@ export default function Workbench() {
         }),
       });
       setModels(next);
-      setLlmOn(!!next.active.usable);
       setModelMsg("已启用自定义本地端点");
       setCustomEditing(false);
       setPickOpen(false);
@@ -451,6 +494,24 @@ export default function Workbench() {
     }
   }
 
+  /** 删除项目：两种口径由用户自己选（只删项目 / 连同账单一起删）。
+   *  账本是追加式的，所以「一起删」在后端是追加一条作废记录，不是重写历史。 */
+  async function deleteProject(id: string, withData: boolean, name: string) {
+    try {
+      await j<{ ok: boolean; voided_count: number; bill_count: number }>(
+        `/api/projects/${encodeURIComponent(id)}?with_data=${withData ? "true" : "false"}`,
+        { method: "DELETE" },
+      );
+      setProjMsg(withData
+        ? `「${name}」与它名下的账单已一起删除。`
+        : `「${name}」已删除；它名下的账单还在账本里，回到「未归项目」。`);
+      setDeletingId("");
+      refresh();
+    } catch {
+      setProjMsg("删除失败：请确认后端在运行。");
+    }
+  }
+
   /** 保存用户名：只写本地存储；清空后保存即视为退出登录。 */
   function saveUser() {
     const name = nameText.trim();
@@ -549,49 +610,118 @@ export default function Workbench() {
   }
 
   /** 导入：上传 → 把摘要写进对话流 → 刷新面板。 */
+  /** 拖拽 / 选择文件后的导入。走流式端点，**逐文件把处理过程按四个阶段写进对话**。
+   *  起因（David 2026-09-25）：一次导十几张票要跑几分钟，只在最后回一句结果，
+   *  用户分不清是在跑还是卡住；而且结果堆成一坨，看不出每一步做了什么。
+   *  进度全部来自后端真实处理结果，不做假进度条。 */
   async function uploadFiles(items: FileItem[]) {
     if (!items.length || intakeBusy) return;
     setIntakeBusy(true);
     setDragActive(false);
     setMsgs((m) => [...m, { role: "user", text: `（导入 ${items.length} 个文件）` }]);
+
+    let blocks: ProgressBlock[] = [];
+    const blank = (): IntakeStages => ({ read: "读取中…", recognized: "—", processed: "—", how: "—" });
+
+    /** 原地重画进度气泡：文件块 + 一行当前状态，不刷屏。 */
+    const paint = (live: string) => {
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        const msg: Msg = { role: "ai", text: live, blocks: [...blocks], progress: true };
+        return last && last.progress ? [...m.slice(0, -1), msg] : [...m, msg];
+      });
+    };
+
     try {
+      paint(`正在接收这 ${items.length} 个文件（本机读取，原文不上传）…`);
       const files = await Promise.all(items.map(async (it) => ({
         name: it.name,
         rel_path: it.rel_path,
         content_b64: await fileToB64(it.file),
       })));
-      const r = await j<IntakeResult>("/api/intake", {
+
+      const res = await fetch("/api/intake/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ files }),
       });
-      const lines: string[] = [];
-      for (const b of r.batches) {
-        lines.push(`【${b.project_name}】生成 ${b.draft_count} 条待确认草稿，合计 ${yuan(b.identified_total_cents)}`);
-        if (b.declared_total_cents) {
-          const diff = b.reconcile_diff_cents ?? 0;
-          lines.push(`  表内总计 ${yuan(b.declared_total_cents)}，差额 ${yuan(diff)}${diff === 0 ? "（对得上）" : "（有没认出来的，请核对）"}`);
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      let summary = "";
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done: streamEnd } = await reader.read();
+        if (streamEnd) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n");
+        buf = parts.pop() ?? "";
+        for (const raw of parts) {
+          if (!raw.trim()) continue;
+          const ev = JSON.parse(raw) as IntakeEvent;
+          if (ev.stage === "start") {
+            blocks = blocks.slice(0, ev.index - 1);
+            blocks.push({ file: ev.file, done: false, stages: blank() });
+            paint(`正在读文件（${ev.index}/${ev.total}）：${ev.file}`);
+          } else if (ev.stage === "file_done") {
+            blocks[ev.index - 1] = { file: ev.file, done: true, stages: ev.stages ?? blank() };
+            paint(ev.index < ev.total
+              ? `正在读文件（${ev.index + 1}/${ev.total}）…`
+              : "正在收尾：把草稿归到项目里…");
+          } else if (ev.stage === "file_failed") {
+            blocks[ev.index - 1] = {
+              file: ev.file, done: true,
+              stages: { read: "—", recognized: "—", processed: "未生成草稿",
+                        how: `${ev.error}——已跳过，不影响其他文件` },
+            };
+            paint("继续处理剩下的文件…");
+          } else if (ev.stage === "all_done") {
+            summary = summarizeIntake(ev.batches ?? [], false).join("\n");
+          }
         }
-        if (b.reconcile) {
-          lines.push(`  双源核对：${b.reconcile.matched}/${b.reconcile.checked} 张与表内金额一致`);
-        }
-        if (b.project_hint) lines.push(`  ${b.project_hint}`);
-        for (const e of b.errors) lines.push(`  ⚠️ ${e.file ?? ""}：${e.error}`);
       }
-      setMsgs((m) => [...m, { role: "ai", text: lines.join("\n") || "没有可导入的内容。" }]);
+
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        const msg: Msg = { role: "ai", text: summary || "没有可导入的内容。", blocks: [...blocks] };
+        return last && last.progress ? [...m.slice(0, -1), msg] : [...m, msg];
+      });
       refresh();
     } catch (err) {
-      setMsgs((m) => [...m, { role: "ai", text: `导入失败：${err instanceof Error ? err.message : String(err)}` }]);
+      const text = `导入失败：${err instanceof Error ? err.message : String(err)}`;
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        const msg: Msg = { role: "ai", text, blocks: [...blocks] };
+        return last && last.progress ? [...m.slice(0, -1), msg] : [...m, msg];
+      });
     } finally {
       setIntakeBusy(false);
     }
   }
+
+  /** 输入框随内容长高：回车换行之后能看出是多行，最高约 5 行，再高就自己滚。 */
+  function autoGrow(el: HTMLTextAreaElement) {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }
+
+  /** 关于弹窗开着时按 Esc 关闭。 */
+  useEffect(() => {
+    if (!aboutOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAboutOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [aboutOpen]);
 
   async function send() {
     const t = text.trim();
     if (!t || busy) return;
     setMsgs((m) => [...m, { role: "user", text: t }]);
     setText("");
+    if (inputRef.current) inputRef.current.style.height = "auto"; // 发送后收回一行高
     setBusy(true);
     try {
       const r = await j<ChatReply>("/api/chat", {
@@ -626,13 +756,18 @@ export default function Workbench() {
                 <line x1="16.5" y1="16.5" x2="21" y2="21" />
               </svg>
             </span>
-            CashLens <span className="brand-sub">本地工作台 · 真数据</span>
+            CashLens <span className="brand-sub">本地工作台</span>
           </div>
           <div className="topbar-right">
-            <span className={`tag ${state ? `t-${state.label}` : "t-unknown"}`}>
-              <span className="dot" />
-              {state ? LABEL_CN[state.label] ?? state.label : apiOk ? "载入中…" : "后端未连接"}
-            </span>
+            {/* 状态标签（「学习中」那个）已按 David 要求从右上角撤掉：孤零零一个词看不明白。
+                同样的信息移到左栏「财务状态」卡片里，那里有上下文。
+                顶栏只在后端真连不上时提示一句 —— 线上出问题时这是第一线索，不能一并抹掉。 */}
+            {!apiOk && (
+              <span className="tag t-unknown">
+                <span className="dot" />
+                后端未连接
+              </span>
+            )}
             {loginOpen ? (
               <span className="login-edit">
                 <input
@@ -683,18 +818,29 @@ export default function Workbench() {
                 <span>图片 / PDF / Excel / CSV 都行；拖整个文件夹就按文件夹名建项目</span>
               </div>
             )}
-            <div className="convo-head">
-              <span className="t">钱的事，说给我听</span>
-              <div className="head-right">
-                <span className="muted">
-                  {state ? `${state.events_count} 笔 · 本地账本 · ` : ""}
-                  {llmOn ? "LLM 对话" : "规则层"}
-                </span>
-              </div>
-            </div>
+            {/* 头部（「钱的事，说给我听」+「N 笔 · 本地账本 · LLM 对话」）已按 David 要求去掉：
+                那行元信息与底部模型按钮重复，去掉后对话区顶部多出一整块可用高度。 */}
             <div className="log" ref={logRef}>
               {msgs.map((m, i) => (
-                <div key={i} className={`b ${m.role}`}>
+                <div key={i} className={`b ${m.role}${m.progress ? " progress" : ""}`}>
+                  {m.blocks && m.blocks.length > 0 && (
+                    <div className="pb-list">
+                      {m.blocks.map((b, j) => (
+                        <div className="pb" key={j}>
+                          <div className="pb-file">
+                            <span className="pb-icon" aria-hidden="true">{b.done ? "📄" : "⏳"}</span>
+                            {b.file}
+                          </div>
+                          {STAGE_LABELS.map(([key, label]) => (
+                            <div className="pb-row" key={key}>
+                              <span className="pb-k">{label}</span>
+                              <span className="pb-v">{b.stages[key] || "—"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {m.text}
                   {m.pending && m.pending.length > 0 && (
                     <div className="acts">
@@ -750,12 +896,24 @@ export default function Workbench() {
                   </div>
                 )}
               </div>
-              <input
+              <textarea
+                ref={inputRef}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && send()}
-                placeholder='记账或问现金流，如「打车花了 28」「我下个月现金流怎么样」'
-                aria-label="输入一句话"
+                rows={1}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  autoGrow(e.target);
+                }}
+                onKeyDown={(e) => {
+                  // 回车 = 换行（原先是回车直接发送，话没写完就被发出去了）。
+                  // 发送走右下角「发送」按钮，或用 Ctrl / Cmd + 回车。
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                placeholder='记账或问现金流，如「打车花了 28」（回车换行，Ctrl / Cmd + 回车发送）'
+                aria-label="输入一句话，回车换行，Ctrl 加回车发送"
                 disabled={!apiOk}
               />
               <div className="modelrow">
@@ -949,17 +1107,61 @@ export default function Workbench() {
                           </span>
                           {!p.named && <span className="m">默认名，建议改成这个项目的完整名称</span>}
                         </div>
-                        <button
-                          className="btn-mini"
-                          onClick={() => {
-                            setRenamingId(p.id);
-                            setRenameText(p.name);
-                            setProjMsg("");
-                          }}
-                        >
-                          改名
-                        </button>
+                        <div className="ev-acts">
+                          <button
+                            className="btn-mini"
+                            onClick={() => {
+                              setRenamingId(p.id);
+                              setRenameText(p.name);
+                              setProjMsg("");
+                            }}
+                          >
+                            改名
+                          </button>
+                          <button
+                            className="btn-x"
+                            title="删除项目"
+                            aria-label={`删除项目「${p.name}」`}
+                            aria-expanded={deletingId === p.id}
+                            onClick={() => {
+                              setDeletingId(deletingId === p.id ? "" : p.id);
+                              setRenamingId("");
+                              setProjMsg("");
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
                       </div>
+                      {deletingId === p.id && (
+                        <div className="proj-del">
+                          <div className="pd-title">
+                            删除「{p.name}」？
+                            {p.count > 0 ? `它名下已有 ${p.count} 笔账单。` : "它名下还没有账单。"}
+                          </div>
+                          <div className="pd-opt">
+                            <button className="btn-mini" onClick={() => deleteProject(p.id, false, p.name)}>
+                              {p.count > 0 ? "只删项目" : "删除项目"}
+                            </button>
+                            <span>
+                              {p.count > 0
+                                ? `账本记录不动，这 ${p.count} 笔回到「未归项目」，数字不会消失。`
+                                : "账本里没有它的记录，删掉即可。"}
+                            </span>
+                          </div>
+                          {p.count > 0 && (
+                            <div className="pd-opt">
+                              <button className="btn-mini danger" onClick={() => deleteProject(p.id, true, p.name)}>
+                                连账单一起删
+                              </button>
+                              <span>这 {p.count} 笔同时作废，界面与统计都不再计入。</span>
+                            </div>
+                          )}
+                          <div className="pd-opt">
+                            <button className="btn-mini" onClick={() => setDeletingId("")}>取消</button>
+                          </div>
+                        </div>
+                      )}
                       {renamingId === p.id && (
                         <div className="proj-edit">
                           <input
@@ -993,7 +1195,14 @@ export default function Workbench() {
 
             <section className="sect">
               <div className="sect-head">
-                <h3>财务状态（状态引擎 · 真）</h3>
+                <h3>财务状态（状态引擎）</h3>
+                <span
+                  className={`tag ${state ? `t-${state.label}` : "t-unknown"}`}
+                  title="状态引擎按证据强度算出来的当前状态标签；可信度低时会如实说「现金流不明」"
+                >
+                  <span className="dot" />
+                  {state ? LABEL_CN[state.label] ?? state.label : apiOk ? "载入中…" : "后端未连接"}
+                </span>
               </div>
               <div className="kpi">
                 <div className="cell">
@@ -1094,8 +1303,57 @@ export default function Workbench() {
             </section>
           </aside>
         </div>
-        <p className="footnote">CashLens · 本地优先 · 数据留在磁盘 · 证据驱动（R38 纪律：此处每个数字都来自真实计算）</p>
+        <p className="footnote">
+          CashLens · 本地优先 · 数据留在磁盘 · 证据驱动（R38 纪律：此处每个数字都来自真实计算）
+          <button className="link-about" onClick={() => setAboutOpen(true)}>关于</button>
+        </p>
       </div>
+
+      {aboutOpen && (
+        <div
+          className="modal-mask"
+          role="dialog"
+          aria-modal="true"
+          aria-label="关于 CashLens"
+          onClick={() => setAboutOpen(false)}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <b>关于 CashLens</b>
+              <button className="btn-x" title="关闭" aria-label="关闭" onClick={() => setAboutOpen(false)}>
+                ×
+              </button>
+            </div>
+            <dl className="about-list">
+              <div>
+                <dt>版本</dt>
+                <dd>0.1.0 · 原型 / 早期验证阶段</dd>
+              </div>
+              <div>
+                <dt>产品</dt>
+                <dd>经营现金流可视化与决策辅助工具。一个人就是一家公司——让经营现金流看得清、撑得住。</dd>
+              </div>
+              <div>
+                <dt>能做什么</dt>
+                <dd>票据与账单导入（图片 / PDF / Excel 报销表 / CSV）、财务状态引擎、现金流区间预测；接单报价决策开发中。</dd>
+              </div>
+              <div>
+                <dt>开发者</dt>
+                <dd>David · 个人开发者</dd>
+              </div>
+              <div>
+                <dt>联系方式</dt>
+                <dd>davidlee_2026@sina.com</dd>
+              </div>
+              <div>
+                <dt>数据</dt>
+                <dd>本地优先：账本与预估存在本机 data/ 目录，默认不上云；识别结果一律先经你确认才入账。</dd>
+              </div>
+            </dl>
+            <p className="about-note">只做事实陈述与依据呈现，不构成记账、税务或投资意见。</p>
+          </div>
+        </div>
+      )}
     </>
   );
 }

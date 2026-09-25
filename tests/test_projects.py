@@ -273,3 +273,132 @@ def test_summary_backfills_missing_project_row(tmp_path):
     out = projects.summary(tmp_path, book.load())
     assert out["total"]["expense_cents"] == 1500
     assert projects.get(tmp_path, "project_z") is not None
+
+
+# ─── 删除项目（2026-09-25：× 按钮的两种口径）────────────────
+
+def test_delete_project_keeps_ledger_and_falls_back_to_unassigned(tmp_path):
+    """只删项目：账本一字不动，账单回落到「未归项目」，数字不消失。"""
+    a = projects.create(tmp_path, "919 昆明项目")
+    b = projects.create(tmp_path, "另一个项目")
+    book = _book(tmp_path)
+    book.append(_ev(datetime(2026, 9, 19), "expense", 1000, project=a["id"]), strict_dedupe=True)
+    book.append(_ev(datetime(2026, 9, 20), "expense", 2000, project=b["id"]), strict_dedupe=True)
+    before = book.path.read_bytes()
+
+    row = projects.mark_deleted(tmp_path, a["id"])
+    assert row["deleted"] is True
+    # 账本文件逐字节未变（账本不可变是产品红线）
+    assert book.path.read_bytes() == before
+
+    listing = projects.list_projects(tmp_path, book.load())
+    assert [p["id"] for p in listing["projects"]] == [b["id"]]     # 已删项目不再列出
+    assert listing["unassigned"]["expense_cents"] == 1000          # 但钱回到未归项目
+    assert listing["unassigned"]["count"] == 1
+    # 总额守恒：删项目不该让任何一笔钱从数字里消失
+    assert listing["unassigned"]["expense_cents"] + listing["projects"][0]["expense_cents"] == 3000
+
+
+def test_deleted_project_not_reused_for_new_entries(tmp_path):
+    """已删项目不能再被解析到，否则新账会记进一个已经删掉的项目。"""
+    a = projects.create(tmp_path, "临时项目")
+    projects.mark_deleted(tmp_path, a["id"])
+    assert projects.resolve(tmp_path, a["id"]) is None
+    assert projects.resolve(tmp_path, "临时项目") is None
+    fresh = projects.ensure_default(tmp_path)
+    # 新项目必须是一个「没被删过」的行，且 id 不复用（复用 id 会让账本归属含混）
+    assert fresh["id"] != a["id"]
+    assert not projects.is_deleted(projects.get(tmp_path, fresh["id"]))
+    assert projects.resolve(tmp_path, fresh["id"]) == fresh["id"]
+
+
+def test_purge_project_appends_void_and_hides_events(tmp_path):
+    """连数据一起删：追加作废记录（不重写历史），事件从此不进任何统计。"""
+    a = projects.create(tmp_path, "919 昆明项目")
+    b = projects.create(tmp_path, "另一个项目")
+    book = _book(tmp_path)
+    book.append(_ev(datetime(2026, 9, 19), "expense", 1000, project=a["id"]), strict_dedupe=True)
+    book.append(_ev(datetime(2026, 9, 20), "expense", 2000, project=b["id"]), strict_dedupe=True)
+    lines_before = len(book.path.read_text(encoding="utf-8").strip().splitlines())
+
+    ids = projects.event_ids_of(book.load(), a["id"])
+    assert len(ids) == 1
+    voided = book.append_void(ids, reason="删除项目时一并作废", project=a["id"])["voided"]
+    assert voided == 1
+    projects.mark_deleted(tmp_path, a["id"], purged_count=voided, with_data=True)
+
+    # 账本是追加的：只多了一行作废记录，历史事件仍在文件里（可审计、误删可救）
+    lines_after = book.path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines_after) == lines_before + 1
+    assert "作废" in lines_after[-1]
+
+    events = book.load()
+    assert [e["project"] for e in events] == [b["id"]]              # 被作废的事件不再返回
+    assert projects.event_ids_of(events, a["id"]) == []             # 该项目的账单已清空
+    listing = projects.list_projects(tmp_path, events)
+    assert listing["unassigned"]["expense_cents"] == 0              # 也不落到未归项目
+    assert listing["unassigned"]["count"] == 0
+    assert projects.get(tmp_path, a["id"])["purged"] is True
+    assert projects.get(tmp_path, a["id"])["purged_count"] == 1
+
+
+def test_void_record_never_becomes_a_financial_event(tmp_path):
+    """作废记录不是收支事件：不能被算进状态，也不能经 make_event 造出来。"""
+    from app.services.state_engine.ledger import VOID_TYPE
+    from app.services.state_engine.spec import EVENT_TYPES
+
+    assert VOID_TYPE not in EVENT_TYPES
+    book = _book(tmp_path)
+    book.append_void(["nope"], reason="空转测试", project="project_a")
+    assert book.load() == []          # 没有命中任何事件，也不会多出一条事件
+
+
+def test_purge_must_rebuild_sqlite_projection(tmp_path):
+    """连数据一起删时，SQLite 投影也必须一起清。
+
+    踩坑点：投影只在 MODEL_VERSION 变化时才重建，而「作废」不换版本号 ——
+    所以 `DELETE /api/projects/{id}?with_data=true` 里必须显式 rebuild 一次，
+    否则 assumptions 表会留着已被作废的事件（状态计算用内存事件所以看不出来）。
+    这条测试覆盖与该端点完全相同的三步：追加作废 → 重建投影 → 复算。
+    """
+    from app.services.state_engine import run_state
+    from app.services.state_engine.ledger import EventLedger
+    from app.services.state_engine.store import Projection
+
+    a = projects.create(tmp_path, "带假设的项目")
+    ledger_path = tmp_path / "finance_events.jsonl"
+    db_path = tmp_path / "proj.db"
+    book = EventLedger(ledger_path)
+    book.append(_ev(datetime(2026, 9, 19), "expense", 1000, project=a["id"]),
+                strict_dedupe=True)
+    book.append(make_event(
+        ts=datetime(2026, 9, 20), event_type="assumption", amount_cents=0,
+        evidence_kind="self_report", project=a["id"], confirmed=True,
+        extra={"assumption": {"subject": "回款", "expected": "3 天"}}),
+        strict_dedupe=True)
+
+    assert len(run_state(ledger_path, db_path)["assumptions"]) == 1
+
+    ids = projects.event_ids_of(book.load(), a["id"])
+    assert len(ids) == 2
+    book.append_void(ids, reason="删除项目时一并作废", project=a["id"])
+    proj = Projection(db_path)                      # ← 端点里的那一步，不能省
+    proj.rebuild(EventLedger(ledger_path).load())
+    proj.close()
+
+    after = run_state(ledger_path, db_path)
+    assert after["assumptions"] == []               # 投影里不再残留
+    assert after["events"] == []                    # 事件也不可见了
+
+    # 反证：投影不会自己跟着账本更新 —— 追加一条新的 assumption 事件后，
+    # needs_rebuild() 仍为 False，投影里还是 0 条（账本已有 1 条）。
+    # 这正是"作废之后必须显式 rebuild"的原因：投影只看模型版本，不看账本内容。
+    book.append(make_event(
+        ts=datetime(2026, 9, 21), event_type="assumption", amount_cents=0,
+        evidence_kind="self_report", project="project_z", confirmed=True,
+        extra={"assumption": {"subject": "回款", "expected": "5 天"}}),
+        strict_dedupe=True)
+    assert len(projects.event_ids_of(book.load(), "project_z")) == 1   # 账本里有
+    stale = run_state(ledger_path, db_path)
+    assert stale["rebuilt"] is False
+    assert stale["assumptions"] == []                                  # 投影里没有 → 是缓存，不是实时视图

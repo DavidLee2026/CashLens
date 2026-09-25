@@ -15,13 +15,14 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .services import (categories, intake, invoice_tax, llm_skill, model_config,
                        parser_rule, pending, projects, query_tools, session_mem,
                        timesheet)
-from .services.state_engine import EventLedger, calc, make_event, run_state
+from .services.state_engine import EventLedger, Projection, calc, make_event, run_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.environ.get("CASH_DATA_DIR", str(REPO_ROOT / "data")))
@@ -384,6 +385,51 @@ def projects_upsert(body: ProjectIn):
     return {"ok": True, "action": "created", "project": projects.create(DATA_DIR, body.name)}
 
 
+@app.delete("/api/projects/{pid}")
+def projects_delete(pid: str, with_data: bool = False):
+    """删除项目。两种口径由用户在界面上自己选：
+
+    - `with_data=false`（只删项目）：映射表标记删除，**账本一字不动**；
+      该项目名下的账单在视图里回落到「未归项目」，数字不会凭空消失。
+    - `with_data=true`（项目与账单一起删）：向账本**追加一条作废记录**，被作废的
+      事件从此不再参与任何统计。**不重写历史文件**，守住账本追加式不可变这条红线，
+      因此误删仍可从账本里查回。
+
+    已删除的项目不再出现在清单里，也不再参与入账归属（避免新账记进已删项目）。
+    """
+    target = projects.resolve(DATA_DIR, pid)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
+    row = projects.get(DATA_DIR, target) or {}
+    label = str(row.get("name") or target)
+
+    ids = projects.event_ids_of(_events(), target)
+    voided = 0
+    if with_data:
+        voided = EventLedger(LEDGER_PATH).append_void(
+            ids, reason=f"删除项目「{label}」时一并作废", project=target)["voided"]
+        # SQLite 投影是按 MODEL_VERSION 缓存的，作废不改变模型版本 —— 必须显式重建，
+        # 否则投影里的旧行（assumptions/transactions）还会留着已被作废的事件。
+        proj = Projection(DB_PATH)
+        proj.rebuild(EventLedger(LEDGER_PATH).load())
+        proj.close()
+
+    out = projects.mark_deleted(DATA_DIR, target, purged_count=voided, with_data=with_data)
+    if out is None:
+        raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
+    return {
+        "ok": True,
+        "action": "purged" if with_data else "deleted",
+        "project": out,
+        "bill_count": len(ids),
+        "voided_count": voided,
+        "note": (f"「{label}」与它名下的 {voided} 笔账单已一起删除。"
+                 if with_data else
+                 f"「{label}」已删除；它名下的 {len(ids)} 笔账单仍在账本里，"
+                 f"在项目面板里回落到「未归项目」。"),
+    }
+
+
 @app.get("/api/projects/summary")
 def projects_summary(project: str | None = None):
     """按项目归集账本：收入 / 支出 / 净额 / 分类分解。
@@ -426,20 +472,13 @@ _INTAKE_MAX_FILE_BYTES = 30 * 1024 * 1024
 _INTAKE_MAX_FILES = 80
 
 
-@app.post("/api/intake")
-def intake_upload(body: IntakeIn):
-    """把用户拖进来的东西变成待确认草稿。
-
-    归属规则：显式指定 project > 文件夹名建项目 > 当前默认项目。
-    一律只生成草稿，需人工确认后才入账（合规红线：确认环节不得为体验取消）。
-    报销表以表内数字为准，嵌入图识别结果只用于核对。
-    """
+def _intake_decode(body: IntakeIn) -> list[dict]:
+    """校验并解出上传的文件。`/api/intake` 与 `/api/intake/stream` 共用，保证两端口径一致。"""
     if not body.files:
         raise HTTPException(status_code=400, detail="没有文件：请拖入图片、PDF、Excel 或 CSV")
     if len(body.files) > _INTAKE_MAX_FILES:
         raise HTTPException(status_code=413,
                             detail=f"一次最多 {_INTAKE_MAX_FILES} 个文件，本次 {len(body.files)} 个")
-
     files: list[dict] = []
     for f in body.files:
         try:
@@ -451,6 +490,125 @@ def intake_upload(body: IntakeIn):
                                 detail=f"文件过大（上限 30MB）：{f.name}")
         files.append({"name": Path(f.name).name, "rel_path": f.rel_path or f.name,
                       "content": blob})
+    return files
+
+
+def _first_ok(items: list[dict]) -> dict:
+    """取第一条成功的结果（失败条目只用于说明原因）。"""
+    for it in items or []:
+        if it.get("ok") is not False:
+            return it
+    return {}
+
+
+def _file_stages(name: str, items: list[dict], errors: list[dict],
+                 draft_count: int, total_cents: int) -> dict:
+    """把一个文件的处理过程拆成四段：读取了什么 / 识别了什么 / 处理了什么 / 怎么处理的。
+
+    为什么拆四段（David 2026-09-25）：把结果堆成一坨，用户看不出每一步做了什么，
+    更看不出「没识别出来」是卡在哪一段。每段只陈述事实；金额交给前端格式化。
+    """
+    got = _first_ok(items)
+    kind = got.get("kind") or ("image" if "amount_cents" in got else "")
+    ext = Path(str(name or "")).suffix.lower()
+    made = (f"生成 {draft_count} 条待确认草稿，合计 {total_cents / 100:.2f} 元"
+            if draft_count else "未生成草稿")
+
+    # 不支持的类型 / 识别失败：前两段照留空位，把原因写在「方式」里。
+    # 注意：不支持的类型只出现在 batch["errors"] 里（不进 files），所以两个来源都要看。
+    if not got:
+        errs = [str(i.get("error") or "") for i in (items or []) if i.get("ok") is False]
+        errs += [str(e.get("error") or "") for e in (errors or [])]
+        reason = next((e for e in errs if e), "没有可用的识别结果")
+        # 内部值（unknown / unsupported）不甩给用户
+        if "暂不支持" in reason:
+            reason = "暂不支持这种文件类型"
+        return {"read": "—", "recognized": "—", "processed": "未生成草稿",
+                "how": f"{reason}——已跳过，不影响其他文件"}
+
+    if kind == "sheet":
+        read = f"表内 {got.get('row_count', 0)} 行"
+        imgs = int(got.get("embedded_image_count") or 0)
+        if imgs:
+            read += f"，含 {imgs} 张嵌入图"
+        rec = got.get("reconcile") or {}
+        recognized = (f"嵌入图核对 {rec.get('matched', 0)}/{rec.get('checked', 0)} 张与表内金额一致"
+                      if rec.get("checked") else "表内数据（这张表里没有嵌入图）")
+        return {"read": read, "recognized": recognized, "processed": made,
+                "how": "以表内数字为准；嵌入图只用于核对，机器不覆盖你写的数"}
+
+    if kind == "csv":
+        src = str(got.get("source") or "")
+        # 内部值 unknown 不直接甩给用户
+        label = "账单格式未识别，已按通用规则解析" if src in ("", "unknown") else f"{src} 账单格式"
+        drafted = int(got.get("drafted") or 0)
+        return {"read": f"读到 {got.get('records', 0)} 行（{label}）",
+                "recognized": f"其中 {drafted} 行识别为收支" if drafted else "没有识别到可入账的收支",
+                "processed": made,
+                "how": "只按通用规则解析；用微信 / 支付宝导出的原始账单文件识别更准"}
+
+    # 图片 / PDF：走票据识别通道
+    amt = int(got.get("amount_cents") or 0)
+    bits = [f"金额 {amt / 100:.2f} 元"] if amt else []
+    for key, label in (("date", "日期"), ("merchant", "商户"), ("invoice_no", "发票号")):
+        if got.get(key):
+            bits.append(f"{label} {got[key]}")
+    if got.get("confidence") is not None:
+        bits.append(f"置信度 {got['confidence']}")
+    how = "识别结果只进「待确认清单」，你确认后才入账"
+    if ext == ".pdf" and not got.get("cloud_uploaded"):
+        how = "PDF 在本机读文本层，未发给模型；" + how
+    elif got.get("cloud_uploaded"):
+        how = "这张图发给了模型服务商做识别；" + how
+    return {"read": "1 个 PDF" if ext == ".pdf" else "1 张图片",
+            "recognized": " · ".join(bits) if bits else "没识别到金额",
+            "processed": made, "how": how}
+
+
+def _merge_batches(batches: list[dict]) -> list[dict]:
+    """把「逐个文件」跑出来的批次按项目合并，让最终汇总仍是「一个项目一行」。"""
+    merged: dict[str, dict] = {}
+    for b in batches:
+        key = str(b.get("project_id") or "")
+        m = merged.get(key)
+        if m is None:
+            m = dict(b)
+            m["files"] = list(b.get("files") or [])
+            m["errors"] = list(b.get("errors") or [])
+            merged[key] = m
+            continue
+        m["files"] += list(b.get("files") or [])
+        m["errors"] += list(b.get("errors") or [])
+        for k in ("draft_count", "identified_total_cents", "declared_total_cents",
+                  "reconcile_diff_cents"):
+            m[k] = m.get(k, 0) + b.get(k, 0)
+        br = b.get("reconcile")
+        if br:
+            mr = m.get("reconcile") or {"checked": 0, "matched": 0,
+                                        "mismatched": [], "unreadable": []}
+            m["reconcile"] = {
+                "checked": mr.get("checked", 0) + br.get("checked", 0),
+                "matched": mr.get("matched", 0) + br.get("matched", 0),
+                "mismatched": list(mr.get("mismatched") or []) + list(br.get("mismatched") or []),
+                "unreadable": list(mr.get("unreadable") or []) + list(br.get("unreadable") or []),
+            }
+        if not m.get("project_hint") and b.get("project_hint"):
+            m["project_hint"] = b["project_hint"]
+    return list(merged.values())
+
+
+@app.post("/api/intake")
+def intake_upload(body: IntakeIn):
+    """把用户拖进来的东西变成待确认草稿。
+
+    归属规则：显式指定 project > 文件夹名建项目 > 当前默认项目。
+    一律只生成草稿，需人工确认后才入账（合规红线：确认环节不得为体验取消）。
+    报销表以表内数字为准，嵌入图识别结果只用于核对。
+
+    注意：这是「整批一次调用」的老口径，用户全程看不到中间进度；
+    拖拽导入走 `/api/intake/stream`（逐文件推进度）。
+    """
+    files = _intake_decode(body)
 
     try:
         out = intake.ingest(DATA_DIR, files, project_ref=body.project or None)
@@ -462,6 +620,56 @@ def intake_upload(body: IntakeIn):
                        "project_name": _project_label(d.get("project", ""))}
                       for d in pending.list_all(DATA_DIR)]
     return out
+
+
+@app.post("/api/intake/stream")
+def intake_stream(body: IntakeIn):
+    """与 `/api/intake` 同一套逻辑，但**逐行推送真实进度**（NDJSON，一行一个 JSON）。
+
+    为什么要有它：一次导入十几张票要跑几分钟。若只在最后回一句结果，用户全程干等，
+    分不清是在跑还是卡住了。这里每处理一个文件推两行，前端立刻能看到：
+    - `{"stage":"start"}`     —— 开始处理第 i 个（前端显示「正在读文件 i/n：xxx」）
+    - `{"stage":"file_done"}` —— 这个文件已读完、草稿已生成（含金额与条数）
+    - `{"stage":"file_failed"}` —— 单个文件失败，不中断整批，如实报出来
+    - `{"stage":"all_done"}`  —— 按项目合并后的汇总（前端把它换成正式结果）
+
+    逐个文件跑而不是整批跑，是因为**报销表的双源对账是在单个表文件内部做的**，
+    拆开不会破坏对账口径。进度全部来自真实处理结果，不做假进度条。
+    """
+    files = _intake_decode(body)
+    total = len(files)
+
+    def gen():
+        batches: list[dict] = []
+        for i, f in enumerate(files, 1):
+            yield json.dumps({"stage": "start", "index": i, "total": total,
+                              "file": f["name"], "rel_path": f["rel_path"]},
+                             ensure_ascii=False) + "\n"
+            try:
+                out = intake.ingest(DATA_DIR, [f], project_ref=body.project or None)
+                bs = out.get("batches") or []
+                batches += bs
+                first = bs[0] if bs else {}
+                yield json.dumps({
+                    "stage": "file_done", "index": i, "total": total, "file": f["name"],
+                    "project_name": first.get("project_name", ""),
+                    "draft_count": first.get("draft_count", 0),
+                    "identified_total_cents": first.get("identified_total_cents", 0),
+                    "stages": _file_stages(f["name"], first.get("files") or [],
+                                             first.get("errors") or [],
+                                             first.get("draft_count", 0),
+                                             first.get("identified_total_cents", 0)),
+                    "errors": [e.get("error", "") for e in (first.get("errors") or [])],
+                }, ensure_ascii=False) + "\n"
+            except Exception as e:  # noqa: BLE001 单个文件失败不能把整批带崩
+                yield json.dumps({"stage": "file_failed", "index": i, "total": total,
+                                  "file": f["name"],
+                                  "error": f"{type(e).__name__}: {str(e)[:200]}"},
+                                 ensure_ascii=False) + "\n"
+        yield json.dumps({"stage": "all_done", "batches": _merge_batches(batches)},
+                         ensure_ascii=False) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 @app.get("/api/pending")

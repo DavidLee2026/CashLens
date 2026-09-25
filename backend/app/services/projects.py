@@ -102,6 +102,43 @@ def rename(data_dir: str | Path, pid: str, name: str) -> dict | None:
     return None
 
 
+def is_deleted(row: dict | None) -> bool:
+    """项目是否已被删除（软删除：映射表里留痕，账本不受影响）。"""
+    return bool((row or {}).get("deleted"))
+
+
+def visible_rows(data_dir: str | Path) -> list[dict]:
+    """正常显示的项目（不含已删除的）。"""
+    return [r for r in _load(data_dir) if not is_deleted(r)]
+
+
+def event_ids_of(events: list[dict] | None, pid: str) -> list[str]:
+    """该项目名下的全部事件 id（「连数据一起删」要用它去追加作废记录）。"""
+    target = str(pid or "")
+    return [str(ev.get("event_id") or "") for ev in (events or [])
+            if str(ev.get("project") or "") == target and ev.get("event_id")]
+
+
+def mark_deleted(data_dir: str | Path, pid: str, purged_count: int = 0,
+                 with_data: bool = False) -> dict | None:
+    """软删除项目：映射表标记 deleted，**账本一字不动**。
+
+    with_data=True 时记录「它的 N 笔事件已作废」；作废动作本身由调用方
+    通过 EventLedger.append_void 追加，本模块不依赖账本（保持纯映射/归集职责）。
+    """
+    rows = _load(data_dir)
+    for r in rows:
+        if str(r.get("id")) == str(pid):
+            r["deleted"] = True
+            r["deleted_at"] = _now()
+            if with_data:
+                r["purged"] = True
+                r["purged_count"] = int(purged_count)
+            _save(data_dir, rows)
+            return dict(r)
+    return None
+
+
 def get(data_dir: str | Path, pid: str) -> dict | None:
     for r in _load(data_dir):
         if str(r.get("id")) == str(pid):
@@ -110,19 +147,25 @@ def get(data_dir: str | Path, pid: str) -> dict | None:
 
 
 def resolve(data_dir: str | Path, ref: str) -> str | None:
-    """把用户给的稳定 id 或显示名解析成稳定 id；解析不到返回 None。"""
+    """把用户给的稳定 id 或显示名解析成稳定 id；解析不到返回 None。
+
+    已删除的项目不参与解析：否则新建/入账会把新账记到一个已经删掉的项目下面。
+    """
     s = str(ref or "").strip()
     if not s:
         return None
-    for r in _load(data_dir):
+    for r in visible_rows(data_dir):
         if s == str(r.get("id")) or s == str(r.get("name")):
             return str(r.get("id"))
     return None
 
 
 def ensure_default(data_dir: str | Path) -> dict:
-    """保证至少存在一个项目（默认 Project A），返回第一个项目。"""
-    rows = _load(data_dir)
+    """保证至少存在一个**未删除**的项目（默认 Project A），返回第一个项目。
+
+    若项目全被删光，这里会新建一个 Project A，避免新账无处可归。
+    """
+    rows = visible_rows(data_dir)
     if not rows:
         return create(data_dir)
     return dict(rows[0])
@@ -211,8 +254,12 @@ def summary(data_dir: str | Path, events: list[dict] | None,
 
     project 传 id 或显示名则只看该项目；传「未归项目」只看未归的；不传则全部项目。
     支出侧按发票号码去重（同一项目内相同号码只计一次），去掉的进 duplicates 如实标注。
+
+    已删除项目名下的账单**不会消失**：账本记录还在，归集时回落到「未归项目」。
+    这样删项目只影响分组，不会让用户以为钱也没了（数字必须看得见）。
     """
     rows = _sync(data_dir, events)
+    deleted_ids = {str(r.get("id")) for r in rows if is_deleted(r)}
 
     raw = str(project or "").strip()
     if not raw:
@@ -227,6 +274,8 @@ def summary(data_dir: str | Path, events: list[dict] | None,
     groups: dict[str, dict] = {}
     for ev in events or []:
         pid = str(ev.get("project") or "")
+        if pid in deleted_ids:
+            pid = UNASSIGNED_PROJECT
         if target is not None and pid != target:
             continue
         g = groups.setdefault(pid, _empty_group(pid, rows))
@@ -295,12 +344,18 @@ def summary(data_dir: str | Path, events: list[dict] | None,
 
 
 def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
-    """项目清单（含每个项目的收支汇总）+ 未归项目一行。"""
+    """项目清单（含每个项目的收支汇总）+ 未归项目一行。
+
+    已删除的项目不出现在清单里；它名下的账单由 summary 回落到「未归项目」，
+    因此删项目不会让任何一笔钱从数字里消失。
+    """
     rows = _sync(data_dir, events)
     stat = {p["project"]: p for p in summary(data_dir, events)["projects"]}
 
     out = []
     for r in rows:
+        if is_deleted(r):
+            continue
         s = stat.get(str(r.get("id")), {})
         out.append({
             "name": r.get("name", ""),
