@@ -719,18 +719,20 @@ export default function Workbench() {
             </div>
             <div className="inputrow">
               <div className="attach">
-                <button
-                  type="button"
-                  className="btn-plus"
-                  onClick={() => setAttachOpen((v) => !v)}
-                  disabled={!apiOk || intakeBusy}
-                  aria-haspopup="menu"
-                  aria-expanded={attachOpen}
-                  aria-label="添加附件"
-                  title="添加图片、票据文件，或整个文件夹"
-                >
-                  {intakeBusy ? "…" : "＋"}
-                </button>
+                <span className="tip">
+                  <button
+                    type="button"
+                    className="btn-plus"
+                    onClick={() => setAttachOpen((v) => !v)}
+                    disabled={!apiOk || intakeBusy}
+                    aria-haspopup="menu"
+                    aria-expanded={attachOpen}
+                    aria-label="添加附件"
+                  >
+                    {intakeBusy ? "…" : "＋"}
+                  </button>
+                  <span className="tip-text">添加图片、票据文件，或整个文件夹</span>
+                </span>
                 {attachOpen && (
                   <div className="attach-menu" role="menu">
                     <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); imageRef.current?.click(); }}>
@@ -757,22 +759,27 @@ export default function Workbench() {
                 disabled={!apiOk}
               />
               <div className="modelrow">
-                <button
-                  className="model-pick"
-                  onClick={() => setPickOpen((v) => !v)}
-                  disabled={!apiOk || modelBusy}
-                  aria-haspopup="listbox"
-                  aria-expanded={pickOpen}
-                  title={models?.active.model ? `当前模型：${models.active.model}` : undefined}
-                >
-                  <span
-                    className={`dot ${
-                      models?.tier === "cloud" ? "cloud" : models?.tier === "none" ? "off" : ""
-                    }`}
-                  />
-                  {modelBusy ? "切换中…" : currentModelLabel()}
-                  <span className="caret" aria-hidden="true">▾</span>
-                </button>
+                <span className="tip">
+                  <button
+                    className="model-pick"
+                    onClick={() => setPickOpen((v) => !v)}
+                    disabled={!apiOk || modelBusy}
+                    aria-haspopup="listbox"
+                    aria-expanded={pickOpen}
+                    aria-label="选择模型"
+                  >
+                    <span
+                      className={`dot ${
+                        models?.tier === "cloud" ? "cloud" : models?.tier === "none" ? "off" : ""
+                      }`}
+                    />
+                    {modelBusy ? "切换中…" : currentModelLabel()}
+                    <span className="caret" aria-hidden="true">▾</span>
+                  </button>
+                  <span className="tip-text">
+                    模型{models?.active.model ? `：${models.active.model}` : ""}
+                  </span>
+                </span>
                 {pickOpen && models && (
                   <div className="model-menu" role="group" aria-label="选择模型档位">
                     {models.tiers.map((t) => (
@@ -859,8 +866,14 @@ export default function Workbench() {
                   </div>
                 )}
               </div>
-              <button className="btn" onClick={send} disabled={!apiOk || busy}>
-                {busy ? "处理中…" : "发送"}
+              <button
+                type="button"
+                className="btn btn-send"
+                onClick={send}
+                disabled={!apiOk || busy}
+                aria-label="发送"
+              >
+                {busy ? "…" : "↑"}
               </button>
             </div>
             <div className="inputfoot">

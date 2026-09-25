@@ -77,10 +77,27 @@ button{font-family:inherit}
 .b{max-width:86%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
 .b.user{align-self:flex-end;background:var(--brand-bg);border-bottom-right-radius:4px}
 .b.ai{align-self:flex-start;background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
-.inputrow{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--border)}
-.inputrow input{flex:1;min-width:0;border:1px solid var(--border);background:var(--white);border-radius:12px;padding:13px 15px;font-size:14px;font-family:inherit;outline:none}
+/* 输入区：参考主流对话产品的做法，一个大输入框，左下角加附件、右下角选模型与发送 */
+.inputrow{display:flex;flex-wrap:wrap;align-content:space-between;align-items:center;gap:10px;
+  min-height:112px;padding:12px 14px 10px;border-top:1px solid var(--border)}
+.inputrow input{order:1;flex:1 0 100%;min-width:0;border:none;background:transparent;
+  padding:6px 6px 0;font-size:15px;font-family:inherit;outline:none;color:var(--text)}
+.inputrow input::placeholder{color:var(--text-3)}
+/* 悬停提示：黑底白字，鼠标移到「＋」或模型按钮上时出现 */
+.tip{position:relative;display:inline-flex;align-items:center}
+.tip-text{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
+  background:var(--navy-900);color:var(--white);font-size:11.5px;line-height:1.4;padding:5px 9px;
+  border-radius:7px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s ease;z-index:50}
+.tip:hover .tip-text,.tip:focus-within .tip-text{opacity:1}
+/* 模型菜单打开时收起悬停提示，否则两者会叠在同一位置 */
+.modelrow:has(.model-menu) .tip-text{opacity:0!important}
 /* 附件入口：一个「＋」按钮，点开选图片 / 文件 / 整个文件夹 */
-.attach{position:relative;flex:0 0 auto}
+.attach{order:2;position:relative;flex:0 0 auto}
+.inputrow .modelrow{order:3;margin-left:auto}
+.btn-send{width:38px;height:38px;border-radius:50%;background:var(--brand);color:var(--white);
+  font-size:17px;line-height:1;padding:0;display:grid;place-items:center}
+.btn-send:hover:not(:disabled){background:var(--indigo-600)}
+.btn-send:disabled{background:var(--gray-200);color:var(--text-3)}
 .btn-plus{width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--white);
   color:var(--text-2);font-size:19px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
 .btn-plus:hover:not(:disabled){border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
