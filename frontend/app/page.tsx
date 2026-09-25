@@ -871,9 +871,8 @@ export default function Workbench() {
                 className="btn btn-send"
                 onClick={send}
                 disabled={!apiOk || busy}
-                aria-label="发送"
               >
-                {busy ? "…" : "↑"}
+                {busy ? "处理中…" : "发送"}
               </button>
             </div>
             <div className="inputfoot">
