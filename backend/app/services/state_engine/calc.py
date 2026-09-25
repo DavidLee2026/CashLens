@@ -180,20 +180,29 @@ def forecast_cashflow(events: list[dict], as_of=None, horizon_days: int = 30) ->
     std = statistics.pstdev(vals) if len(vals) > 1 else 0.0
     current_balance = sum(vals)  # MVP 代理：近 90 天累计净流当作当前可确认余额
 
-    insufficient = len(daily) < 5  # 数据点太少：区间不可信，如实标注
-    median = current_balance + mean * horizon_days
-    low = current_balance + (mean - BAND_Z * std) * horizon_days
-    high = current_balance + (mean + BAND_Z * std) * horizon_days
-    reason = (
-        f"数据不足（近 90 天仅 {len(daily)} 天有记录），区间暂不可信——多记或导入几笔后自动变宽"
-        if insufficient
-        else f"基于过去 {FORECAST_WINDOW_DAYS} 天日净流入节奏（{len(daily)} 天有记录）"
-    )
+    # 数据点太少时不做外推，只报「当前已知净额」。
+    # 依据对外口径「数据不足时如实标注不可信，不做假装精确的点预测」。
+    # 曾出现的错：只记 1 笔 100 元收入时，把当日值当成日均节奏外推 30 天，显示成 3100 元。
+    insufficient = len(daily) < 5
+    if insufficient:
+        median = low = high = current_balance
+        reason = (
+            f"数据不足（近 {FORECAST_WINDOW_DAYS} 天只有 {len(daily)} 天有记录），暂不外推 {horizon_days} 天："
+            "上面显示的是当前已知净额，多记或导入几笔后会自动给出区间"
+        )
+        extrapolated = False
+    else:
+        median = current_balance + mean * horizon_days
+        low = current_balance + (mean - BAND_Z * std) * horizon_days
+        high = current_balance + (mean + BAND_Z * std) * horizon_days
+        reason = f"基于过去 {FORECAST_WINDOW_DAYS} 天日净流入节奏（{len(daily)} 天有记录）"
+        extrapolated = True
     return {
         "median_balance_cents": int(median),
         "band90_low_cents": int(low),
         "band90_high_cents": int(high),
         "confidence": None,  # 由调用方用 compute() 的 cashflow_confidence 填充
         "insufficient": insufficient,
+        "extrapolated": extrapolated,
         "reason": reason,
     }

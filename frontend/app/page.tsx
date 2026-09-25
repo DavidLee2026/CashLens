@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string; project?: string; project_name?: string };
 type Msg = { role: "user" | "ai"; text: string; pending?: PendingDraft[] };
@@ -17,6 +17,8 @@ type Fc = {
   band90_high_cents: number;
   confidence: number;
   insufficient?: boolean;
+  /** false 表示数据不足、后端没有做外推（此时三档数值是「当前已知净额」，不是 30 天预测）。 */
+  extrapolated?: boolean;
   reason: string;
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
@@ -126,6 +128,33 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+/** 指标旁的「?」：悬停或点击都显示一句人话解释。
+ *  起因：连开发者自己都要回头查的指标（健康度、区间下沿），不该让客户去猜。 */
+function Hint({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="hint-q">
+      <button
+        type="button"
+        className="q"
+        aria-label="这是什么意思"
+        aria-expanded={open}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen((v) => !v)}
+        onBlur={() => setOpen(false)}
+      >
+        ?
+      </button>
+      {open && (
+        <span className="q-tip" role="tooltip">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** 会话 id：localStorage 持久化，多轮追问共享同一上下文。
  *  key 带 v2：数据清零时一并作废旧会话（旧 key 的历史上下文不再被读到）。 */
 function sessionId(): string {
@@ -144,7 +173,7 @@ export default function Workbench() {
   const [msgs, setMsgs] = useState<Msg[]>(() => [
     {
       role: "ai",
-      text: "你好，我是 CashLens 财务管家。钱的事你不用懂格式，也不用自己记流水账——跟我说大白话就行，剩下的归拢、分类、盯缺口，都交给我。\n\n比如一句「昨天微信收了 3000 尾款」或「打车花了 28」，我马上帮你记好；想知道下个月会不会缺钱，就问我「现金流怎么样」，我会把依据一起讲给你听。\n\n先来一句试试？\n\n（本地开发提示：需先启动后端 cd backend && python3 -m uvicorn app.main:app --port 8001）",
+      text: "你好，我是 CashLens 财务管家。不用懂会计，也不用记格式，把花钱和收钱的事用大白话讲给我就行。\n\n我能帮你做三件事：\n1. 记账：说一句「昨天微信收了 3000 尾款」或「打车花了 28」，我记下来，还能记到对应项目上；\n2. 收票据：点左下角的「＋」，发票照片、发票 PDF、项目工时表、微信支付宝账单都能传，我先认出来给你看，你确认了才入账；\n3. 看钱够不够：问我「这个月花了多少」「下个月会不会缺钱」，我用你自己的账本算，并把依据一起说清楚。\n\n先来一句试试？",
     },
   ]);
   const [text, setText] = useState("");
@@ -178,6 +207,10 @@ export default function Workbench() {
   // 导入：拖文件 / 拖整个文件夹（按文件夹名建项目）
   const [dragActive, setDragActive] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
+  // 附件入口：一个「＋」按钮，配三个隐藏选择器（图片 / 文件 / 整个文件夹）
+  const [attachOpen, setAttachOpen] = useState(false);
+  const imageRef = useRef<HTMLInputElement>(null);
+  const dirRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -457,6 +490,21 @@ export default function Workbench() {
     }
   }
 
+  /** 文件选择：图片 / 文件 / 整个文件夹三个选择器共用。
+   *  文件夹选择要带上相对路径，这样第一层目录名会成为项目名（与拖拽导入同一口径）。 */
+  async function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
+    const list = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!list.length) return;
+    await uploadFiles(
+      list.map((f) => ({
+        name: f.name,
+        rel_path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+        file: f,
+      }))
+    );
+  }
+
   /** 递归展开拖进来的目录（拖整个文件夹时，第一层目录名会成为项目名）。 */
   async function readEntry(entry: FsEntry, prefix: string): Promise<FileItem[]> {
     if (entry.isFile) {
@@ -636,27 +684,12 @@ export default function Workbench() {
               </div>
             )}
             <div className="convo-head">
-              <span className="t">说一句，钱就记下了</span>
+              <span className="t">钱的事，说给我听</span>
               <div className="head-right">
                 <span className="muted">
                   {state ? `${state.events_count} 笔 · 本地账本 · ` : ""}
                   {llmOn ? "LLM 对话" : "规则层"}
                 </span>
-                <button className="btn-mini" onClick={() => fileRef.current?.click()} disabled={!apiOk || intakeBusy}>
-                  {intakeBusy ? "导入中…" : "导入票据"}
-                </button>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  multiple
-                  hidden
-                  accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.xlsx,.xlsm,.csv"
-                  onChange={async (e) => {
-                    const fs = Array.from(e.target.files ?? []);
-                    e.target.value = "";
-                    if (fs.length) await uploadFiles(fs.map((f) => ({ name: f.name, rel_path: f.name, file: f })));
-                  }}
-                />
               </div>
             </div>
             <div className="log" ref={logRef}>
@@ -685,6 +718,36 @@ export default function Workbench() {
               ))}
             </div>
             <div className="inputrow">
+              <div className="attach">
+                <button
+                  type="button"
+                  className="btn-plus"
+                  onClick={() => setAttachOpen((v) => !v)}
+                  disabled={!apiOk || intakeBusy}
+                  aria-haspopup="menu"
+                  aria-expanded={attachOpen}
+                  aria-label="添加附件"
+                  title="添加图片、票据文件，或整个文件夹"
+                >
+                  {intakeBusy ? "…" : "＋"}
+                </button>
+                {attachOpen && (
+                  <div className="attach-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); imageRef.current?.click(); }}>
+                      图片或截图
+                      <span className="am-sub">发票、小票、微信与支付宝截图</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); fileRef.current?.click(); }}>
+                      发票与表格文件
+                      <span className="am-sub">数电发票 PDF、项目工时 Excel、账单 CSV</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); dirRef.current?.click(); }}>
+                      整个文件夹
+                      <span className="am-sub">按文件夹名自动建项目，里面有多少张都收</span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -693,17 +756,6 @@ export default function Workbench() {
                 aria-label="输入一句话"
                 disabled={!apiOk}
               />
-              <button className="btn" onClick={send} disabled={!apiOk || busy}>
-                {busy ? "处理中…" : "发送"}
-              </button>
-            </div>
-            <div className="inputfoot">
-              <div className="hint">
-                LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。
-                {models?.tier === "cloud" && "当前档位为云端，自由对话文本与票据图像会上云。"}
-                {models?.tier === "local" && "当前用本地模型，数据不出本机。"}
-                {models?.tier === "none" && "当前不调用模型，全部本机处理。"}
-              </div>
               <div className="modelrow">
                 <button
                   className="model-pick"
@@ -807,8 +859,37 @@ export default function Workbench() {
                   </div>
                 )}
               </div>
+              <button className="btn" onClick={send} disabled={!apiOk || busy}>
+                {busy ? "处理中…" : "发送"}
+              </button>
+            </div>
+            <div className="inputfoot">
+              <div className="hint">
+                LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。
+                {models?.tier === "cloud" && "当前档位为云端，自由对话文本与票据图像会上云。"}
+                {models?.tier === "local" && "当前用本地模型，数据不出本机。"}
+                {models?.tier === "none" && "当前不调用模型，全部本机处理。"}
+              </div>
             </div>
             {modelMsg && <div className="hint">{modelMsg}</div>}
+            {/* 三个隐藏的文件选择器：图片 / 文件 / 整个文件夹，都由左侧「＋」触发 */}
+            <input ref={imageRef} type="file" hidden multiple accept="image/*" onChange={onPickFiles} />
+            <input
+              ref={fileRef}
+              type="file"
+              hidden
+              multiple
+              accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.xlsx,.xlsm,.csv"
+              onChange={onPickFiles}
+            />
+            <input
+              ref={dirRef}
+              type="file"
+              hidden
+              multiple
+              {...({ webkitdirectory: "true" } as Record<string, string>)}
+              onChange={onPickFiles}
+            />
           </section>
 
           {/* 右侧面板 */}
@@ -905,11 +986,17 @@ export default function Workbench() {
               <div className="kpi">
                 <div className="cell">
                   <div className="v num">{healthPct}%</div>
-                  <div className="k">健康度</div>
+                  <div className="k">
+                    健康度
+                    <Hint text="按你记的每一笔逐笔更新：收入把它推高、支出把它压低，证据越硬权重越大。它不是资产数字，是账本证据算出来的状态分。" />
+                  </div>
                 </div>
                 <div className="cell">
                   <div className="v num">{confPct}%</div>
-                  <div className="k">现金流可信度</div>
+                  <div className="k">
+                    现金流可信度
+                    <Hint text="看最近一笔收入距今多久、收入间隔稳不稳。越久没进账、间隔越乱，这个数字越低；数据太少时它会很低，我们就直接说「现金流不明」，不编数字。" />
+                  </div>
                 </div>
               </div>
               <div className="bar good">
@@ -922,28 +1009,53 @@ export default function Workbench() {
 
             <section className="sect">
               <div className="sect-head">
-                <h3>未来 30 天现金流（90% 区间）</h3>
+                <h3>
+                  {fc && fc.extrapolated === false
+                    ? "现金流预测（数据不足，暂不外推）"
+                    : "未来 30 天现金流（90% 区间）"}
+                  <Hint text="按你过去 90 天的收支节奏往后推 30 天。区间下沿是偏悲观的情形、上沿是偏乐观的情形，真实结果大约有 90% 的可能性落在这两条线之间。" />
+                </h3>
               </div>
               {fc ? (
-                <>
-                  <div className="fc-row">
-                    <span className="k">期末预计（中位）</span>
-                    <b className="num">{yuan(fc.median_balance_cents)}</b>
-                  </div>
-                  <div className="fc-row">
-                    <span className="k">区间下沿</span>
-                    <b className={`num ${fc.band90_low_cents < 0 ? "amt-out" : "amt-in"}`}>{yuan(fc.band90_low_cents)}</b>
-                  </div>
-                  <div className="fc-row">
-                    <span className="k">区间上沿</span>
-                    <b className="num">{yuan(fc.band90_high_cents)}</b>
-                  </div>
-                  <div className="fc-note">
-                    {fc.insufficient
-                      ? "数据不足：区间暂不可信 —— 多记或导入几笔后自动变宽（现金流不明口径）"
-                      : `${fc.reason} · 可信度低时如实标注「现金流不明」`}
-                  </div>
-                </>
+                fc.extrapolated === false ? (
+                  <>
+                    <div className="fc-row">
+                      <span className="k">
+                        当前已知净额
+                        <Hint text="账本里所有收入减掉所有支出之后的数。数据还不够 5 天，我们不硬推 30 天，只把已经记下的实情告诉你。" />
+                      </span>
+                      <b className={`num ${fc.median_balance_cents < 0 ? "amt-out" : "amt-in"}`}>
+                        {yuan(fc.median_balance_cents)}
+                      </b>
+                    </div>
+                    <div className="fc-note">{fc.reason}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="fc-row">
+                      <span className="k">
+                        期末预计（中位）
+                        <Hint text="30 天后最可能落在的位置：一半概率高于它、一半低于它。" />
+                      </span>
+                      <b className="num">{yuan(fc.median_balance_cents)}</b>
+                    </div>
+                    <div className="fc-row">
+                      <span className="k">
+                        区间下沿
+                        <Hint text="偏悲观的情形：90% 的可能，30 天后的余额不会低于这个数。" />
+                      </span>
+                      <b className={`num ${fc.band90_low_cents < 0 ? "amt-out" : "amt-in"}`}>{yuan(fc.band90_low_cents)}</b>
+                    </div>
+                    <div className="fc-row">
+                      <span className="k">
+                        区间上沿
+                        <Hint text="偏乐观的情形：90% 的可能，30 天后的余额不会高于这个数。" />
+                      </span>
+                      <b className="num">{yuan(fc.band90_high_cents)}</b>
+                    </div>
+                    <div className="fc-note">{fc.reason} · 可信度低时如实标注「现金流不明」</div>
+                  </>
+                )
               ) : (
                 <div className="empty">{apiOk ? "等待数据…" : "后端未连接"}</div>
               )}
