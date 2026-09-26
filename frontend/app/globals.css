@@ -56,8 +56,6 @@ button{font-family:inherit}
 @media (max-width:980px){
   .grid{grid-template-columns:1fr}
   .convo,.side{grid-column:auto;grid-row:auto}
-  /* 单列堆叠时左栏不再对聊天区取齐，否则会多出一屏高的空白 */
-  .side{min-height:0}
 }
 
 /* 卡片 */
@@ -182,11 +180,28 @@ button{font-family:inherit}
    不再让每块各自成为一张独立卡片。 */
 /* 左栏不再自己滚动（去掉右边缘那条内部滚动条）：内容比窗口高时改由整页滚动，
    这样第 4 张卡片（最近事件）不会被藏起来，也不会同时出现两条滚动条。 */
-/* 左栏高度与对话区**对齐且恒定**：用 min-height（不是 height），所以内容多了也不会被
-   截断、不会出现内部滚动条（卡片不会被藏住），页面整体还能继续往下滚。
-   起因（David 2026-09-25）：左栏原先完全由内容撑高 —— 点「新建项目」就变高、
-   建完项目又比右栏矮，两列顶端一直在跳。 */
-.side{display:flex;flex-direction:column;gap:0;padding:0;min-height:calc(100vh - 118px)}
+/* 左栏与对话区**严格等高**：高度取同一个表达式，内容多时左栏内部滚动。
+   为什么用 height 而不是 min-height（2026-09-25 两轮返工）：min-height 只保证下限，
+   左栏内容 654px 在窗口一矮（视口 700 时右栏只有 582）就会比右栏高出一截。
+   为什么不让两栏"一起长高"：那会把输入框顶到屏幕外，而输入框是主路径。
+   滚动条做成**常显**的细条：macOS 的浮层滚动条会自己藏起来，上次就是因此
+   「第 4 张卡片被藏住却看不出来」。 */
+.side{display:flex;flex-direction:column;gap:0;padding:0;
+  height:calc(100vh - 118px);min-height:520px;overflow-y:auto;
+  scrollbar-gutter:stable;overscroll-behavior:contain}
+.side::-webkit-scrollbar{width:10px}
+/* 槽与滑块都要**看得见**：滚动条存在的唯一目的就是让人知道"下面还有"，
+   用太淡的灰等于没做（2026-09-25 第一版用 --gray-200，截图上几乎看不出）。 */
+.side::-webkit-scrollbar-track{background:var(--gray-100)}
+.side::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:99px;
+  border:2px solid transparent;background-clip:content-box}
+.side::-webkit-scrollbar-thumb:hover{background:var(--gray-500);background-clip:content-box}
+/* ⚠️ 窄屏覆盖必须写在上面 .side 基础规则**之后**：媒体查询不增加优先级，
+   同优先级下后写的规则获胜 —— 写在前面会被基础规则盖掉（2026-09-25 实测 420px 失效）。
+   单列堆叠时左栏不再对聊天区取齐，也不该有内部滚动条。 */
+@media (max-width:980px){
+  .side{height:auto;min-height:0;overflow:visible}
+}
 .side .sect{padding:16px;background:transparent;border:none;border-top:1px solid var(--border);
   border-radius:0;box-shadow:none;position:relative}
 .side .sect:first-child{border-top:none}
