@@ -192,11 +192,22 @@ def test_events_without_invoice_no_are_not_deduped(tmp_path):
 
 # ─── 入账时的项目归属 ───────────────────────────────────
 
-def test_resolve_incoming_defaults_to_first_project(tmp_path):
+def test_resolve_incoming_defaults_to_unassigned_not_first_project(tmp_path):
+    """⚠️ 回归测试（2026-09-26 欠账 E 组 18）：没说项目时**不能**再落到表里第一个项目。
+
+    旧行为 = `visible_rows()[0]`：真实数据里第一个项目是随手建的 `121213`，账会悄悄进到那儿，
+    而草稿生成时项目就写死了、确认和入账后都改不了 —— 用户看不见也纠正不了。
+    新行为 = 返回空 id（＝「未归项目」，也就是总账户），并提示确认时可以选项目。
+    """
+    first = projects.create(tmp_path, "121213")           # 先建一个"垃圾项目"占住第一位
     pid, hint = projects.resolve_incoming(tmp_path, None)
-    assert pid and "Project A" in hint and "重命名" in hint
-    pid2, hint2 = projects.resolve_incoming(tmp_path, None)
-    assert pid2 == pid and hint2  # 第二次仍落同一个默认项目
+    assert pid == ""                                      # 不再落到第一个项目
+    assert pid != first["id"]
+    assert "未归项目" in hint and "确认" in hint
+    # 第二次仍然是不归项目，不会"漂移"到某个项目上
+    assert projects.resolve_incoming(tmp_path, None)[0] == ""
+    # 显式说了项目照旧认
+    assert projects.resolve_incoming(tmp_path, "121213")[0] == first["id"]
 
 
 def test_resolve_incoming_creates_project_named_by_user(tmp_path):

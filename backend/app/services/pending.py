@@ -70,18 +70,25 @@ def update(data_dir: str | Path, pid: str, **fields) -> dict | None:
     return None
 
 
-def accept(data_dir: str | Path, pid: str, append_fn) -> dict | None:
+def accept(data_dir: str | Path, pid: str, append_fn,
+           project_override: str | None = None) -> dict | None:
     """确认入账：从草稿弹出并回调写账本。
 
     append_fn(direction, amount_cents, category, channel, note, counterparty, project) -> (event, appended)
     project 用 .get 取，兼容 9/24 之前生成、还没有 project 字段的旧草稿。
+
+    `project_override`（2026-09-26 新增，欠账 E 组 18）：**用户在确认那一刻挑的项目**，
+    可传 id 或完整名；空字符串表示"就是未归项目"。归属必须能在确认环节被纠正 —— 草稿上的
+    项目是生成时定下的，而用户不可能每次都准确把账放进对应账户（David 原话）。
+    传 None 表示不改（沿用草稿上的值）。
     """
     drafts = list_all(data_dir)
     for i, d in enumerate(drafts):
         if d["id"] == pid:
+            proj = d.get("project", "") if project_override is None else project_override
             ev, appended = append_fn(d["direction"], d["amount_cents"], d["category"],
                                      d["channel"], d["note"], d.get("counterparty", ""),
-                                     d.get("project", ""))
+                                     proj)
             del drafts[i]
             _save(data_dir, drafts)
             return {"draft": d, "event": ev, "appended": appended}
