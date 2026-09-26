@@ -119,10 +119,22 @@ def get_forecast(horizon_days: int = 30):
 
 
 class ChatIn(BaseModel):
-    """用户的一句话（记账/查询/闲聊）+ 可选会话 id（多轮自由对话）。"""
+    """用户的一句话（记账/查询/闲聊）+ 可选会话 id + 当前选中项目。
+
+    `project`（2026-09-26 新增，欠账 E 组 18）：前端左栏当前选中的项目（id 或完整名），
+    只作为**新账的默认归属**；查询口径始终是全部项目（总账户），见 `_scope_note`。
+    留空 ＝ 未归项目（总账户），不再落到"表里第一个项目"。
+    """
 
     text: str
     session_id: str | None = None
+    project: str = ""
+
+
+class PendingAcceptIn(BaseModel):
+    """确认草稿时的可选覆盖：用户在确认那一刻挑的项目（空字符串 ＝ 未归项目）。"""
+
+    project: str | None = None
 
 
 class ModelSelectIn(BaseModel):
@@ -169,11 +181,26 @@ def _project_label(pid: str) -> str:
     return str((row or {}).get("name") or projects.UNASSIGNED_LABEL)
 
 
+def _scope_note(project_ref: str) -> str:
+    """当前选中了项目时，查询答复要**标注口径范围**（2026-09-26 David 拍板）。
+
+    查询默认全账本（总账户）、不跟随选中项目；选中项目只影响"新账默认记到哪"。
+    所以这里有话必须说清楚，免得用户以为"选了 X 就只算 X"。
+    """
+    s = str(project_ref or "").strip()
+    if not s:
+        return ""
+    pid = projects.resolve(DATA_DIR, s) or s
+    return (f"（口径提示：以上数字是全部项目的合计——总账户；"
+            f"当前选中只是让新账默认记入「{_project_label(pid)}」，查询不分项目）")
+
+
 def _draft_one(direction: str, amount_cents: int, category: str, channel: str, note: str,
                counterparty: str = "", project: str | None = None) -> dict:
     """识别 → 只生成待确认草稿（不直接入账）。
 
-    project 可传 id 或显示名；留空则归入当前默认项目，并在草稿上附一句项目名提醒。
+    project 可传 id 或显示名（"当前选中的项目"也走这里）；**留空 ＝ 未归项目（总账户）**，
+    不再落到"表里第一个项目"（见 `projects.resolve_incoming` 的 2026-09-26 改动）。
     """
     pid, hint = projects.resolve_incoming(DATA_DIR, project)
     d = pending.create(
@@ -191,15 +218,21 @@ def _project_line(d: dict) -> str:
     return str(d.get("project_hint") or f"归入项目「{_project_label(d.get('project', ''))}」。")
 
 
-def _rule_reply(text: str) -> dict:
-    """规则兜底（无 LLM 时）：记账走待确认 / 问现金流 / 接不上。"""
+def _rule_reply(text: str, current_project: str = "") -> dict:
+    """规则兜底（无 LLM 时）：记账走待确认 / 问现金流 / 接不上。
+
+    `current_project` = 前端当前选中的项目，作为新账默认归属（留空＝未归项目）。
+    """
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
         return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}
     if r["kind"] == "ask_cashflow":
         out = _cashflow_text()
-        return {"ok": True, "text": out["text"], "state": out.get("state"), "forecast": out.get("forecast")}
-    d = _draft_one(r["direction"], r["amount_cents"], r["category"], r["channel"], r["text"])
+        note = _scope_note(current_project)
+        return {"ok": True, "text": out["text"] + (f"\n{note}" if note else ""),
+                "state": out.get("state"), "forecast": out.get("forecast")}
+    d = _draft_one(r["direction"], r["amount_cents"], r["category"], r["channel"], r["text"],
+                   project=current_project or None)
     dir_cn = "收入" if r["direction"] == "income" else "支出"
     return {
         "ok": True,
@@ -208,8 +241,12 @@ def _rule_reply(text: str) -> dict:
     }
 
 
-def _run_actions(parsed: dict, text: str) -> dict:
-    """执行 LLM 选出的动作：记账=生成待确认草稿；查询=真数据。返回文案+结构化结果。"""
+def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
+    """执行 LLM 选出的动作：记账=生成待确认草稿；查询=真数据。返回文案+结构化结果。
+
+    归属优先级（2026-09-26，欠账 E 组 18）：**动作里显式说的项目 > 前端当前选中项目 > 未归项目**。
+    当前选中项目只是"默认值"，用户在一句话里说了别的项目要能覆盖它。
+    """
     events = _events()
 
     def h_cashflow(evs, act):
@@ -258,7 +295,7 @@ def _run_actions(parsed: dict, text: str) -> dict:
             executed = True
             d = _draft_one(direction, amount, a.get("category"), a.get("channel"),
                            a.get("note") or text, a.get("counterparty", ""),
-                           a.get("project") or None)
+                           a.get("project") or current_project or None)
             drafts.append(d)
             dir_cn = "收入" if direction == "income" else "支出"
             parts.append(f"识别到{dir_cn} {_yuan(amount)}（{d['category']} · {d['channel']}）——请确认后入账。{_project_line(d)}")
@@ -723,13 +760,24 @@ def pending_list():
 
 
 @app.post("/api/pending/{pid}/accept")
-def pending_accept(pid: str):
-    """确认入账：写入事件账本。"""
-    out = pending.accept(DATA_DIR, pid, _append_event)
+def pending_accept(pid: str, body: PendingAcceptIn | None = None):
+    """确认入账：写入事件账本。
+
+    `body.project` 可选（2026-09-26，欠账 E 组 18）：**用户在确认那一刻改归属**，
+    可传项目 id 或完整名；空字符串 ＝ 就是未归项目。不传则沿用草稿生成时的项目。
+    """
+    override = body.project if body is not None else None
+    if override is not None:
+        # ⚠️ 必须先把"名字"解析成 id 再写账本：`_append_event` 假定拿到的是已解析好的 id
+        # （账本只存稳定 id，显示名走映射表）。传名字就写，会存进一个不存在 id 的幽灵值。
+        override = projects.resolve_incoming(DATA_DIR, override)[0] if override.strip() else ""
+    out = pending.accept(DATA_DIR, pid, _append_event, project_override=override)
     if out is None:
         raise HTTPException(status_code=404, detail="待确认草稿不存在")
     state = run_state(LEDGER_PATH, DB_PATH)["state"]
-    return {"ok": True, "appended": out["appended"], "draft": out["draft"], "state": state}
+    return {"ok": True, "appended": out["appended"], "draft": out["draft"],
+            "project_name": _project_label((out.get("event") or {}).get("project", "")),
+            "state": state}
 
 
 @app.post("/api/pending/{pid}/decline")
@@ -751,7 +799,7 @@ def chat(body: ChatIn):
     if llm_skill.is_configured():
         parsed = llm_skill.parse_accounting(prompt)
         if parsed is not None:
-            run = _run_actions(parsed, body.text)
+            run = _run_actions(parsed, body.text, body.project)
             if run["executed"]:
                 results_json = json.dumps(run["results"], ensure_ascii=False, default=str)[:2200]
                 final = ""
@@ -761,6 +809,11 @@ def chat(body: ChatIn):
                     final = ""
                 if not final or len(final) < 8:
                     final = "\n".join(run["parts"])
+                # 查询答复要如实标注口径范围（查询始终是全账本，不跟随选中项目）
+                if any(str(x.get("action", "")).startswith("ask_") for x in run["results"]):
+                    note = _scope_note(body.project)
+                    if note:
+                        final = f"{final}\n{note}"
             else:
                 final = str(parsed.get("reply", "")).strip() or "我还在学习这句怎么接——可以记一笔账，或问我最近流水 / 现金流。"
             session_mem.add_turn(sid, body.text, final, result_note=final[:120])
@@ -771,7 +824,7 @@ def chat(body: ChatIn):
                                  "project_name": _project_label(d.get("project", ""))}
                                 for d in run["drafts"]]}
 
-    r = _rule_reply(body.text)
+    r = _rule_reply(body.text, body.project)
     session_mem.add_turn(sid, body.text, r.get("text", ""))
     r["session_id"] = sid
     return r

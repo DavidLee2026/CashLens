@@ -269,6 +269,28 @@ button{font-family:inherit}
 .proj-pop.new{top:48px;left:16px;right:16px}
 .proj-pop.row{top:calc(100% - 2px);left:0;right:0}
 .proj-pop .proj-edit,.proj-pop .proj-del{margin:0}
+/* 当前项目（欠账 E 组 18）：项目行可点选 + 选中态高亮 + 输入区口径提示。全用既有 token */
+.proj-sel{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;cursor:pointer;
+  border:1px solid var(--border);background:var(--white);border-radius:9px;padding:8px 10px;
+  font-family:inherit;color:var(--text)}
+.proj-sel:hover{border-color:var(--brand)}
+.proj-sel.on{border-color:var(--brand);background:var(--brand-bg)}
+.proj-sel .ps-name{font-size:13px;font-weight:700}
+.proj-sel .ps-sub{font-size:11px;color:var(--text-2)}
+.proj-tip{font-size:11px;color:var(--text-3);margin:6px 0 9px;line-height:1.45}
+.ev.on{background:var(--brand-bg);border-radius:8px}
+.ev-pick{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:1;min-width:0;
+  border:none;background:none;text-align:left;cursor:pointer;font-family:inherit;color:inherit;padding:0}
+.ev-pick:hover b,.ev.on .ev-pick b{color:var(--brand)}
+/* 待确认里的项目下拉：归属必须能在确认那一刻改（用户不一定说对） */
+.proj-pick{flex:0 0 auto;max-width:150px;border:1px solid var(--border);background:var(--white);
+  border-radius:8px;padding:3px 6px;font-size:11.5px;font-family:inherit;color:var(--text)}
+.proj-pick:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
+/* 输入区上方的口径条：新账记到哪 + 查询口径 */
+.scope-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 18px 0;
+  font-size:11.5px;color:var(--text-2)}
+.scope-bar b{color:var(--brand)}
+.scope-bar .sb-note{color:var(--text-3)}
 .btn-mini.danger{background:var(--risk-bg);border-color:var(--risk);color:var(--risk)}
 .btn-mini.danger:hover{background:var(--risk);border-color:var(--risk);color:var(--white)}
 .footnote{font-size:11px;color:var(--text-3);text-align:center;padding:18px 0 8px}

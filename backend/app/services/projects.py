@@ -164,6 +164,9 @@ def ensure_default(data_dir: str | Path) -> dict:
     """保证至少存在一个**未删除**的项目（默认 Project A），返回第一个项目。
 
     若项目全被删光，这里会新建一个 Project A，避免新账无处可归。
+
+    ⚠️ 2026-09-26 起**不再作为入账默认值**（默认值已改为「未归项目」空 id，见 `resolve_incoming`）；
+    保留它是为了"想主动建一个项目"的场景与既有测试。
     """
     rows = visible_rows(data_dir)
     if not rows:
@@ -175,17 +178,21 @@ def resolve_incoming(data_dir: str | Path, ref: str | None = None) -> tuple[str,
     """入账时决定这笔归哪个项目，返回 (project_id, 给用户的提示文案)。
 
     - 说了项目（id 或完整名）→ 用它；表里没有就按这个名字新建，别丢掉用户的归类意图。
-    - 没说项目 → 落到当前默认项目（表里第一个，没有就建 Project A），并提示可改名。
+    - **没说项目 → 返回空 id（＝「未归项目」，也就是总账户）**，并提示确认时可改。
+
+    ⚠️ 2026-09-26 改（欠账 E 组 18）：原先"没说项目"会落到**表里第一个项目**。后果是账会
+    悄悄进到随便某个项目里（真实数据里是随手建的 `121213`），而且草稿生成时项目就写死了、
+    确认时改不了、入账后也改不了 —— 用户看不见、也纠正不了。空 id 在界面上是明确可见的
+    「未归项目」（总账户），且确认环节可以挑项目。
     """
     s = str(ref or "").strip()
-    if s:
-        pid = resolve(data_dir, s)
-        if pid is None:
-            row = create(data_dir, s)
-            return row["id"], f"已新建项目「{row['name']}」并把这笔归入。"
-        return pid, ""
-    row = ensure_default(data_dir)
-    return row["id"], f"未指定项目，这笔先归入「{row['name']}」，可随时重命名。"
+    if not s:
+        return "", "这笔先放在「未归项目」（总账户），确认时可以选具体项目。"
+    pid = resolve(data_dir, s)
+    if pid is None:
+        row = create(data_dir, s)
+        return row["id"], f"已新建项目「{row['name']}」并把这笔归入。"
+    return pid, ""
 
 
 def display_name(rows: list[dict], pid: str) -> str:

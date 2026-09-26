@@ -3,6 +3,16 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string; project?: string; project_name?: string };
+/** 总账户合计（全部项目 ＋ 未归项目）：左栏第一行用，也是"查询口径"的那本账。 */
+function accountTotals(v: ProjectsView | null) {
+  const rows = v?.projects ?? [];
+  return {
+    income: rows.reduce((s, x) => s + x.income_cents, 0) + (v?.unassigned.income_cents ?? 0),
+    expense: rows.reduce((s, x) => s + x.expense_cents, 0) + (v?.unassigned.expense_cents ?? 0),
+    count: rows.reduce((s, x) => s + x.count, 0) + (v?.unassigned.count ?? 0),
+  };
+}
+
 /** 一个文件处理过程的四个阶段（顺序固定，见 STAGE_LABELS）。 */
 type IntakeStages = { read: string; recognized: string; processed: string; how: string };
 /** 对话里的一块进度：一个文件 + 它的四个阶段。 */
@@ -245,6 +255,19 @@ export default function Workbench() {
   // 新建项目：内联表单，成功后刷新左侧项目面板
   const [creatingProj, setCreatingProj] = useState(false);
   const [newProjName, setNewProjName] = useState("");
+  /* 当前选中的项目（"" ＝ 总账户 / 未归项目）。
+     它只决定**新账默认记到哪**；查询口径始终是全部项目（2026-09-26 拍板）。
+     起因（欠账 E 组 18）：原先没说项目的账会落到 projects.json 里第一个项目，
+     用户既看不出、也改不了 —— 所以左栏必须能选、且选中态要显眼。 */
+  const [activeProject, setActiveProject] = useState("");
+  /* 确认草稿时逐笔挑的项目（草稿 id → 项目 id/名字）。归属是逐笔属性，不是会话属性：
+     这次说本月报销、下一句说三个月后回款，必须在确认那一刻能分开。 */
+  const [draftProject, setDraftProject] = useState<Record<string, string>>({});
+  // 选中的项目被删掉之后，别让"当前项目"指向一个不存在的 id
+  useEffect(() => {
+    if (!activeProject || !projView) return;
+    if (!projView.projects.some((x) => x.id === activeProject)) setActiveProject("");
+  }, [activeProject, projView]);
   // 登录：原型阶段只在本地记一个用户名，不接账号体系；不登录也能用全部功能
   const [user, setUser] = useState("");
   const [loginOpen, setLoginOpen] = useState(false);
@@ -448,8 +471,14 @@ export default function Workbench() {
   async function act(p: PendingDraft, acceptIt: boolean) {
     if (actingIds.has(p.id)) return; // 防连点：处理中不可重复提交
     setActingIds((prev) => new Set(prev).add(p.id));
+    // 确认时把"这一笔归哪个项目"一起提交（下拉里选的；没动过就是草稿原来的项目）
+    const proj = draftProject[p.id] ?? p.project ?? "";
     try {
-      await j<{ ok: boolean }>(`/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`, { method: "POST" });
+      const res = await j<{ ok: boolean; project_name?: string }>(
+        `/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project: proj }) }
+      );
       // 成功即从气泡移除该草稿按钮（已入账/已忽略的不允许再点）
       setMsgs((m) =>
         m.map((msg) =>
@@ -461,7 +490,7 @@ export default function Workbench() {
       setMsgs((m) => [
         ...m,
         { role: "ai", text: acceptIt
-            ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}）${p.project_name ? `，归入「${p.project_name}」` : ""}。`
+            ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}），归入「${res.project_name || "未归项目"}」。`
             : "已忽略，这笔不入账。" },
       ]);
       refresh();
@@ -741,7 +770,7 @@ export default function Workbench() {
       const r = await j<ChatReply>("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t, session_id: sessionId() }),
+        body: JSON.stringify({ text: t, session_id: sessionId(), project: activeProject }),
       });
       if (r.session_id && typeof window !== "undefined") {
         window.localStorage.setItem("cl_session_v2", r.session_id);
@@ -758,6 +787,10 @@ export default function Workbench() {
 
   const healthPct = state ? Math.round(state.financial_health * 100) : 0;
   const confPct = state ? Math.round(state.cashflow_confidence * 100) : 0;
+  const acct = accountTotals(projView);
+  const activeProjectName = activeProject === ""
+    ? "未归项目（总账户）"
+    : (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject);
 
   return (
     <>
@@ -862,8 +895,20 @@ export default function Workbench() {
                         <div className="act-row" key={p.id}>
                           <span className="num">
                             {p.direction === "income" ? "收入" : "支出"} {yuan(p.amount_cents)}（{p.category}）
-                            {p.project_name ? ` → ${p.project_name}` : ""}
                           </span>
+                          {/* 归属在确认那一刻可改：草稿上的项目是识别时定下的，而用户不一定说对 */}
+                          <select
+                            className="proj-pick"
+                            value={draftProject[p.id] ?? p.project ?? ""}
+                            onChange={(e) => setDraftProject((s) => ({ ...s, [p.id]: e.target.value }))}
+                            aria-label="这笔归入哪个项目"
+                            disabled={actingIds.has(p.id)}
+                          >
+                            <option value="">未归项目（总账户）</option>
+                            {(projView?.projects ?? []).map((x) => (
+                              <option key={x.id} value={x.id}>{x.name}</option>
+                            ))}
+                          </select>
                           <button className="btn-mini ok" disabled={actingIds.has(p.id)} onClick={() => act(p, true)}>
                             {actingIds.has(p.id) ? "处理中…" : "确认入账"}
                           </button>
@@ -876,6 +921,11 @@ export default function Workbench() {
                   )}
                 </div>
               ))}
+            </div>
+            {/* 输入区上方常显"正在记入哪本账"，免得用户不知道新账会落到哪儿 */}
+            <div className="scope-bar">
+              正在记入：<b>{activeProjectName}</b>
+              <span className="sb-note">查询始终是全部项目合计（总账户）</span>
             </div>
             <div className="inputrow">
               <div className="attach">
@@ -1115,20 +1165,41 @@ export default function Workbench() {
                   </div>
                 </div>
               )}
+              {/* 当前项目（欠账 E 组 18）：选中＝新账默认记到这里，选中态高亮。
+                  它只决定"新账记到哪"；查询始终是全部项目合计（见输入区那行提示）。 */}
+              <button
+                type="button"
+                className={`proj-sel${activeProject === "" ? " on" : ""}`}
+                onClick={() => setActiveProject("")}
+                aria-pressed={activeProject === ""}
+                title="选中它：新账不指定具体项目，进「未归项目」；查询本来就是全部项目合计"
+              >
+                <span className="ps-name">总账户（全部项目）</span>
+                <span className="ps-sub">
+                  支出 {yuan(acct.expense)} · 收入 {yuan(acct.income)} · {acct.count} 笔
+                </span>
+              </button>
+              <div className="proj-tip">点一个项目＝新账默认记到它；每笔在确认时还能单独改</div>
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
                 <div className="empty">还没有项目。点上面的「新建项目」，或记账时说一句「这笔记到 919 昆明项目」，就建好了</div>
               ) : (
                 <>
                   {projView.projects.map((p) => (
                     <div key={p.id} className="proj-item">
-                      <div className="ev">
-                        <div>
+                      <div className={`ev${activeProject === p.id ? " on" : ""}`}>
+                        <button
+                          type="button"
+                          className="ev-pick"
+                          onClick={() => setActiveProject(p.id)}
+                          aria-pressed={activeProject === p.id}
+                          title="选它＝新账默认记到这个项目"
+                        >
                           <b>{p.name}</b>
                           <span className="m">
                             支出 {yuan(p.expense_cents)} · 收入 {yuan(p.income_cents)} · {p.count} 笔
                           </span>
                           {!p.named && <span className="m">默认名，建议改成这个项目的完整名称</span>}
-                        </div>
+                        </button>
                         <div className="ev-acts">
                           <button
                             className="btn-mini"
