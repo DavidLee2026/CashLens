@@ -50,7 +50,7 @@ button{font-family:inherit}
    按 Grid 自动放置规则（列号回退则行号 +1）会被挤到第二行，
    表现就是左列空白、数据卡片掉到对话下方。窄屏单列时再还原为 auto。 */
 .main{max-width:1160px;margin:0 auto;padding:14px 20px 18px}
-.grid{display:grid;grid-template-columns:360px minmax(0,1.25fr);gap:18px;align-items:start}
+.grid{display:grid;grid-template-columns:360px minmax(0,1.25fr);gap:18px}
 .convo{grid-column:2;grid-row:1}
 .side{grid-column:1;grid-row:1}
 @media (max-width:980px){
@@ -62,7 +62,10 @@ button{font-family:inherit}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 1px 2px rgba(10,37,64,.05)}
 
 /* 对话区 */
-.convo{display:flex;flex-direction:column;height:calc(100vh - 118px);min-height:520px;position:relative}
+/* 对话区高度由"两栏里更高的那一栏"决定：min-height 只是下限（窗口高时对齐全屏），
+   左栏内容更高时**整行一起长高**（页面滚动），两栏因此始终等高。
+   ⚠️ 这里不能用 height：定了 height 就没法跟左栏一起长。 */
+.convo{display:flex;flex-direction:column;min-height:max(520px,calc(100vh - 118px));position:relative}
 .convo-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
 .convo-head .t{font-weight:700;font-size:15px}
 .convo-head .muted{font-size:12px;color:var(--text-2)}
@@ -73,7 +76,11 @@ button{font-family:inherit}
   border-radius:var(--radius);border:2px dashed var(--brand);background:var(--brand-bg);
   color:var(--brand);font-size:13px;pointer-events:none}
 .drop-overlay b{font-size:16px}
-.log{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+/* contain:size = **对话消息不参与"两栏谁更高"的计算**：否则按 flex 规范，滚动子项的
+   max-content 贡献仍按内容算（实测灌 40 条消息把整行从 782 撑到 2741，输入框被推走）。
+   加了它之后：两栏高度只由左栏卡片与窗口高决定，消息再多也在对话区内部滚。
+   height:0 / min-height:0 一并保留，作为不支持 contain:size 时的兜底。 */
+.log{flex:1;height:0;min-height:0;contain:size;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
 .b{max-width:86%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
 .b.user{align-self:flex-end;background:var(--brand-bg);border-bottom-right-radius:4px}
 .b.ai{align-self:flex-start;background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
@@ -180,34 +187,25 @@ button{font-family:inherit}
    不再让每块各自成为一张独立卡片。 */
 /* 左栏不再自己滚动（去掉右边缘那条内部滚动条）：内容比窗口高时改由整页滚动，
    这样第 4 张卡片（最近事件）不会被藏起来，也不会同时出现两条滚动条。 */
-/* 左栏与对话区**严格等高**：高度取同一个表达式，内容多时左栏内部滚动。
-   为什么用 height 而不是 min-height（2026-09-25 两轮返工）：min-height 只保证下限，
-   左栏内容 654px 在窗口一矮（视口 700 时右栏只有 582）就会比右栏高出一截。
-   为什么不让两栏"一起长高"：那会把输入框顶到屏幕外，而输入框是主路径。
-   滚动条做成**常显**的细条：macOS 的浮层滚动条会自己藏起来，上次就是因此
-   「第 4 张卡片被藏住却看不出来」。 */
+/* 左栏：**没有内部滚动条**（David 2026-09-25 明确要求去掉），高度与对话区一致：
+   min-height 负责"窗口高时对齐整屏"，内容更高时它自己长高、对话区跟着长高（两栏始终等高），
+   所以既不会出现滚动条，也不会把卡片藏起来。 */
 .side{display:flex;flex-direction:column;gap:0;padding:0;
-  height:calc(100vh - 118px);min-height:520px;overflow-y:auto;
-  scrollbar-gutter:stable;overscroll-behavior:contain}
-.side::-webkit-scrollbar{width:10px}
-/* 槽与滑块都要**看得见**：滚动条存在的唯一目的就是让人知道"下面还有"，
-   用太淡的灰等于没做（2026-09-25 第一版用 --gray-200，截图上几乎看不出）。 */
-.side::-webkit-scrollbar-track{background:var(--gray-100)}
-.side::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:99px;
-  border:2px solid transparent;background-clip:content-box}
-.side::-webkit-scrollbar-thumb:hover{background:var(--gray-500);background-clip:content-box}
-/* ⚠️ 窄屏覆盖必须写在上面 .side 基础规则**之后**：媒体查询不增加优先级，
-   同优先级下后写的规则获胜 —— 写在前面会被基础规则盖掉（2026-09-25 实测 420px 失效）。
-   单列堆叠时左栏不再对聊天区取齐，也不该有内部滚动条。 */
-@media (max-width:980px){
-  .side{height:auto;min-height:0;overflow:visible}
-}
-.side .sect{padding:16px;background:transparent;border:none;border-top:1px solid var(--border);
+  min-height:max(520px,calc(100vh - 118px))}
+/* 左栏卡片：去掉卡片自身的圆角/边框/阴影，只用分隔线（是"一块面板"而不是一叠卡片）。
+   position:relative 是新建 / 改名 / 删除确认三个浮层的定位锚点，不能删。 */
+.side .sect{padding:13px 16px;background:transparent;border:none;border-top:1px solid var(--border);
   border-radius:0;box-shadow:none;position:relative}
+/* ⚠️ 窄屏覆盖必须写在上面 .side / .convo 基础规则**之后**：媒体查询不增加优先级，
+   同优先级下后写的规则获胜 —— 写在前面会被基础规则盖掉（2026-09-25 实测 420px 失效）。
+   单列堆叠时左栏不再对聊天区取齐（否则会多出一屏高的空白）。 */
+@media (max-width:980px){
+  .side{min-height:0}
+}
 .side .sect:first-child{border-top:none}
 .sect{padding:16px}
-.sect h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin-bottom:12px}
-.sect-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.sect h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin-bottom:8px}
+.sect-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .sect-head h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin:0}
 .tag{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
 .tag .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -216,11 +214,11 @@ button{font-family:inherit}
 .t-unknown,.t-review_due{color:var(--text-2);background:var(--gray-100)}
 .t-fragile{color:var(--risk);background:var(--risk-bg)}
 .t-misconception{color:var(--risk);background:var(--risk-bg)}
-.kpi{display:flex;gap:12px;margin-bottom:14px}
-.kpi .cell{flex:1;background:var(--gray-50);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.kpi{display:flex;gap:12px;margin-bottom:10px}
+.kpi .cell{flex:1;background:var(--gray-50);border:1px solid var(--border);border-radius:10px;padding:8px 11px}
 .kpi .cell .v{font-size:19px;font-weight:700;font-family:var(--font-mono)}
 .kpi .cell .k{font-size:11px;color:var(--text-2);margin-top:2px}
-.bar{height:8px;background:var(--gray-100);border-radius:99px;overflow:hidden;margin:6px 0 2px}
+.bar{height:7px;background:var(--gray-100);border-radius:99px;overflow:hidden;margin:4px 0 2px}
 .bar>i{display:block;height:100%;border-radius:99px;background:var(--brand)}
 .bar.good>i{background:var(--income)}
 .bar.bad>i{background:var(--risk)}
@@ -238,7 +236,7 @@ button{font-family:inherit}
   box-shadow:0 6px 18px rgba(10,37,64,.14);font-size:11.5px;font-weight:400;color:var(--text-2);
   line-height:1.55;text-align:left;letter-spacing:0;white-space:normal}
 /* 事件列表 */
-.ev{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px dashed var(--gray-200);font-size:13px}
+.ev{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed var(--gray-200);font-size:13px}
 .ev:last-child{border-bottom:none}
 .ev .m{color:var(--text-2);font-size:12px;display:block}
 .amt-in{color:var(--income);font-weight:700}
