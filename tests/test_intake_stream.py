@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
-from app.main import _file_stages, _merge_batches  # noqa: E402
+from app.main import _file_stages, _merge_batches, _tick_note  # noqa: E402
 
 
 def _batch(pid, name, **kw):
@@ -99,16 +99,41 @@ def test_file_stages_sheet_csv_image():
           "date": "2026-09-20", "invoice_no": "26537", "cloud_uploaded": True}], [], 1, 96200)
     assert img["read"] == "1 张图片"
     assert "上海简乐" in img["recognized"] and "962.00" in img["recognized"]
-    assert "模型服务商" in img["how"]        # 数据去向必须如实说
+    # 2026-09-28 David 定：方式栏只说「这张票怎么处理、结果由谁点头」，
+    # 不叙述用哪一档模型、也不叙述供应商（写了会让人以为经营信息被别人看到）。
+    assert "待确认清单" in img["how"] and "确认后才入账" in img["how"]
+    assert "模型服务商" not in img["how"]
+
+
+def test_file_stages_never_mentions_vendor_or_cloud_tier():
+    """口径护栏（2026-09-28 立）：界面文案里不得出现供应商 / 上云 / 出本机这类基础设施叙述。
+
+    这条断言是把 David 的决定固化下来 —— 防止以后有人为了「更透明」又加回去。
+    必要的告知放在「关于」页与合规文件里，不在逐文件进度里重复。
+    """
+    cases = [
+        ("发票.jpg", [{"ok": True, "amount_cents": 96200, "cloud_uploaded": True}], ".jpg"),
+        ("发票.pdf", [{"ok": True, "amount_cents": 96200, "cloud_uploaded": False}], ".pdf"),
+        ("报销表.xlsx", [{"ok": True, "kind": "sheet", "row_count": 3}], ".xlsx"),
+        ("账单.csv", [{"ok": True, "kind": "csv", "records": 3, "drafted": 1}], ".csv"),
+    ]
+    banned = ("模型服务商", "发给模型", "上云", "出本机", "不出本机", "第三方")
+    for name, got, ext in cases:
+        stages = _file_stages(name, got, [], 1, 1000)
+        joined = " ".join(str(v) for v in stages.values())
+        for word in banned:
+            assert word not in joined, f"{name} 的进度文案里出现了「{word}」：{joined}"
+        # 心跳里那句「现在在干什么」同样受这条护栏约束
+        assert not any(w in _tick_note(name) for w in banned), _tick_note(name)
 
 
 def test_file_stages_pdf_text_layer_says_local():
-    """PDF 有文本层本机直读时，方式里要说清「没发给模型」——这是隐私口径的一部分。"""
+    """PDF 有文本层时，方式里说清「本机直读」——这是能力（更快更准），不是数据去向叙述。"""
     st = _file_stages(
         "发票.pdf",
         [{"ok": True, "amount_cents": 96200, "date": "2026-09-20", "cloud_uploaded": False}], [], 1, 96200)
     assert st["read"] == "1 个 PDF"
-    assert "本机读文本层" in st["how"] and "未发给模型" in st["how"]
+    assert "本机直读" in st["how"] and "待确认清单" in st["how"]
 
 
 def test_file_stages_never_leaks_internal_values():
