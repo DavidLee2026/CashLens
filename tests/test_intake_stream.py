@@ -129,9 +129,25 @@ def test_file_stages_explains_text_amount_candidates():
                       [{"ok": True, "amount_cents": 0, "text_amounts": 5, "draft_count": 5,
                         "confidence": 0}], [], 5, 145439)
     assert "不是票面" in st["recognized"] and "5 个金额" in st["recognized"]
-    assert "候选草稿" in st["processed"] and "只挑该报的" in st["processed"]
+    assert "候选草稿" in st["processed"] and "该报哪几笔" in st["processed"]
     assert "由你决定" in st["how"]
     assert "置信度" not in st["recognized"], "这一档不该带「置信度 0」这种噪音"
+
+
+def test_file_stages_says_transfer_only_when_the_money_really_left():
+    """有转账记录时**只列转账**，文案不能说"逐条列进待确认"（那会把订单/行程单也算进去）。"""
+    st = _file_stages("…115033_73_19.jpg",
+                      [{"ok": True, "amount_cents": 0, "text_amounts": 6, "draft_count": 1,
+                        "transfer_amounts": 1, "confidence": 0}], [], 1, 10000)
+    assert "不是票面" in st["recognized"] and "1 笔是转账" in st["recognized"]
+    assert "只列转账" in st["processed"]
+    assert "逐条列进" not in st["recognized"], "有转账时不是逐条列，别让用户以为订单金额也记了"
+
+    # 读到了金额、但没有一笔是"客户付出去的钱" → 如实说没建草稿，别含糊成「未生成草稿」
+    none = _file_stages("…115032_72_19.jpg",
+                        [{"ok": True, "amount_cents": 0, "text_amounts": 2, "draft_count": 0,
+                          "transfer_amounts": 0, "confidence": 0}], [], 0, 0)
+    assert "客户付出去的钱" in none["processed"]
 
 
 def test_file_stages_never_mentions_vendor_or_cloud_tier():

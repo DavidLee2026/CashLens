@@ -796,14 +796,31 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
     # 聊天/文字截图（不是票面、图里有多笔金额）：如实说清"金额是从文字里读出来的候选"，
     # 别让用户以为系统替他把账算好了 —— 记哪几笔由他在待确认里挑。
     n_txt = int(got.get("text_amounts") or 0)
+    n_tr = int(got.get("transfer_amounts") or 0)
+    n_tot = int(got.get("total_amounts") or 0)
     recognized = " · ".join(bits) if bits else "没识别到金额"
     if n_txt:
         # 这一档不要"置信度 0"那种噪音：它不是票面，用户要看的是"读到了几个金额"
-        recognized = (f"不是票面：图里读到 {n_txt} 个金额（聊天/文字截图），"
-                      f"已按原文逐条列进「待确认」")
-        made = (f"生成 {draft_count} 条候选草稿（金额来自图中文字，可能含合计，请只挑该报的）"
-                if draft_count else f"图里读到 {n_txt} 个金额，但都没能建出草稿")
-        how = "金额是从图里文字读出来的，记哪几笔由你决定；你确认后才入账"
+        # 「图里自己算的合计」要如实说：读到的金额数比列出来的多，用户得知道多在哪。
+        tot_note = f"，其中 {n_tot} 个是图里自己算的合计（没重复列）" if n_tot else ""
+        if n_tr:
+            # 图里有转账卡片 → 只列转账（用户口径：「主要判断客户付出去了多少钱」）。
+            # 文案不能说"逐条列进待确认"——否则读到的 N 个金额会让人以为都记了账。
+            recognized = (f"不是票面：图里读到 {n_txt} 个金额{tot_note}，其中 {n_tr} 笔是转账"
+                          f"（客户实际付出去的钱）")
+            made = ("生成 1 条候选草稿（只列转账这一笔，其余是提交的订单/行程单）"
+                    if draft_count else "图里有转账记录，但没能建出草稿，请手工核一下")
+            how = "转账金额从图里原文读出来；你确认后才入账"
+        elif draft_count:
+            recognized = (f"不是票面：图里读到 {n_txt} 个金额{tot_note}（聊天/文字截图），"
+                          f"已按原文逐条列进「待确认」")
+            made = f"生成 {draft_count} 条候选草稿（金额来自图中文字，请核对该报哪几笔）"
+            how = "金额是从图里文字读出来的，记哪几笔由你决定；你确认后才入账"
+        else:
+            # 读到了、但一条都不该列（全是别人贴的付款卡片/行程单）：不许说成"已列进待确认"。
+            recognized = f"不是票面：图里读到 {n_txt} 个金额{tot_note}（聊天/文字截图）"
+            made = "但没有一笔是「客户付出去的钱」（多是别人提交的付款卡片/行程单），没建草稿"
+            how = "金额是从图里文字读出来的，记哪几笔由你决定；你确认后才入账"
     return {"read": "1 个 PDF" if ext == ".pdf" else "1 张图片",
             "recognized": recognized, "processed": made, "how": how}
 

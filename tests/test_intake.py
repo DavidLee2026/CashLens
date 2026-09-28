@@ -216,36 +216,103 @@ def test_identical_lines_are_kept_and_flagged_not_merged():
     assert merged[0]["repeat"] is False
 
 
+def test_transfer_line_wins_and_order_items_are_not_called_transfers(tmp_path, monkeypatch):
+    """有转账记录就只列转账；**转账卡片紧挨着的订单金额不许被算成转账**。
+
+    实弹来源（2026-09-28，`…115033_73_19.jpg`）：这张图里客户只付出去一笔 100 元
+    （微信转账卡片：向漆彩 王琦琪转账 / ¥100.00 / 已被接收），下面是没付款的饿了么订单卡
+    23.55×2 与一张 -92.00 的行程单。原文里转账卡片的尾行就是孤零零一个「转账」，
+    **它紧挨着的正是订单卡的第一行金额** —— 我第一版取 ±1 行做上下文，于是那条 23.55
+    被沾成了转账，图里读出 2 笔而不是 1 笔。定稿：只看**本行 + 下一行**。
+    """
+    text_lines = [
+        "商品 美团/大众点评预订单", "-92.00", "滴滴行程单",
+        "向漆彩 王琦琪转账", "¥100.00", "已被接收", "转账",
+        "辣椒炒肉盖码饭+例... ¥23.55", "辣椒炒肉盖码饭+例... ¥23.55", "餐具数量",
+        "漆彩 王琦琪", "的¥100.00", "已收款",
+    ]
+    rows = intake.text_amount_candidates(text_lines)
+    transfers = [c for c in rows if c["kind"] == "transfer"]
+    assert [c["amount_cents"] for c in transfers] == [10000], \
+        f"只有那笔 ¥100 转账算转账（本行/下一行判定），实得 {transfers}"
+    assert all(c["kind"] != "transfer" for c in rows if c["amount_cents"] == 2355), \
+        "订单卡里的 23.55 不是转账，不许被上一行的「转账」二字沾上"
+
+    # 走真路径：整张图 → 只落 1 条草稿（100 元），订单金额与行程单都不进待确认
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "amount": 0, "category": "其他",
+        "note": "不是票据，是聊天/文字截图", "text_lines": text_lines,
+    })
+    intake.ingest(tmp_path, [
+        {"name": "…115033_73_19.jpg", "rel_path": "919昆明项目发票/…115033_73_19.jpg",
+         "content": b"x"},
+    ])
+    drafts = pending.list_all(tmp_path)
+    assert [d["amount_cents"] for d in drafts] == [10000], \
+        "图里只有一笔钱真的付出去了：其余金额是订单/行程单，不许进待确认"
+
+
+def test_arithmetic_totals_are_not_listed_and_each_amount_gets_its_own_label():
+    """图里自己算的账不列；每条金额带**自己的条目名**（一行两笔钱＝两个类别）。
+
+    实弹（2026-09-28，80_19 简乐吴浩军那张）：用户给的结构是
+    「打车（交通）186.79 / 闪送（快递→经营）110 / 午饭晚饭水（餐饮）549.6」。
+    """
+    rows = intake.text_amount_candidates([
+        "打车186.79+闪送110=296.79",
+        "午饭晚饭水一共549.6",
+        "296.79+549.6=846.39",
+    ])
+    keep = [(c["amount_cents"], c["label"], c["derived"]) for c in rows if not c["derived"]]
+    assert keep == [(18679, "打车", False), (11000, "闪送", False), (54960, "午饭晚饭水一共", False)], keep
+    assert all(c["derived"] for c in rows if c["amount_cents"] in (29679, 84639)), \
+        "等号右边是左边加出来的合计，不列（左边那几条已经代表了这笔钱）"
+    # 549.6 在合计行里被再引用一次 —— 同一笔钱，不重复列
+    assert sum(1 for c in rows if c["amount_cents"] == 54960 and not c["derived"]) == 1
+    # 光杆合计（左边没有加数）仍要留：否则会把图里唯一的金额扔掉
+    only = intake.text_amount_candidates(["合计=846.39"])
+    assert [(c["amount_cents"], c["derived"], c["is_total"]) for c in only] == [(84639, False, True)]
+
+
 def test_text_amount_candidates_ignores_lines_without_amounts():
     assert intake.text_amount_candidates(["客户有五份晚饭", "好的好的，闪送是什么", ""]) == []
     assert intake.text_amount_candidates(None) == []
 
 
 def test_chat_screenshot_creates_candidate_drafts(tmp_path, monkeypatch):
-    """聊天截图 → 每条金额一条「需核对」草稿，原文进 note，不自动入账。"""
+    """聊天截图 → 每条金额一条「需核对」草稿，原文进 note，不自动入账。
+
+    这里的原文就是 80_19 那张真图（「打车186.79+闪送110=296.79 / 午饭晚饭水一共549.6」）。
+    用户 2026-09-28 定了结构：**该报的是 186.79 + 110 + 549.6 三条**，图里自己加的
+    296.79 与 846.39 不列（那笔钱已由明细代表），算式里被再引用的 549.6 也不重复列。
+    """
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
         "type": "expense", "amount": 0, "category": "其他", "note": "不是票据，是聊天/文字截图",
-        "text_lines": ["打车186.79+闪送110=296.79", "午饭晚饭水一共549.6", "客户有五份晚饭"],
+        "text_lines": ["打车186.79+闪送110=296.79", "午饭晚饭水一共549.6",
+                       "客户有五份晚饭", "296.79+549.6=846.39"],
     })
     out = intake.ingest(tmp_path, [
         {"name": "微信图片_1.jpg", "rel_path": "919昆明项目发票/微信图片_1.jpg", "content": b"x"},
     ])
     drafts = pending.list_all(tmp_path)
     amounts = sorted(d["amount_cents"] for d in drafts)
-    assert amounts == [11000, 18679, 29679, 54960], f"金额候选不对：{amounts}"
+    assert amounts == [11000, 18679, 54960], f"该报的只有三条明细：{amounts}"
     # 每条的 note 都要留住原文，且带「请人工核对」→ 面板上的「需核对」徽章靠它亮
     assert all("原文：" in d["note"] for d in drafts)
     assert all("请人工核对" in d["note"] for d in drafts)
-    total = next(d for d in drafts if d["amount_cents"] == 29679)
-    assert "合计" in total["note"], "等号右边的是合计，要标注以免用户重复记"
-    # 分类按原文行判（读原文，不推断）：打车/闪送算交通，饭水算餐饮
+    # 分类按**条目名**判，不按整行（一行里两笔钱可以是两个类别）
     cats = {d["amount_cents"]: d["category"] for d in drafts}
-    assert cats[18679] == "交通" and cats[54960] == "餐饮"
+    assert cats[18679] == "交通", "「打车」→ 交通"
+    assert cats[11000] == "经营", "「闪送」寄的是物料 → 经营（这一类含快递/寄件）"
+    assert cats[54960] == "餐饮", "「午饭晚饭水」→ 餐饮"
+    labels = {d["amount_cents"]: d["note"] for d in drafts}
+    assert "打车" in labels[18679] and "闪送" in labels[11000], "条目名要写进 note，用户才看得懂"
     b = out["batches"][0]
-    assert b["draft_count"] == 4
-    assert b["files"][0]["text_amounts"] == 4
+    assert b["draft_count"] == 3
+    assert b["files"][0]["text_amounts"] == 7, "读到的金额仍是 7 个（含图里自己算的合计）"
+    assert b["files"][0]["total_amounts"] == 4, "如实报出有几个是图里自己算的合计"
     # 汇总要靠这个数才知道"这批是候选，别全确认"（之前写错位置，图片走不到，一直显示 0）
-    assert b["text_amount_drafts"] == 4
+    assert b["text_amount_drafts"] == 3
 
 
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
