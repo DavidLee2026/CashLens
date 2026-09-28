@@ -781,6 +781,12 @@ def _match_list_orders(records: list[dict]) -> list[dict]:
         for row in rec.get("orders") or []:
             ts = _parse_ts(row.get("at") or "")
             cents = int(round(float(row.get("amount") or 0) * 100))
+            if cents <= 0:
+                # 金额 0 的行**整个跳过**（用户 2026-09-28：「先不列 0 元的了」「果然是没有必要，
+                # 因为这个已经列在其他截图里了，而且不是 0 元」）——
+                # 这类行多半是截图被裁掉、金额没进画面，而同一天的付款详情那张通常已经把它记了；
+                # 既不能建草稿，也没必要在汇总里占一句让人去核对。
+                continue
             hit = None
             for v in vouchers:
                 if not ts or v["ts"][0] != ts[0]:

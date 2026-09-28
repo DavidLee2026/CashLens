@@ -197,8 +197,9 @@ def test_order_list_is_matched_to_a_voucher_by_time_not_by_amount():
     assert [m["at"] for m in hit] == ["2026-09-18 11:55:53"], "时间对得上的那条要配上"
     assert hit[0]["delta_seconds"] == 44 and hit[0]["voucher_file"] == "…123051.jpg"
     assert hit[0]["amount_differs"] is False
-    # 另一条 12:14:55 离得远（19 分钟）→ 不配，但**必须列出来**，不能悄悄吞掉
-    assert [m["at"] for m in out[0]["unmatched"]] == ["2026-09-18 12:14:55"]
+    # 12:14:55 那条是 **0 元**（截图被裁、金额没进画面）→ 整个跳过：
+    # 用户 2026-09-28 定的口径「先不列 0 元的了」「没有必要，因为这个已经列在其他截图里了」。
+    assert out[0]["unmatched"] == [], "0 元的行既不建草稿，也不占汇总里那句「没配到」"
 
 
 def test_order_list_matching_degrades_safely_without_a_clock():
@@ -209,10 +210,12 @@ def test_order_list_matching_degrades_safely_without_a_clock():
     day_only = {"file": "v.jpg", "ok": True, "doc_kind": "payment",
                 "gross_cents": 7800, "occurred_at": "2026-09-18"}
     listed = {"file": "l.jpg", "ok": True, "doc_kind": "list", "orders": [
-        {"at": "2026-09-18", "amount": 78.0}, {"at": "2026-09-18", "amount": 12.5}]}
+        {"at": "2026-09-18", "amount": 78.0}, {"at": "2026-09-18", "amount": 12.5},
+        {"at": "2026-09-18", "amount": 0.0}]}
     out = _match_list_orders([day_only, listed])[0]
     assert len(out["matched"]) == 1 and out["matched"][0]["amount_cents"] == 7800
     assert len(out["unmatched"]) == 1 and out["unmatched"][0]["amount_cents"] == 1250
+    assert all(x["amount_cents"] for x in out["unmatched"]), "0 元那条不进 unmatched"
 
     # 时间差超过窗口 → 不配（金额一致也不行）
     far = dict(day_only, occurred_at="2026-09-18 14:00:00")
@@ -288,7 +291,7 @@ def test_file_stages_names_which_image_the_order_list_duplicates():
                             "name": "A4文档(彩色单面)", "status": "已退款",
                             "voucher_file": "微信图片_20260924123051.jpg",
                             "delta_seconds": 44, "amount_differs": False}],
-               "unmatched": [{"at": "2026-09-18 12:14:55", "amount_cents": 0,
+               "unmatched": [{"at": "2026-09-18 12:14:55", "amount_cents": 3000,
                               "name": "A4文档(彩色单面)", "status": "已完成"}]}}
     st = _file_stages("微信图片_20260924123055.jpg", [got], [], 0, 0)
     assert "微信图片_20260924123051.jpg" in st["processed"], "点名是哪张图重复"
@@ -296,7 +299,7 @@ def test_file_stages_names_which_image_the_order_list_duplicates():
     assert "微信图片_20260924123051.jpg" in st["how"], "「要记就用那张」也要点名"
     assert "没配到付款凭证的 1 笔" in st["how"], "没配到的照样列出来"
     assert "12:14:55" in st["how"]
-    assert "没有建草稿" in st["how"], "没配到的这条是 0 元 → 不该建草稿，也要说清"
+    assert "没有建草稿" in st["how"], "没配到、又不该建的，要说清为什么"
 
     # 没配到、但有金额又不是退款 → **要列成候选**（用户口径：员工先垫付、第二天报销是正常的）
     got2 = dict(got, list_match={
