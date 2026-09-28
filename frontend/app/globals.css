@@ -293,6 +293,8 @@ button{font-family:inherit}
 .ev-pick{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:1;min-width:0;
   border:none;background:none;text-align:left;cursor:pointer;font-family:inherit;color:inherit;padding:0}
 .ev-pick:hover b,.ev.on .ev-pick b{color:var(--brand)}
+/* 「点开明细」小提示：让"能点"这件事看得见（未归项目那行没有 ⋯/×，容易被当成坏掉） */
+.pick-hint{color:var(--text-3)}
 /* 待确认里的项目下拉：归属必须能在确认那一刻改（用户不一定说对） */
 .proj-pick{flex:0 0 auto;max-width:150px;border:1px solid var(--border);background:var(--white);
   border-radius:8px;padding:3px 6px;font-size:11.5px;font-family:inherit;color:var(--text)}

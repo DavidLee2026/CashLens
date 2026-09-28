@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import os
 import time
@@ -186,17 +187,28 @@ def _cashflow_text() -> dict:
     return query_tools.cashflow_text(_events())
 
 
+# 只有**文件导入**产生的草稿才开严格去重（防的是"同一份票据被导入两次"）。
+# 口述/一句话记的草稿是用户逐笔确认的：他说两遍就是两笔，不该被去重悄悄吃掉。
+_FILE_DRAFT_SOURCES = ("识别", "报销表", "账单")
+
+
 def _append_event(direction: str, amount_cents: int, category: str, channel: str, note: str,
-                  counterparty: str = "", project: str = ""):
-    """真正写入事件账本（确认后调用）。返回 (event, appended)。project 在草稿生成时已解析好。"""
+                  counterparty: str = "", project: str = "", *, strict_dedupe: bool = True):
+    """真正写入事件账本（确认后调用）。返回 (event, appended)。project 在草稿生成时已解析好。
+
+    `strict_dedupe`：账本里已有同 dedupe_key 的事件时是否跳过不写。默认 True（导入路径用），
+    口述草稿由 `pending_accept` 传 False —— 见 `_FILE_DRAFT_SOURCES` 的说明。
+    """
     ev = make_event(
         ts=datetime.now(), event_type=direction, amount_cents=amount_cents,
         evidence_kind="voice", channel=channel or "manual", category=category or "其他",
         counterparty=counterparty or "", note=note or "", confirmed=True,
         project=project or "",
+        # 口述/手工确认的条目不去重（见 make_event 的 dedupe_unique 说明）
+        dedupe_unique=not strict_dedupe,
     )
     book = EventLedger(LEDGER_PATH)
-    res = book.append(ev, strict_dedupe=True)
+    res = book.append(ev, strict_dedupe=strict_dedupe)
     return ev, res["appended"]
 
 
@@ -918,7 +930,10 @@ def pending_accept(pid: str, body: PendingAcceptIn | None = None):
     # 分类同理可在确认那一刻改：草稿分类是「待确认」（机器没判出来）时就该由人补上。
     # `pending.accept` 内部还会把占位符收成空串，账本里永远不出现「待确认」这个"分类"。
     cat_override = body.category if body is not None else None
-    out = pending.accept(DATA_DIR, pid, _append_event, project_override=override,
+    draft = pending.get(DATA_DIR, pid) or {}
+    strict = draft.get("source") in _FILE_DRAFT_SOURCES
+    append = functools.partial(_append_event, strict_dedupe=strict)
+    out = pending.accept(DATA_DIR, pid, append, project_override=override,
                          category_override=cat_override)
     if out is None:
         raise HTTPException(status_code=404, detail="待确认草稿不存在")

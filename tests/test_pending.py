@@ -271,3 +271,82 @@ def test_panel_offers_a_category_picker_for_unconfirmed_rows_and_never_labels_it
     assert "category: draftCategory[p.id] ?? \"\"" in src, "批量确认要带上每行选的分类"
     # 空分类显示成「未分类」，不拿「其他」冒充
     assert 'ev.category || "未分类"' in src, "空分类应显示「未分类」"
+
+
+# ─── 去重挡下时不能静默丢数据（2026-09-28 真机）────────────────────
+# 现场：用户口述记了 4 笔 ¥28，点「全部确认」，界面报「已确认入账 4 笔（支出 ¥112.00）」，
+# 但账本只有 1 笔 —— 另外 3 笔被 strict_dedupe 挡下（4 个草稿的
+# project/channel/金额/日期/分类/商户 完全一样，去重键相同），而 accept 不管成没成
+# 都把草稿删了。结果：草稿没了、账没记上、界面还说成功。
+
+def _temp_data(tmp_path, monkeypatch):
+    from app import main
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    return tmp_path
+
+
+def test_same_manual_entry_confirmed_twice_records_twice(tmp_path, monkeypatch):
+    """口述的草稿：他说两遍就是两笔，不该被去重悄悄吃掉。
+
+    去重是为了防「同一份票据被导入两次」；口述是用户逐笔确认的动作，
+    没有"重复导入"这回事。所以严格去重只对**文件导入**的草稿生效。
+    """
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    _temp_data(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+
+    for _ in range(2):
+        d = pending.create(tmp_path, direction="expense", amount_cents=2800,
+                           category="交通", channel="manual", note="打车")
+        assert client.post(f"/api/pending/{d['id']}/accept", json={}).json()["appended"] is True
+
+    events = [e for e in main.EventLedger(main.LEDGER_PATH).load() if e["type"] == "expense"]
+    assert len(events) == 2, f"口述两笔应当记两笔，实际 {len(events)} 笔"
+    assert sum(e["amount_cents"] for e in events) == 5600
+    assert pending.list_all(tmp_path) == [], "两笔都写成功了，草稿应当都已弹掉"
+
+
+def test_duplicate_file_draft_is_skipped_but_the_draft_is_kept(tmp_path, monkeypatch):
+    """文件导入的草稿：去重照旧生效，但**必须留下草稿**，并且如实返回 appended=False。
+
+    以前这里会连草稿一起删掉 —— 用户既没记上账、也找不回那条草稿，是静默丢数据。
+    现在草稿继续留在「待确认」里，前端会明说"与已有记录完全相同、没有重复入账"。
+    """
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    _temp_data(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+
+    def one(source: str):
+        d = pending.create(tmp_path, direction="expense", amount_cents=4050,
+                           category="购物", channel="receipt", note="便利店")
+        pending.update(tmp_path, d["id"], source=source)
+        return client.post(f"/api/pending/{d['id']}/accept", json={}).json()
+
+    assert one("识别")["appended"] is True
+    second = one("识别")
+    assert second["appended"] is False, "同一份票据导入两次，第二笔应当被去重挡下"
+    assert len(pending.list_all(tmp_path)) == 1, "被挡下的那笔草稿必须留着，不能静默删掉"
+
+    events = [e for e in main.EventLedger(main.LEDGER_PATH).load() if e["type"] == "expense"]
+    assert len(events) == 1, "去重生效：账本里只应有一笔"
+
+
+def test_confirm_reports_truthfully_when_a_draft_is_deduped():
+    """界面上报「已确认入账」之前，必须看过后端返回的 `appended`。
+
+    2026-09-28 真机：一次批量报了「已确认入账 4 笔（支出 ¥112.00）」，账本只有 1 笔。
+    以前单笔与批量都只数"请求成功了几次"，不看有没有真写进账本 —— 这是**假汇报**。
+    """
+    src = _page_tsx()
+    assert "res.appended === false" in src, "单笔确认要按 appended 分支"
+    assert "r.appended === false" in src, "批量确认要按 appended 计数"
+    assert "skipped" in src, "批量要把被去重挡下的笔数单独报出来"
+    assert "没有重复入账" in src, "要说清为什么没入账，不能只说成功"
