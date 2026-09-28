@@ -1002,7 +1002,13 @@ export default function Workbench() {
             paint(`正在读第 ${ev.index}/${ev.total} 个：${ev.file} · 已 ${secs}`);
           } else if (ev.stage === "file_done") {
             const st = ev.stages ?? blank();
-            blocks[ev.index - 1] = { file: ev.file, done: true, stages: st, brief: st.processed };
+            /* 没生成草稿时**必须把原因一起写在那一行里**（原因在「识别」栏，比如「没识别到金额」）。
+               起因（2026-09-28 真机）：用户导入三张微信聊天截图，界面每张只写「未生成草稿」，
+               而"为什么"藏在折叠明细里 —— 看起来就像系统坏了。只报"没成"不报"为什么"，等于没报。 */
+            const brief = st.processed === "未生成草稿"
+              ? `${st.processed} · ${st.recognized}`
+              : st.processed;
+            blocks[ev.index - 1] = { file: ev.file, done: true, stages: st, brief };
             paint(ev.index < ev.total
               ? `正在读第 ${ev.index + 1}/${ev.total} 个…`
               : "正在收尾：把草稿归到项目里…");

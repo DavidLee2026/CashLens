@@ -260,6 +260,18 @@ def test_footer_line_belongs_to_the_right_column_and_left_panel_runs_to_the_bott
     assert "text-align:center" in _tight(_rules(".footnote{")), "口径说明在右栏内居中"
 
 
+def test_no_draft_reason_is_shown_on_the_same_line():
+    """「未生成草稿」那一行必须带上**原因**，不能只说"没成"。
+
+    起因（2026-09-28 真机）：用户导入三张微信聊天截图（群里的报账对话），
+    界面每张只写「未生成草稿」，而真正的原因（"没识别到金额"）藏在折叠的四段明细里 ——
+    看起来就像系统坏了。**只报"没成"不报"为什么"，等于没报。**
+    """
+    src = _page_src()
+    assert 'st.processed === "未生成草稿"' in src, "没生成草稿时要单独拼一句带原因的 brief"
+    assert "${st.processed} · ${st.recognized}" in src, "原因取「识别」栏那句（如「没识别到金额」）"
+
+
 # ------------------------------------------------------- 一次导入只占一个框
 
 
