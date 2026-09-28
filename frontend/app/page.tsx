@@ -165,6 +165,14 @@ type IntakeBatch = {
   /* 这批里有多少条草稿是"图内文字金额"的候选（含合计行、重复行）——
      汇总的合计会把它们全加起来，所以必须提醒用户"别全确认"。 */
   text_amount_drafts?: number;
+  /* 订单列表 ↔ 付款凭证的配对结论（后端按**时间**配对：实弹那两张相差 44 秒）。
+     命中的只是"把结论说出来"（列表页本来就不建草稿）；没配到的要如实列出来。 */
+  list_matches?: {
+    file: string;
+    matched: { at: string; amount_cents: number; name: string; status: string;
+               voucher_file: string; delta_seconds: number | null; amount_differs: boolean }[];
+    unmatched: { at: string; amount_cents: number; name: string; status: string }[];
+  }[];
   errors: { file?: string; error: string }[];
 };
 type IntakeResult = {
@@ -255,6 +263,25 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
       lines.push(b.text_amount_drafts >= b.draft_count
         ? `  这 ${b.text_amount_drafts} 条都是从图里文字读出来的候选（请核对该报哪几笔）`
         : `  其中 ${b.text_amount_drafts} 条来自图内文字（请核对该报哪几笔）`);
+    }
+    for (const m of b.list_matches ?? []) {
+      // 订单列表与付款凭证的配对（时间为主）：**同一笔只记一次**这句话必须让用户看见，
+      // 不然他看到列表页"没生成草稿"会以为系统漏了。没配到的也照实说。
+      if (m.matched.length) {
+        const secs = m.matched.find((x) => x.delta_seconds !== null)?.delta_seconds;
+        const gap = secs === undefined || secs === null ? "" : `（时间相差 ${secs} 秒）`;
+        lines.push(`  订单列表里有 ${m.matched.length} 笔与付款凭证是同一笔${gap}，只按付款凭证记一次`);
+        for (const x of m.matched.filter((y) => y.amount_differs)) {
+          lines.push(`    ⚠️ ${x.at} 时间对得上但金额不一致（列表 ${yuan(x.amount_cents)}），请核对`);
+        }
+      }
+      if (m.unmatched.length) {
+        const shown = m.unmatched.slice(0, 3)
+          .map((x) => `${x.at || "时间未读到"} ${yuan(x.amount_cents)}`).join("、");
+        const more = m.unmatched.length > 3 ? ` 等 ${m.unmatched.length} 笔` : "";
+        lines.push(`  订单列表里还有 ${m.unmatched.length} 笔没配到付款凭证：${shown}${more}`
+          + `——列表页只有总价，需要的话你自己记一笔`);
+      }
     }
     if (b.declared_total_cents) {
       const diff = b.reconcile_diff_cents ?? 0;

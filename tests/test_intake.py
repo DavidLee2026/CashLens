@@ -161,6 +161,10 @@ def test_cache_keeps_text_lines_and_fingerprint_carries_prompt_version():
     命中缓存的那次没有原文可用；而旧缓存条目又会一直命中。指纹加版本号 = 旧条目自动失效。
     """
     assert "text_lines" in intake._CACHE_FIELDS
+    # 2026-09-28 补：页面类型 / 退款 / 时间 / 订单行也要进缓存字段表，
+    # 否则命中旧缓存时这些新字段会凭空消失（这坑踩过一次）
+    for k in ("doc_kind", "refund_amount", "occurred_at", "orders"):
+        assert k in intake._CACHE_FIELDS, f"{k} 也要进缓存字段表"
     fp = intake._model_fingerprint()
     assert intake._RECOG_PROMPT_VERSION in fp, "提示词版本要进指纹，改结构才能让旧缓存失效"
 

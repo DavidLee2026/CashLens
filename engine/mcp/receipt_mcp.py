@@ -92,6 +92,8 @@ RECOGNIZE_PROMPT = """你是一个票据识别助手。请识别这张图片中�
   "doc_kind": "receipt|payment|unpaid|list|chat",
   "amount": 数字,
   "refund_amount": 数字,
+  "occurred_at": "YYYY-MM-DD HH:MM:SS",
+  "orders": [{"at": "YYYY-MM-DD HH:MM:SS", "amount": 数字, "name": "商品名", "status": "状态"}],
   "date": "YYYY-MM-DD",
   "merchant": "商户名称",
   "category": "餐饮|交通|购物|房租|其他",
@@ -123,15 +125,20 @@ RECOGNIZE_PROMPT = """你是一个票据识别助手。请识别这张图片中�
    items 填「商品说明」那一行，**另外把页面上出现的商家名 / 小程序名 / 服务名也各抄一条**
    （例：账单里的「爱萝卜打印」要抄进去，否则分类认不出是打印）；
    date 取支付时间；text_lines 填空数组 []（它已经是结构化信息，不需要再逐行抄一遍）
-8. **退款要单独填**：页面上写了「已退款 ¥6.00」「退款记录」「退款成功」这类，就把**退款金额**写进
+8. **时间要读全**：页面上的支付时间 / 交易时间 / 下单时间，能读到时分秒就填 `occurred_at` = "YYYY-MM-DD HH:MM:SS"，
+   只读到日期就填 "YYYY-MM-DD"（**不要自己编时分秒**）。发票取开票日期即可。
+9. `list`（订单列表 / 账单列表）还要把**每一行**抄进 `orders`：时间（`at`，同样读全）、金额（`amount`）、
+   商品名（`name`）、状态（`status`，如 已完成 / 已退款 / 待打印 / 未付款）。**一行一条，不要漏、不要自己算合计**——
+   后端要拿这些时间去和同批付款凭证的支付时间对，判断哪一行是同一笔。
+10. **退款要单独填**：页面上写了「已退款 ¥6.00」「退款记录」「退款成功」这类，就把**退款金额**写进
    refund_amount（没有退款填 0，不要自己算净额）——净额由后端减，你只负责把两个数读准。
-9. `unpaid` 与 `list`：amount 保持 0、refund_amount 填 0、items 留空、
+11. `unpaid` 与 `list`：amount 保持 0、refund_amount 填 0、items 留空、
    note 写清是哪种（"待支付，钱还没出去" / "订单列表，不是付款凭证"），并把图里的文字逐行原样抄进 text_lines
-10. `chat`：amount 保持 0、items 留空、confidence 填 0，note 写"不是票据，是聊天/文字截图"，
+12. `chat`：amount 保持 0、items 留空、confidence 填 0，note 写"不是票据，是聊天/文字截图"，
    把图里的文字**逐行原样**抄进 text_lines（一行一条，不要合并、不要改写、不要翻译），
    **不要替用户挑金额、不要算合计、不要判断哪笔该报** —— 只抄原文，选哪笔由用户决定
-11. 如果图是发票/小票/付款凭证，text_lines 填空数组 []
-12. 只输出 JSON"""
+13. 如果图是发票/小票/付款凭证，text_lines 填空数组 []
+14. 只输出 JSON"""
 
 
 def log(msg: str):
