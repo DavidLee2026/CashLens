@@ -322,7 +322,7 @@ export default function Workbench() {
   /* 批量确认：默认收起，点「全部确认」才展开一次确认条。
      ⚠️ 不做成一键直入账——合规红线是「用户确认环节不得为体验而取消」，
      所以这里仍然是用户显式点的，而且要先把「共几笔 / 多少钱 / 其中几笔带核对提示」摆出来。 */
-  const [batchAsk, setBatchAsk] = useState(false);
+  const [batchAsk, setBatchAsk] = useState<null | "accept" | "decline">(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
@@ -644,7 +644,32 @@ export default function Workbench() {
         `批量确认中断：已入账 ${done} 笔，其余未动。请确认后端在运行后重试。` }]);
     } finally {
       setBatchBusy(false);
-      setBatchAsk(false);
+      setBatchAsk(null);
+      refresh();
+    }
+  }
+
+  /** 批量取消（丢弃草稿）：拖错文件夹时用，省得一笔一笔点「不要」。
+      ⚠️ 它**不写账本** —— 这些草稿本来就还没入账，所以「全部取消」不产生任何账本记录，
+      也没有"能不能撤回"的问题：文件还在原处，重新拖进来就回来了。 */
+  async function actBatchDecline(ids: string[]) {
+    const targets = pendingList.filter((p) => ids.includes(p.id));
+    if (!targets.length || batchBusy) return;
+    setBatchBusy(true);
+    let done = 0;
+    try {
+      for (const p of targets) {
+        await j(`/api/pending/${p.id}/decline`, { method: "POST" });
+        done += 1;
+      }
+      setMsgs((m) => [...m, { role: "ai", text:
+        `已丢弃 ${done} 笔待确认草稿，账本未变动。需要时把文件重新拖进来即可。` }]);
+    } catch {
+      setMsgs((m) => [...m, { role: "ai", text:
+        `批量取消失败：已丢弃 ${done} 笔，其余仍在待确认里。请确认后端在运行后重试。` }]);
+    } finally {
+      setBatchBusy(false);
+      setBatchAsk(null);
       refresh();
     }
   }
@@ -1535,17 +1560,27 @@ export default function Workbench() {
                   {batchAsk ? (
                     <span className="sect-note">确认后才入账</span>
                   ) : (
-                    <button
-                      className="btn-mini"
-                      disabled={batchBusy || actingIds.size > 0}
-                      title="一次确认多笔：仍然由你点，机器不会自动入账；会先把总笔数、总额与带「需核对」提示的笔数摆出来"
-                      onClick={() => setBatchAsk(true)}
-                    >
-                      {batchBusy ? "入账中…" : "全部确认"}
-                    </button>
+                    <span className="sect-acts">
+                      <button
+                        className="btn-mini"
+                        disabled={batchBusy || actingIds.size > 0}
+                        title="一次确认多笔：仍然由你点，机器不会自动入账；会先把总笔数、总额与带「需核对」提示的笔数摆出来"
+                        onClick={() => setBatchAsk("accept")}
+                      >
+                        {batchBusy ? "处理中…" : "全部确认"}
+                      </button>
+                      <button
+                        className="btn-mini"
+                        disabled={batchBusy || actingIds.size > 0}
+                        title="一次丢弃多笔（拖错文件夹时用）：只删待确认草稿，账本不受影响，需要时把文件重新拖进来即可"
+                        onClick={() => setBatchAsk("decline")}
+                      >
+                        全部取消
+                      </button>
+                    </span>
                   )}
                 </div>
-                {batchAsk && (
+                {batchAsk === "accept" && (
                   <div className="pd-confirm">
                     <p>
                       将 <b>{pendingList.length}</b> 笔入账：支出 <b>{yuan(batchExpense)}</b>
@@ -1565,8 +1600,26 @@ export default function Workbench() {
                               onClick={() => actBatch(pendingList.map((x) => x.id))}>
                         确认全部 {pendingList.length} 笔
                       </button>
-                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(false)}>
+                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
                         取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {batchAsk === "decline" && (
+                  <div className="pd-confirm">
+                    <p>
+                      将丢弃 <b>{pendingList.length}</b> 笔待确认草稿：支出 <b>{yuan(batchExpense)}</b>
+                      {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
+                      <b>账本不受影响</b>——这些本来就还没入账；需要时把文件重新拖进来即可。
+                    </p>
+                    <div className="pd-confirm-acts">
+                      <button className="btn-mini danger" disabled={batchBusy}
+                              onClick={() => actBatchDecline(pendingList.map((x) => x.id))}>
+                        确认全部不要
+                      </button>
+                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
+                        返回
                       </button>
                     </div>
                   </div>

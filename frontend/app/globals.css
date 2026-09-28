@@ -210,6 +210,7 @@ button{font-family:inherit}
 .sect h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin-bottom:8px}
 .sect-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .sect-head h3{font-size:12px;letter-spacing:.1em;color:var(--text-2);font-weight:700;margin:0}
+.sect-acts{display:inline-flex;align-items:center;gap:6px}
 .tag{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
 .tag .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
 .t-learning{color:var(--warn);background:var(--warn-bg)}

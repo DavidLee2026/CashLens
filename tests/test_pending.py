@@ -130,7 +130,7 @@ def test_batch_confirm_stays_behind_an_explicit_second_click():
 
     合规红线是「用户确认环节不得为体验而取消」。批量确认只是把 17 次点击并成 2 次，
     仍然是用户显式发起的；这条测试锁住：
-      ① 存在批量入口「全部确认」，且它只是把确认条打开（setBatchAsk(true)）；
+      ① 存在批量入口「全部确认」，且它只是把确认条打开（setBatchAsk("accept")）；
       ② 确认条里必须先摆出笔数与金额，再给「确认全部 N 笔」；
       ③ 批量走的是同一个 accept 端点（不新增接口，端点数不变）；
       ④ 中途失败要如实报告已入账几笔，不许假装全成功。
@@ -138,7 +138,7 @@ def test_batch_confirm_stays_behind_an_explicit_second_click():
     src = _page_tsx()
 
     assert "全部确认" in src, "左栏待确认面板应有批量入口"
-    assert "setBatchAsk(true)" in src, "批量入口只能打开确认条，不能直接入账"
+    assert 'setBatchAsk("accept")' in src, "批量入口只能打开确认条，不能直接入账"
     # 确认条里要摆数字再让用户点
     assert "batchExpense" in src and "batchIncome" in src, "确认条要先摆出支出/收入合计"
     assert "确认全部 {pendingList.length} 笔" in src, "确认条里要有明确的「确认全部 N 笔」按钮"
@@ -172,3 +172,23 @@ def test_pending_panel_labels_fourth_field_and_missing_date():
     assert "导入于" in src, "created 应只作为 title 里的说明出现"
     # 需核对提示要看得见（批量确认时用户据此决定是否排除）
     assert "需核对" in src and "needsReview" in src
+
+
+def test_batch_decline_asks_first_and_never_touches_the_ledger():
+    """「全部取消」同样要先问一句，并且绝不能碰账本。
+
+    场景（用户提的）：拖错了文件夹，17 笔全进来了，一笔一笔点「不要」太费劲。
+    但「丢弃」对用户是不可逆的（草稿删掉就得重新导入），所以同样必须二次点击；
+    确认条里还要如实说明「账本不受影响」—— 这些草稿本来就没入账，
+    所以「全部取消」不产生任何账本记录，也不存在"能不能撤回"的问题。
+    """
+    src = _page_tsx()
+
+    assert "全部取消" in src, "待确认面板应有批量丢弃入口"
+    assert 'setBatchAsk("decline")' in src, "批量丢弃入口只能打开确认条，不能直接丢"
+    assert "确认全部不要" in src, "确认条里要有明确的「确认全部不要」按钮"
+    assert "账本不受影响" in src, "要如实说明丢弃草稿不影响账本"
+    assert "`/api/pending/${p.id}/decline`" in src, "批量丢弃应复用单笔 decline 端点"
+    assert "批量取消失败：已丢弃" in src, "中途失败必须报告已丢弃笔数"
+    # 两个入口互斥：开了确认条就不再露出入口，避免"点了一下不知道会发生什么"
+    assert 'batchAsk === "accept"' in src and 'batchAsk === "decline"' in src
