@@ -10,7 +10,11 @@
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
   --font-mono:ui-monospace,"SF Mono",Menlo,monospace;
   --radius:12px;
-  --bg:var(--gray-50);
+  /* 🔴 面与块的深浅关系（2026-09-28 晚定，照 deepseek harness：左栏浅灰、右边纯白）：
+     页面 / 对话区 = 白（--bg），左栏面板 = --gray-50。
+     ⚠️ 改这两者中任何一个，都必须同步改左栏里的"块"（.kpi .cell / .pd-confirm）——
+     块的底色要跟所在的面**反过来**，否则会隐形。这一条今天已经反复过两次。 */
+  --bg:var(--white);
   --card:var(--white);
   --border:var(--gray-200);
   --text:var(--navy-900);
@@ -30,16 +34,17 @@ body{font-family:var(--font-sans);color:var(--text);background:var(--bg);line-he
 button{font-family:inherit}
 .num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 
-/* 顶栏 */
-.topbar{position:sticky;top:0;z-index:20;background:rgba(247,249,252,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
-.topbar-inner{max-width:1160px;margin:0 auto;padding:0 20px;height:56px;display:flex;align-items:center;justify-content:space-between}
+/* 顶栏已取消（2026-09-28 用户要求「账目信息移到最左边、顶部是 CashLens 的 logo」）
+   品牌与登录搬进左栏顶部 .side-head，整页铺满、左栏贴窗口左边缘。 */
+/* 登录入口（原来在顶栏右侧，现在在左栏顶部；只记本机用户名，不接账号体系，全用既有 token） */
+.login-edit{display:flex;align-items:center;gap:6px}
+/* 品牌：原来长在顶栏里，现在用在左栏顶部 .side-head 与窄屏的 .brandbar 两处（删顶栏时
+   差点把这几条一起删掉 —— 它们不属于顶栏，属于品牌本身） */
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--text)}
-.brand-mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--indigo-500),var(--cyan-400));display:grid;place-items:center;flex:0 0 auto}
+.brand-mark{width:26px;height:26px;border-radius:8px;flex:0 0 auto;
+  background:linear-gradient(135deg,var(--indigo-500),var(--cyan-400));display:grid;place-items:center}
 .brand-mark svg{width:15px;height:15px}
 .brand-sub{font-size:12px;color:var(--text-2);font-weight:400}
-/* 顶栏右侧：状态标签 + 登录入口（登录只记本地用户名，不接账号体系，全用既有 token） */
-.topbar-right{display:flex;align-items:center;gap:10px}
-.login-edit{display:flex;align-items:center;gap:6px}
 .login-edit input{border:1px solid var(--border);background:var(--white);border-radius:8px;
   padding:5px 9px;font-size:12px;font-family:inherit;color:var(--text);outline:none;width:150px}
 .login-edit input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
@@ -48,13 +53,24 @@ button{font-family:inherit}
    这样窄屏收成单列时对话仍在上面，符合移动端的主路径（先说话，再看数）。
    ⚠️ 必须同时显式写 grid-row:1：DOM 里 .side 排在 .convo 之后，而它的列号更小，
    按 Grid 自动放置规则（列号回退则行号 +1）会被挤到第二行，
-   表现就是左列空白、数据卡片掉到对话下方。窄屏单列时再还原为 auto。 */
-.main{max-width:1160px;margin:0 auto;padding:14px 20px 18px}
-.grid{display:grid;grid-template-columns:360px minmax(0,1.25fr);gap:18px}
+   表现就是左列空白、数据卡片掉到对话下方。窄屏单列时再还原为 auto。
+
+   🔴 **高度模型（2026-09-28 晚按用户要求定为最终版，别再改回"整页滚"）**：
+   工作台**不整页滚动** —— `.main` 直接占满「视口 − 顶栏 56px」，`.grid` 用 flex:1
+   吃掉剩下的高度（min-height:0 才能让子项真的收缩）；
+   于是**左栏自己滚、右栏自己滚**（各一条滚动条，互不影响，顶部文字不跟着对方跑）。
+   上一版曾把两栏都改成"跟内容长高、整页滚一个滚动条"，用户当场否掉：
+   「应该是左边管左边，右边管右边，怎么我上下滚动的时候，左边和右边顶部的文字在滚动？」 */
+.main{height:100vh;display:flex;flex-direction:column;padding:0}
+.grid{flex:1;min-height:0;display:grid;
+  grid-template-columns:340px minmax(0,1fr);gap:0}
 .convo{grid-column:2;grid-row:1}
 .side{grid-column:1;grid-row:1}
+/* 窄屏：一屏塞不下两栏，退回"单列 + 整页滚动"（手机上双栏各自滚反而更难用）。
+   ⚠️ 媒体查询不增加优先级，覆盖规则必须写在基础规则之后。 */
 @media (max-width:980px){
-  .grid{grid-template-columns:1fr}
+  .main{height:auto;display:block}
+  .grid{display:block}
   .convo,.side{grid-column:auto;grid-row:auto}
 }
 
@@ -63,10 +79,8 @@ button{font-family:inherit}
    现在内容直接落在页面底色上，只用发丝线分隔；需要浮在内容之上的弹层
    （.proj-pop / .attach-menu / .model-menu / .modal-card）仍保留自己的面。 */
 
-/* 对话区 */
-/* 对话区高度由"两栏里更高的那一栏"决定：min-height 只是下限（窗口高时对齐全屏），
-   内容更高时**整行一起长高**，两栏因此始终等高。 */
-.convo{display:flex;flex-direction:column;min-height:max(520px,calc(100vh - 118px));position:relative}
+/* 对话区：高度就是网格行给的那一份（不再跟内容长高），内部自己滚 */
+.convo{display:flex;flex-direction:column;min-height:0;position:relative}
 .convo-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
 .convo-head .t{font-weight:700;font-size:15px}
 .convo-head .muted{font-size:12px;color:var(--text-2)}
@@ -77,11 +91,11 @@ button{font-family:inherit}
   border-radius:var(--radius);border:2px dashed var(--brand);background:var(--brand-bg);
   color:var(--brand);font-size:13px;pointer-events:none}
 .drop-overlay b{font-size:16px}
-/* 对话**不自己滚**（David 2026-09-28：整页 + 对话 + 最近事件三处滚动条，看着头晕）：
-   消息直接往下排、跟着内容长高，**整页只有一个滚动条**。
-   ⚠️ 这里不能再加 flex:1 / height:0 / contain:size / overflow-y:auto 那一套
-   （那是"两栏等高 + 对话内部滚"的旧解法）；输入区改由 .composer 用 sticky 钉住。 */
-.log{flex:1 1 auto;padding:16px 18px 4px;display:flex;flex-direction:column;gap:14px}
+/* 对话**自己滚**（用户 2026-09-28 晚定）：右栏管右栏 —— 消息多了在这个区域内滚，
+   顶栏、左栏、输入区都不动。高度由 .convo 的 flex 分配，`overflow-y:auto` 让
+   自动最小尺寸归零，所以不会再出现"消息把容器撑高"那套问题（那套是老布局的坑）。 */
+.log{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding:18px 22px 4px;display:flex;flex-direction:column;gap:14px}
 /* 助手消息不再包框：直接是文字（配合"去掉框"）。用户消息保留一层浅色底，
    两者因此仍能一眼分清谁说的。 */
 .b{max-width:100%;font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
@@ -116,11 +130,12 @@ button{font-family:inherit}
 .pb-k{flex:0 0 30px;color:var(--text-2)}
 .pb-v{flex:1;min-width:0;color:var(--text)}
 /* 输入区：参考主流对话产品的做法，一个大输入框，左下角加附件、右下角选模型与发送 */
-/* 输入区整组（口径条 + 输入框 + 底部说明）钉在视口底部：整页只剩一个滚动条之后，
-   长对话会把输入框推出屏幕，sticky 让它在滚动过程中始终够得着。
-   背景必须不透明，否则下面的消息会从它背后透上来。 */
-.composer{position:sticky;bottom:0;z-index:6;background:var(--bg);
-  border-top:1px solid var(--border)}
+/* 输入区是右栏底部一个**圆角填充框**（照 deepseek harness 的做法）：整组包在框里、
+   四周留白，比"一条横线切到底"更像一个可操作的入口，也不用给整列加边框。
+   ⚠️ 里面的 .scope-bar / .inputrow / .inputfoot 自带左右内边距，所以这个框自身不再加横向 padding。 */
+.composer{flex:0 0 auto;margin:0 20px 14px;
+  border:1px solid var(--border);border-radius:14px;background:var(--card);
+  box-shadow:0 1px 2px rgba(10,37,64,.04)}
 .inputrow{display:flex;flex-wrap:wrap;align-content:space-between;align-items:center;gap:10px;
   min-height:112px;padding:12px 14px 10px}
 .inputrow input,.inputrow textarea{order:1;flex:1 0 100%;min-width:0;border:none;background:transparent;
@@ -154,7 +169,7 @@ button{font-family:inherit}
   padding:9px 10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text)}
 .attach-menu button:hover{background:var(--gray-50)}
 .am-sub{display:block;font-size:11px;font-weight:400;color:var(--text-2);margin-top:2px;line-height:1.4}
-.composer:focus-within{border-top-color:var(--brand)}
+.composer:focus-within{border-color:var(--brand)}
 .btn{border:none;border-radius:10px;background:var(--brand);color:#fff;font-size:14px;font-weight:600;padding:11px 22px;cursor:pointer}
 .btn:hover{background:var(--indigo-600)}
 .btn:disabled{opacity:.6;cursor:default}
@@ -218,8 +233,25 @@ button{font-family:inherit}
 /* 左栏：**没有内部滚动条**（David 2026-09-25 明确要求去掉），高度与对话区一致：
    min-height 负责"窗口高时对齐整屏"，内容更高时它自己长高、对话区跟着长高（两栏始终等高），
    所以既不会出现滚动条，也不会把卡片藏起来。 */
-.side{display:flex;flex-direction:column;gap:0;padding:0;
-  min-height:max(520px,calc(100vh - 118px))}
+/* 左栏：**自己滚**（左栏管左栏）+ **一块独立的面**（用户 2026-09-28 晚：
+   「左右板块没有区分」「应该是左边管左边，右边管右边」）。
+   注意"面"与"框"不是一回事：这里是通高、无圆角、无阴影、只有右边缘一条发丝线的面板，
+   不是原先那种悬浮卡片 —— 卡片已按用户要求去掉，别把 `.card` 再加回来。 */
+.side{display:flex;flex-direction:column;gap:0;padding:0;min-height:0;
+  background:var(--gray-50);border-right:1px solid var(--border)}
+/* 顶部品牌 + 登录：固定不动，只有中间那段跟着滚（deepseek harness 的侧栏也是这个结构） */
+.side-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:12px 14px;border-bottom:1px solid var(--border)}
+.side-head .brand{font-size:16px}
+.side-head-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+/* 左栏的滚动区（左栏管左栏）：滚动条出现在这一段的右边缘，品牌与登录不跟着跑 */
+.side-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+/* 窄屏才露出的品牌行（宽屏的品牌在左栏顶部） */
+.brandbar{display:none;align-items:center;gap:10px;font-weight:700;font-size:18px;
+  padding:12px 16px;border-bottom:1px solid var(--border)}
+/* ⚠️ 这里**故意不写** ::-webkit-scrollbar 自定义样式：macOS 默认是"覆盖式"滚动条
+   （不滚动就不显示、也不占宽度），一旦自己写 ::-webkit-scrollbar 就会变成常驻占位，
+   正好是用户最烦的那种"到处是滚动条"。两块区域各滚各的，但滚动条只在滚的时候露个脸。 */
 /* 左栏卡片：去掉卡片自身的圆角/边框/阴影，只用分隔线（是"一块面板"而不是一叠卡片）。
    position:relative 是新建 / 改名 / 删除确认三个浮层的定位锚点，不能删。 */
 .side .sect{padding:13px 16px;background:transparent;border:none;border-top:1px solid var(--border);
@@ -227,8 +259,16 @@ button{font-family:inherit}
 /* ⚠️ 窄屏覆盖必须写在上面 .side / .convo 基础规则**之后**：媒体查询不增加优先级，
    同优先级下后写的规则获胜 —— 写在前面会被基础规则盖掉（2026-09-25 实测 420px 失效）。
    单列堆叠时左栏不再对聊天区取齐（否则会多出一屏高的空白）。 */
+/* ⚠️ 这三条覆盖必须写在 .side-body / .brandbar 基础规则**之后**：
+   媒体查询不增加优先级，写在前面会被后面的基础规则静默盖掉（2026-09-25 踩过一次，
+   2026-09-28 把品牌搬进左栏时又踩了一次 —— 移动端品牌行整行不显示）。 */
 @media (max-width:980px){
-  .side{min-height:0}
+  .side{min-height:0;background:transparent;border-right:none;
+    border-top:1px solid var(--border)}
+  /* 窄屏左栏被排到对话下面：品牌行回到对话区顶部，左栏顶部那个品牌与它的内部滚动一并撤掉 */
+  .brandbar{display:flex}
+  .side-head .brand{display:none}
+  .side-body{overflow:visible}
 }
 .side .sect:first-child{border-top:none}
 .sect{padding:16px}
@@ -244,8 +284,7 @@ button{font-family:inherit}
 .t-fragile{color:var(--risk);background:var(--risk-bg)}
 .t-misconception{color:var(--risk);background:var(--risk-bg)}
 .kpi{display:flex;gap:12px;margin-bottom:10px}
-/* KPI 小格与批量确认条：取消卡片之后这两块落在页面底色（--gray-50）上，
-   必须换成白色面才看得出是一块面板（原先是灰面压在白卡上，正好反过来）。 */
+/* KPI 小格：左栏是浅灰的面，所以格子用白面才看得出来（见 :root 里那条"面与块"规则） */
 .kpi .cell{flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 11px}
 .kpi .cell .v{font-size:19px;font-weight:700;font-family:var(--font-mono)}
 .kpi .cell .k{font-size:11px;color:var(--text-2);margin-top:2px}
@@ -417,7 +456,11 @@ button{font-family:inherit}
   .dc-chk{grid-template-columns:70px auto 1fr}}
 .btn-mini.danger{background:var(--risk-bg);border-color:var(--risk);color:var(--risk)}
 .btn-mini.danger:hover{background:var(--risk);border-color:var(--risk);color:var(--white)}
-.footnote{font-size:11px;color:var(--text-3);text-align:center;padding:18px 0 8px}
+/* 左栏现在是自己滚动的容器（overflow 会裁剪溢出的内容），所以**右侧那一格**的
+   指标气泡要改成右对齐、向左展开 —— 230px 的气泡挂在 360px 宽的左栏里，
+   若仍 left:0 会有 150px 被右边缘切掉（2026-09-28 实测）。 */
+.kpi .cell:last-child .hint-q .q-tip{left:auto;right:0}
+.footnote{flex:0 0 auto;font-size:11px;color:var(--text-3);text-align:center;padding:6px 0 8px}
 /* 底部「关于」：灰色小字，不抢眼 */
 .link-about{margin-left:8px;border:none;background:transparent;color:var(--text-3);
   font-size:11px;font-family:inherit;text-decoration:underline;cursor:pointer;padding:0}
