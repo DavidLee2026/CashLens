@@ -58,13 +58,14 @@ button{font-family:inherit}
   .convo,.side{grid-column:auto;grid-row:auto}
 }
 
-/* 卡片 */
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 1px 2px rgba(10,37,64,.05)}
+/* 卡片：**取消**（David 2026-09-28：「去掉框，和 deepseek harness 一样」）。
+   原先左右两栏各是一张带边框/圆角/阴影的卡片，页面上看起来是一堆框叠一堆框。
+   现在内容直接落在页面底色上，只用发丝线分隔；需要浮在内容之上的弹层
+   （.proj-pop / .attach-menu / .model-menu / .modal-card）仍保留自己的面。 */
 
 /* 对话区 */
 /* 对话区高度由"两栏里更高的那一栏"决定：min-height 只是下限（窗口高时对齐全屏），
-   左栏内容更高时**整行一起长高**（页面滚动），两栏因此始终等高。
-   ⚠️ 这里不能用 height：定了 height 就没法跟左栏一起长。 */
+   内容更高时**整行一起长高**，两栏因此始终等高。 */
 .convo{display:flex;flex-direction:column;min-height:max(520px,calc(100vh - 118px));position:relative}
 .convo-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
 .convo-head .t{font-weight:700;font-size:15px}
@@ -76,28 +77,52 @@ button{font-family:inherit}
   border-radius:var(--radius);border:2px dashed var(--brand);background:var(--brand-bg);
   color:var(--brand);font-size:13px;pointer-events:none}
 .drop-overlay b{font-size:16px}
-/* contain:size = **对话消息不参与"两栏谁更高"的计算**：否则按 flex 规范，滚动子项的
-   max-content 贡献仍按内容算（实测灌 40 条消息把整行从 782 撑到 2741，输入框被推走）。
-   加了它之后：两栏高度只由左栏卡片与窗口高决定，消息再多也在对话区内部滚。
-   height:0 / min-height:0 一并保留，作为不支持 contain:size 时的兜底。 */
-.log{flex:1;height:0;min-height:0;contain:size;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
-.b{max-width:86%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
-.b.user{align-self:flex-end;background:var(--brand-bg);border-bottom-right-radius:4px}
-.b.ai{align-self:flex-start;background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
-/* 流式导入的进度气泡：处理中略淡，一眼看出「还在跑」；不加转圈动画（真进度比假动效有用） */
+/* 对话**不自己滚**（David 2026-09-28：整页 + 对话 + 最近事件三处滚动条，看着头晕）：
+   消息直接往下排、跟着内容长高，**整页只有一个滚动条**。
+   ⚠️ 这里不能再加 flex:1 / height:0 / contain:size / overflow-y:auto 那一套
+   （那是"两栏等高 + 对话内部滚"的旧解法）；输入区改由 .composer 用 sticky 钉住。 */
+.log{flex:1 1 auto;padding:16px 18px 4px;display:flex;flex-direction:column;gap:14px}
+/* 助手消息不再包框：直接是文字（配合"去掉框"）。用户消息保留一层浅色底，
+   两者因此仍能一眼分清谁说的。 */
+.b{max-width:100%;font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.b.user{max-width:86%;align-self:flex-end;background:var(--brand-bg);padding:10px 14px;
+  border-radius:14px;border-bottom-right-radius:4px}
+.b.ai{align-self:stretch}
+/* 流式导入的进度：处理中略淡，一眼看出「还在跑」；不加转圈动画（真进度比假动效有用） */
 .b.progress{color:var(--text-2)}
-/* 导入进度：一个文件一块，四行固定阶段（读取 / 识别 / 处理 / 方式）。
-   不把结果堆成一坨 —— 用户要能一眼看出每一步做了什么、卡在哪一段。 */
-.pb-list{display:flex;flex-direction:column;gap:11px}
-.pb{border-left:2px solid var(--border);padding-left:9px}
-.pb-file{font-weight:600;margin-bottom:4px;word-break:break-all;line-height:1.4}
-.pb-icon{margin-right:4px}
+/* 导入框：一次导入只占**一个框**（标题 + 逐文件 + 汇总都在里面）。
+   这是对话区里唯一保留边框的块 —— 整次导入是一件"事"，需要一眼看出边界；
+   其余消息（尤其助手回复）不加框。 */
+.b.import{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px 14px;align-self:stretch}
+.pb-head{font-size:12.5px;font-weight:700;color:var(--text-2);letter-spacing:.04em;
+  margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+/* 逐文件：**一行一个**。完成的只留「文件名 + 结果」，正在跑的那个展开四段明细；
+   想细看已完成的点文件名展开（一次一个）。十几个文件各四段叠起来能刷满整屏。 */
+.pb-list{display:flex;flex-direction:column;gap:3px;margin-bottom:2px}
+.pb{padding:2px 0}
+.pb-file{display:flex;align-items:baseline;gap:6px;width:100%;text-align:left;cursor:pointer;
+  border:none;background:none;font-family:inherit;font-size:13px;font-weight:600;
+  color:var(--text);padding:2px 0;line-height:1.5}
+.pb-file:hover .pb-name{color:var(--brand)}
+.pb-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-brief{flex:1 1 auto;min-width:0;font-weight:400;font-size:12px;color:var(--text-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-icon{flex:0 0 auto}
+/* 正在跑的那个文件：给一行左侧发丝线，四段明细缩排对齐在文件名下 */
+.pb:not(.done){border-left:2px solid var(--brand);padding-left:9px}
+.pb:not(.done) .pb-file{cursor:default}
 .pb-row{display:flex;gap:8px;font-size:12.5px;line-height:1.55}
 .pb-k{flex:0 0 30px;color:var(--text-2)}
 .pb-v{flex:1;min-width:0;color:var(--text)}
 /* 输入区：参考主流对话产品的做法，一个大输入框，左下角加附件、右下角选模型与发送 */
+/* 输入区整组（口径条 + 输入框 + 底部说明）钉在视口底部：整页只剩一个滚动条之后，
+   长对话会把输入框推出屏幕，sticky 让它在滚动过程中始终够得着。
+   背景必须不透明，否则下面的消息会从它背后透上来。 */
+.composer{position:sticky;bottom:0;z-index:6;background:var(--bg);
+  border-top:1px solid var(--border)}
 .inputrow{display:flex;flex-wrap:wrap;align-content:space-between;align-items:center;gap:10px;
-  min-height:112px;padding:12px 14px 10px;border-top:1px solid var(--border)}
+  min-height:112px;padding:12px 14px 10px}
 .inputrow input,.inputrow textarea{order:1;flex:1 0 100%;min-width:0;border:none;background:transparent;
   padding:6px 6px 0;font-size:15px;font-family:inherit;outline:none;color:var(--text)}
 /* 输入框改成 textarea 以支持回车换行：不要拖拽手柄，长高到约 5 行后自己滚 */
@@ -129,7 +154,7 @@ button{font-family:inherit}
   padding:9px 10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text)}
 .attach-menu button:hover{background:var(--gray-50)}
 .am-sub{display:block;font-size:11px;font-weight:400;color:var(--text-2);margin-top:2px;line-height:1.4}
-.inputrow:focus-within{border-top-color:var(--brand)}
+.composer:focus-within{border-top-color:var(--brand)}
 .btn{border:none;border-radius:10px;background:var(--brand);color:#fff;font-size:14px;font-weight:600;padding:11px 22px;cursor:pointer}
 .btn:hover{background:var(--indigo-600)}
 .btn:disabled{opacity:.6;cursor:default}
@@ -219,7 +244,9 @@ button{font-family:inherit}
 .t-fragile{color:var(--risk);background:var(--risk-bg)}
 .t-misconception{color:var(--risk);background:var(--risk-bg)}
 .kpi{display:flex;gap:12px;margin-bottom:10px}
-.kpi .cell{flex:1;background:var(--gray-50);border:1px solid var(--border);border-radius:10px;padding:8px 11px}
+/* KPI 小格与批量确认条：取消卡片之后这两块落在页面底色（--gray-50）上，
+   必须换成白色面才看得出是一块面板（原先是灰面压在白卡上，正好反过来）。 */
+.kpi .cell{flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 11px}
 .kpi .cell .v{font-size:19px;font-weight:700;font-family:var(--font-mono)}
 .kpi .cell .k{font-size:11px;color:var(--text-2);margin-top:2px}
 .bar{height:7px;background:var(--gray-100);border-radius:99px;overflow:hidden;margin:4px 0 2px}
@@ -243,13 +270,10 @@ button{font-family:inherit}
 .ev{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed var(--gray-200);font-size:13px}
 .ev:last-child{border-bottom:none}
 .ev .m{color:var(--text-2);font-size:12px;display:block}
-/* 「最近事件」是左栏唯一允许内部滚动的地方（用户 2026-09-28 要求：只露 5 条，
-   更多用滚轮上下看，否则整页太长）。
-   ⚠️ 别"顺手"把这个 overflow 去掉：左栏整体不要滚动条是另一条要求（2026-09-25），
-   两者不冲突 —— 这里是有意为之的局部窗口。
-   5 行 = 227.5px：行高是**实测**的 45.5px（CDP 在真实 CSS 环境里插入同款节点量得），
-   不是估的。改 .ev 的内边距或字号后要重新量、并同步这个算式。 */
-.ev-list{max-height:calc(5 * 45.5px);overflow-y:auto;overscroll-behavior:contain}
+/* 「最近事件」默认只露 5 条（EV_WINDOW），要看全部点下面的「展开其余 N 笔」。
+   ⚠️ 这里**不再做局部滚动**：取消卡片之后左栏已经没有自己的滚动条了，
+   再在这一块里塞第二个滚动条就是 David 说的「三处滚动、看着头晕」。 */
+.ev-list{display:flex;flex-direction:column}
 .amt-in{color:var(--income);font-weight:700}
 .amt-out{color:var(--risk);font-weight:700}
 .empty{color:var(--text-3);font-size:13px;text-align:center;padding:18px 0}
@@ -312,7 +336,7 @@ button{font-family:inherit}
 .pd-more{align-self:flex-start;margin-top:8px}
 /* 批量确认条：先把「共几笔 / 多少钱 / 几笔带核对提示」摆出来，再让用户点确认 */
 .pd-confirm{margin:6px 0 2px;padding:9px 10px;border:1px solid var(--border);
-  border-radius:8px;background:var(--gray-50);display:flex;flex-direction:column;gap:8px}
+  border-radius:8px;background:var(--card);display:flex;flex-direction:column;gap:8px}
 .pd-confirm p{margin:0;font-size:11.5px;line-height:1.5;color:var(--text-2)}
 .pd-confirm-acts{display:flex;gap:6px;flex-wrap:wrap}
 /* 徽章不能被 word-break:break-all 从中间折断（「需核」/「对」），整块换行 */

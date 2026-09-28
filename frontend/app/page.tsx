@@ -23,7 +23,7 @@ function accountTotals(v: ProjectsView | null) {
 /** 一个文件处理过程的四个阶段（顺序固定，见 STAGE_LABELS）。 */
 type IntakeStages = { read: string; recognized: string; processed: string; how: string };
 /** 对话里的一块进度：一个文件 + 它的四个阶段。 */
-type ProgressBlock = { file: string; done: boolean; stages: IntakeStages };
+type ProgressBlock = { file: string; done: boolean; stages: IntakeStages; brief?: string };
 /** 决策闸门（四态沿用状态引擎规格） */
 type DecisionCheck = {
   name: string;
@@ -61,6 +61,11 @@ type Msg = {
   role: "user" | "ai"; text: string; pending?: PendingDraft[];
   progress?: boolean; blocks?: ProgressBlock[];
   decision?: DecisionView;
+  /* 一次导入 = **一条消息、一个框**（David 2026-09-28 要求）：
+     此前是「用户气泡（导入 N 个文件）→ AI 进度气泡 → AI 结果气泡」三段，
+     每段各自一个框，中间还穿插别的消息，看起来一堆框在刷屏。
+     带上这两个标记后，标题 + 逐文件进度 + 最终汇总全部原地落在同一个框里。 */
+  isImport?: boolean; importTitle?: string;
 };
 type StateT = {
   label: string;
@@ -243,9 +248,7 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
 }
 
 const CHANNEL_CN: Record<string, string> = { wechat: "微信", alipay: "支付宝", cash: "现金", bank: "银行卡", manual: "手动", voice: "语音", receipt: "票据" };
-/** 「最近事件」一次露几条（其余用滚轮在该区域里看）。数值与 globals.css 的
- *  `.ev-list{max-height:calc(5 * 45.5px)}` 是配对的：改这里必须同步改那里，否则
- *  会出现"说 5 条实际露 4 条半"的错位。 */
+/** 「最近事件」默认露几条（其余点「展开其余 N 笔」看，不在该区域里二次滚动）。 */
 const EV_WINDOW = 5;
 const LABEL_CN: Record<string, string> = {
   unknown: "现金流不明",
@@ -362,6 +365,11 @@ export default function Workbench() {
   const [cats, setCats] = useState<CategoriesView | null>(null);
   /* 项目行的「⋯」菜单开着哪一个；项目详情弹窗（改名 / 详情 两个分支，David 2026-09-26） */
   const [projMenuId, setProjMenuId] = useState("");
+  /* 导入框里被点开明细的那个文件（一次只开一个：不看就只留一行，否则十几个文件
+     各四段明细能刷满一整屏 —— David 2026-09-28「太多信息了，看的头晕」）。 */
+  const [openFile, setOpenFile] = useState("");
+  /* 左栏「最近事件」默认只露 5 条，要看全部靠展开，不在那块区域里做第二个滚动条。 */
+  const [showAllEvents, setShowAllEvents] = useState(false);
   const [detailId, setDetailId] = useState("");
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
@@ -567,6 +575,7 @@ export default function Workbench() {
       /* 忽略损坏缓存 */
     }
   }, []);
+
 
   useEffect(() => {
     // 对话历史持久化（刷新不丢；只存文本，最近 40 条）
@@ -908,31 +917,30 @@ export default function Workbench() {
     return window.btoa(bin);
   }
 
-  /** 导入：上传 → 把摘要写进对话流 → 刷新面板。 */
-  /** 拖拽 / 选择文件后的导入。走流式端点，**逐文件把处理过程按四个阶段写进对话**。
-   *  起因（David 2026-09-25）：一次导十几张票要跑几分钟，只在最后回一句结果，
-   *  用户分不清是在跑还是卡住；而且结果堆成一坨，看不出每一步做了什么。
+  /** 导入：上传 → 把整次导入写进**同一个框** → 刷新面板。
+   *  一次导入只占一条消息：标题（导入几个文件）+ 逐文件进度 + 最终汇总都在里面，
+   *  不再另发「（导入 N 个文件）」用户气泡，也不再让进度和结果各占一个框。
    *  进度全部来自后端真实处理结果，不做假进度条。 */
   async function uploadFiles(items: FileItem[]) {
     if (!items.length || intakeBusy) return;
     setIntakeBusy(true);
     setDragActive(false);
-    setMsgs((m) => [...m, { role: "user", text: `（导入 ${items.length} 个文件）` }]);
 
     let blocks: ProgressBlock[] = [];
+    const title = `导入 ${items.length} 个文件`;
     const blank = (): IntakeStages => ({ read: "读取中…", recognized: "—", processed: "—", how: "—" });
 
-    /** 原地重画进度气泡：文件块 + 一行当前状态，不刷屏。 */
-    const paint = (live: string) => {
+    /** 原地重画这个导入框：文件块 + 一行当前状态，不刷屏、不开新框。 */
+    const paint = (live: string, progress = true) => {
       setMsgs((m) => {
         const last = m[m.length - 1];
-        const msg: Msg = { role: "ai", text: live, blocks: [...blocks], progress: true };
-        return last && last.progress ? [...m.slice(0, -1), msg] : [...m, msg];
+        const msg: Msg = { role: "ai", text: live, blocks: [...blocks], progress, isImport: true, importTitle: title };
+        return last && last.isImport ? [...m.slice(0, -1), msg] : [...m, msg];
       });
     };
 
     try {
-      paint(`正在接收这 ${items.length} 个文件（本机读取，原文不上传）…`);
+      paint("正在接收文件（本机读取，原文不上传）…");
       const files = await Promise.all(items.map(async (it) => ({
         name: it.name,
         rel_path: it.rel_path,
@@ -965,7 +973,7 @@ export default function Workbench() {
           if (ev.stage === "start") {
             blocks = blocks.slice(0, ev.index - 1);
             blocks.push({ file: ev.file, done: false, stages: blank() });
-            paint(`正在读文件（${ev.index}/${ev.total}）：${ev.file}`);
+            paint(`正在读第 ${ev.index}/${ev.total} 个：${ev.file}`);
           } else if (ev.stage === "tick") {
             /* 心跳：后端还在跑这个文件（真机实测一张报销表要 239 秒）。
                显示**真实已等秒数**与正在做的动作，不显示假百分比；
@@ -978,15 +986,16 @@ export default function Workbench() {
               stages: { read: "读取中…", recognized: "—", processed: "—",
                         how: `${ev.note}（已 ${secs}）` },
             };
-            paint(`正在读文件（${ev.index}/${ev.total}）：${ev.file} · 已 ${secs}`);
+            paint(`正在读第 ${ev.index}/${ev.total} 个：${ev.file} · 已 ${secs}`);
           } else if (ev.stage === "file_done") {
-            blocks[ev.index - 1] = { file: ev.file, done: true, stages: ev.stages ?? blank() };
+            const st = ev.stages ?? blank();
+            blocks[ev.index - 1] = { file: ev.file, done: true, stages: st, brief: st.processed };
             paint(ev.index < ev.total
-              ? `正在读文件（${ev.index + 1}/${ev.total}）…`
+              ? `正在读第 ${ev.index + 1}/${ev.total} 个…`
               : "正在收尾：把草稿归到项目里…");
           } else if (ev.stage === "file_failed") {
             blocks[ev.index - 1] = {
-              file: ev.file, done: true,
+              file: ev.file, done: true, brief: `未生成草稿 · ${ev.error}`,
               stages: { read: "—", recognized: "—", processed: "未生成草稿",
                         how: `${ev.error}——已跳过，不影响其他文件` },
             };
@@ -997,19 +1006,11 @@ export default function Workbench() {
         }
       }
 
-      setMsgs((m) => {
-        const last = m[m.length - 1];
-        const msg: Msg = { role: "ai", text: summary || "没有可导入的内容。", blocks: [...blocks] };
-        return last && last.progress ? [...m.slice(0, -1), msg] : [...m, msg];
-      });
+      // 汇总与进度在同一个框里：进度态下线，文案换成结果，文件行原样留着
+      paint(summary || "没有可导入的内容。", false);
       refresh();
     } catch (err) {
-      const text = `导入失败：${err instanceof Error ? err.message : String(err)}`;
-      setMsgs((m) => {
-        const last = m[m.length - 1];
-        const msg: Msg = { role: "ai", text, blocks: [...blocks] };
-        return last && last.progress ? [...m.slice(0, -1), msg] : [...m, msg];
-      });
+      paint(`导入失败：${err instanceof Error ? err.message : String(err)}`, false);
     } finally {
       setIntakeBusy(false);
     }
@@ -1123,7 +1124,7 @@ export default function Workbench() {
         <div className="grid">
           {/* 对话区：支持拖入文件 / 整个文件夹 */}
           <section
-            className="card convo"
+            className="convo"
             aria-label="对话记账与票据导入"
             onDragOver={(e) => { e.preventDefault(); if (!intakeBusy) setDragActive(true); }}
             onDragLeave={(e) => { if (e.currentTarget === e.target) setDragActive(false); }}
@@ -1144,23 +1145,34 @@ export default function Workbench() {
                 那行元信息与底部模型按钮重复，去掉后对话区顶部多出一整块可用高度。 */}
             <div className="log" ref={logRef}>
               {msgs.map((m, i) => (
-                <div key={i} className={`b ${m.role}${m.progress ? " progress" : ""}`}>
+                <div key={i} className={`b ${m.role}${m.progress ? " progress" : ""}${m.isImport ? " import" : ""}`}>
+                  {m.importTitle && <div className="pb-head">{m.importTitle}</div>}
                   {m.blocks && m.blocks.length > 0 && (
                     <div className="pb-list">
-                      {m.blocks.map((b, j) => (
-                        <div className="pb" key={j}>
-                          <div className="pb-file">
-                            <span className="pb-icon" aria-hidden="true">{b.done ? "📄" : "⏳"}</span>
-                            {b.file}
+                      {m.blocks.map((b, j) => {
+                        /* 一行一个文件：完成的只留「文件名 + 结果」，正在跑的那个展开四段。
+                           要细看已完成的，点文件名展开（一次只展开一个）。 */
+                        const open = !b.done || openFile === b.file;
+                        return (
+                          <div className={`pb${b.done ? " done" : ""}`} key={j}>
+                            <button
+                              type="button" className="pb-file"
+                              onClick={() => setOpenFile(openFile === b.file ? "" : b.file)}
+                              title={`${b.file}——点一下看这个文件的四段明细`}
+                            >
+                              <span className="pb-icon" aria-hidden="true">{b.done ? "📄" : "⏳"}</span>
+                              <span className="pb-name">{b.file}</span>
+                              {b.done && b.brief && <span className="pb-brief">{b.brief}</span>}
+                            </button>
+                            {open && STAGE_LABELS.map(([key, label]) => (
+                              <div className="pb-row" key={key}>
+                                <span className="pb-k">{label}</span>
+                                <span className="pb-v">{b.stages[key] || "—"}</span>
+                              </div>
+                            ))}
                           </div>
-                          {STAGE_LABELS.map(([key, label]) => (
-                            <div className="pb-row" key={key}>
-                              <span className="pb-k">{label}</span>
-                              <span className="pb-v">{b.stages[key] || "—"}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {/* 决策卡：数值全部来自后端确定性计算，前端只展示、不再算一遍 */}
@@ -1248,6 +1260,9 @@ export default function Workbench() {
                 </div>
               ))}
             </div>
+            {/* 输入区整组（口径条 + 输入框 + 底部说明）包一层：整页只有一个滚动条之后，
+                这一组用 sticky 钉在视口底部，滚动长对话时输入框不会跑掉。 */}
+            <div className="composer">
             {/* 输入区上方常显"正在记入哪本账"，免得用户不知道新账会落到哪儿 */}
             <div className="scope-bar">
               正在记入：<b>{activeProjectName}</b>
@@ -1444,6 +1459,7 @@ export default function Workbench() {
               </div>
             </div>
             {modelMsg && <div className="hint">{modelMsg}</div>}
+            </div>
             {/* 三个隐藏的文件选择器：图片 / 文件 / 整个文件夹，都由左侧「＋」触发 */}
             <input ref={imageRef} type="file" hidden multiple accept="image/*" onChange={onPickFiles} />
             <input
@@ -1465,7 +1481,7 @@ export default function Workbench() {
           </section>
 
           {/* 右侧面板 */}
-          <aside className="card side" aria-label="现金流面板">
+          <aside className="side" aria-label="现金流面板">
             {/* 项目维度：账本按项目归集，这里是项目的唯一入口 */}
             <section className="sect">
               <div className="sect-head">
@@ -1946,28 +1962,37 @@ export default function Workbench() {
             <section className="sect">
               <div className="sect-head">
                 <h3>最近事件</h3>
-                {events.length > EV_WINDOW && <span className="sect-note">滚轮可看更多</span>}
+                {events.length > EV_WINDOW && (
+                  <span className="sect-note">共 {events.length} 笔</span>
+                )}
               </div>
               {events.length === 0 ? (
                 <div className="empty">账本为空——说一句记账试试</div>
               ) : (
-                /* 只露 5 条（EV_WINDOW），更多用滚轮在这个区域里看 —— 否则账本一有数据，
-                   左栏就会被这 12 条撑长，整页跟着变长（用户 2026-09-28 要求）。 */
-                <div className="ev-list">
-                  {events.slice(0, 12).map((ev) => (
-                    <div className="ev" key={ev.event_id}>
-                      <div>
-                        <b className={ev.type === "expense" ? "amt-out" : "amt-in"}>{yuan(ev.amount_cents)}</b>
-                        <span className="m">
-                          {/* 空分类如实说「未分类」，别拿「其他」冒充 —— 「其他」是个
-                              真分类，和"根本没分类"不是一回事。后端 projects.summary()
-                              也是这么归的，两处口径一致。 */}
-                          {ev.category || "未分类"} · {CHANNEL_CN[ev.channel] ?? ev.channel} · {ev.ts.slice(0, 10)}
-                        </span>
+                /* 默认只露 5 条（EV_WINDOW），更多靠「展开全部」——**不在这一块里做第二个
+                   滚动条**（David 2026-09-28：整页 + 对话 + 最近事件三处滚动太晕）。 */
+                <>
+                  <div className="ev-list">
+                    {events.slice(0, showAllEvents ? events.length : EV_WINDOW).map((ev) => (
+                      <div className="ev" key={ev.event_id}>
+                        <div>
+                          <b className={ev.type === "expense" ? "amt-out" : "amt-in"}>{yuan(ev.amount_cents)}</b>
+                          <span className="m">
+                            {/* 空分类如实说「未分类」，别拿「其他」冒充 —— 「其他」是个
+                                真分类，和"根本没分类"不是一回事。后端 projects.summary()
+                                也是这么归的，两处口径一致。 */}
+                            {ev.category || "未分类"} · {CHANNEL_CN[ev.channel] ?? ev.channel} · {ev.ts.slice(0, 10)}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                  {events.length > EV_WINDOW && (
+                    <button className="btn-mini pd-more" onClick={() => setShowAllEvents((v) => !v)}>
+                      {showAllEvents ? "收起" : `展开其余 ${events.length - EV_WINDOW} 笔`}
+                    </button>
+                  )}
+                </>
               )}
             </section>
           </aside>
