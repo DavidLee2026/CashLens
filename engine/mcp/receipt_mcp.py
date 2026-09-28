@@ -250,12 +250,39 @@ def _apply_invoice_checks(result: dict, local_text: str | None) -> None:
     result["note"] = f"{prev}；{tip}" if prev else tip
 
 
+def _item_names(text: str) -> list[str]:
+    """数电票的项目名称写作「*大类*具体名目」（如「*生产生活服务*住宿费」）。
+
+    ⚠️ 这是**自包含的一个 token**，不依赖左右分栏 —— 所以"文本流顺序不可靠"
+    这条不适用于它：判分类只需要这个名目本身，不需要知道它在版面上的位置。
+    （2026-09-28 修：此前把分类和商户一起当成"分栏不可靠"留空，导致一张票面
+      明写着「*生产生活服务*住宿费」、还带着 20 位发票号码的住宿发票被判成「待确认」。
+      读票面是引擎层的事，判分类是后端 `categories.py` 的事，两者不该一起放弃。）
+    """
+    return re.findall(r"\*[^*\n]{1,14}\*([^\s¥\d*]{1,20})", text or "")
+
+
+def _merchant_candidates(text: str) -> list[str]:
+    """文本层里"像主体名称"的 token（公司 / 酒店 / 宾馆 / 民宿 / 客栈 / 店 …）。
+
+    只作**候选**返回，不认定谁是卖方：买方与卖方的名字可能挤在同一行、
+    顺序不等于视觉分栏。由后端用"分类能否对上"做交叉核对后再定（见 intake 的
+    `_merchant_by_category`），对不上就留空交人工。
+    """
+    out: list[str] = []
+    for w in re.split(r"[\s;:：,，、]+", text or ""):
+        if len(w) >= 4 and re.search(r"(公司|酒店|宾馆|旅馆|民宿|客栈|商店|店|中心)$", w) and w not in out:
+            out.append(w)
+    return out
+
+
 def parse_from_text_layer(text: str, source_path: str) -> dict:
     """从 PDF 版式文本层本机解析（隐私模式：图像不出本机）。
 
-    只抽文本层里位置确定的三样：发票号码、开票日期、价税合计。
-    商户与买卖方在文本流里顺序不可靠（文本流顺序不等于视觉左右分栏），
-    一律留空并进 needs_human，交人工确认，不做推断。
+    抽文本层里位置确定的：发票号码、开票日期、价税合计，外加票面项目名目
+    （`items`，判分类用）与主体名称候选（`merchant_candidates`，供后端交叉核对）。
+    买卖方**顺序不可靠**（文本流顺序不等于视觉左右分栏），所以本函数不认定
+    谁是卖方 —— 它只把读到的原文交出去，由后端判。
     """
     nums = _twenty_digit_candidates(text)
 
@@ -273,13 +300,30 @@ def parse_from_text_layer(text: str, source_path: str) -> dict:
     plausible = _structurally_plausible(nums, date)
     invoice_no = plausible[0] if len(plausible) == 1 else ""
 
+    items = _item_names(text)
+    candidates = _merchant_candidates(text)
+
     check = validate_invoice_no(invoice_no)
-    needs_human = ["merchant", "category"]
+    needs_human = ["merchant"]
+    if not items:
+        needs_human.append("category")
     if len(plausible) != 1:
         needs_human.append("invoice_no")
         check = {"ok": False, "no": invoice_no, "warnings": [],
                  "reason": (f"文本层中结构合理的号码候选有 {len(plausible)} 个"
                             f"（原始 20 位候选 {len(nums)} 个），无法判定")}
+
+    # 提示语按"实际读到了什么"写，不写死：读到了就别吓唬用户说要人工确认
+    missing = []
+    if len(plausible) != 1:
+        missing.append("发票号码")
+    if not candidates:
+        missing.append("商户")
+    if not items:
+        missing.append("分类")
+    note = "本机 PDF 文本层解析（图像未出本机）"
+    note += ("：" + "、".join(missing) + "需人工确认") if missing else \
+            ("：已读到票面项目 " + "、".join(items[:3]))
 
     return {
         "type": "expense",
@@ -288,8 +332,9 @@ def parse_from_text_layer(text: str, source_path: str) -> dict:
         "merchant": "",
         "category": "",
         "invoice_no": invoice_no,
-        "items": [],
-        "note": "本机 PDF 文本层解析（图像未出本机）：商户与分类需人工确认",
+        "items": items,
+        "merchant_candidates": candidates,
+        "note": note,
         "confidence": 0.9 if (invoice_no and amount and date) else 0.4,
         "evidence": "recognition",
         "_raw_image": source_path,
@@ -362,11 +407,19 @@ def recognize_receipt(image_path: str, local_only: bool = False) -> dict:
     is_pdf = image_path.lower().endswith(".pdf")
     local_text = extract_pdf_text_layer(image_path) if is_pdf else None
 
-    if local_only or cfg["tier"] == "none":
-        if not local_text:
-            why = "当前档位是「不用模型」" if cfg["tier"] == "none" else "本机解析模式"
-            return {"error": f"{why}：需要带文本层的 PDF；拍照或截图请改用云端或本地模型档位。"}
+    # 带文本层的 PDF：本机直读，**不调模型**。
+    # 起因（2026-09-28 真机）：一张数电票文本层里明明写着「*生产生活服务*住宿费」和
+    # 20 位发票号码，却被判成「待确认」—— 因为代码先把 PDF 当 base64 image 发了出去，
+    # 被 API 以 `Invalid base64 image` 拒掉，才回退本机。代价是白等一次失败调用、
+    # note 里留一句吓人的报错，而且与合规文件写的「数电发票 PDF 全程本机解析」不符
+    # （字节其实已经上传过、只是被拒了）。数电票自带版式文本层，本机直读更快也更准，
+    # 没有任何理由先走模型通道 —— 模型通道读 PDF 本来就不成立（local/cloud 两边都拒）。
+    if local_text:
         return parse_from_text_layer(local_text, image_path)
+
+    if local_only or cfg["tier"] == "none":
+        why = "当前档位是「不用模型」" if cfg["tier"] == "none" else "本机解析模式"
+        return {"error": f"{why}：需要带文本层的 PDF；拍照或截图请改用云端或本地模型档位。"}
 
     if not cfg["usable"]:
         return {"error": f"当前档位「{cfg['tier']}」配置不完整："

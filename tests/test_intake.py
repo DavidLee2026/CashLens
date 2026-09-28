@@ -210,3 +210,38 @@ def test_category_ignores_technical_note(tmp_path, monkeypatch):
     drafts = pending.list_all(tmp_path)
     assert len(drafts) == 1
     assert drafts[0]["category"] == "待确认"      # 关键：不是「经营」
+
+
+# ─── 商户交叉核对 + 票面名目参与判分类（2026-09-28 修）───
+# 合成名称，不含真实票面信息。
+
+def test_merchant_cross_checked_against_the_item_category():
+    """文本层里买卖方名字顺序不可靠，所以**不能按顺序取**；用"分类能否对上"交叉核对。
+
+    住宿票的卖方应当是酒店、餐饮票的是餐厅 —— 这是票面项目名目给出的独立证据，
+    所以这是核对而不是猜。命中必须**唯一**才采纳。
+    """
+    cands = ["某某文化传播有限公司", "某某酒店管理有限公司"]
+    assert intake._merchant_by_category(cands, "住宿") == "某某酒店管理有限公司"
+
+    # 命中 0 个 → 留空交人工（不许硬挑一个）
+    assert intake._merchant_by_category(cands, "交通") == ""
+    # 占位符分类不做核对（还没有可信分类可对）
+    assert intake._merchant_by_category(cands, "待确认") == ""
+    assert intake._merchant_by_category(cands, "") == ""
+    # 两个都命中 → 不唯一，同样留空
+    dup = ["某某酒店管理有限公司", "某某酒店有限公司"]
+    assert intake._merchant_by_category(dup, "住宿") == ""
+
+
+def test_category_can_come_from_the_invoice_item_name_alone():
+    """分类只看 merchant+category 时，文本层 PDF 这两样都是空的 → 必然「待确认」。
+
+    补上票面项目名目之后，「*生产生活服务*住宿费」这种名目就能判出「住宿」。
+    这条锁住"名目确实参与判分类"这个事实（否则本机 PDF 通道会永远判不出分类）。
+    """
+    from app.services import categories
+    assert categories.match_category("", "", "住宿费") == "住宿"
+    assert categories.match_category("", "", "打车费") == "交通"
+    # 名目认不出时仍如实落占位符，不硬猜
+    assert categories.match_category("", "", "某个说不清的名目") == categories.UNCONFIRMED_CATEGORY
