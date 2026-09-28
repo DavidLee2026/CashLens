@@ -711,6 +711,16 @@ export default function Workbench() {
   const batchExpense = pendingList.reduce((s, x) => s + (x.direction === "expense" ? x.amount_cents : 0), 0);
   const batchIncome = pendingList.reduce((s, x) => s + (x.direction === "income" ? x.amount_cents : 0), 0);
 
+  /** 项目名下的金额明细，用在"下手前先看清代价"的地方（删除确认等）。
+   *  起因（2026-09-28）：删除确认只说"名下已有 17 笔账单"，没说这 17 笔是 ¥1,643.12 ——
+   *  真要连账单删时，用户看不到自己正要作废掉多少钱。 */
+  function projAmountText(p: ProjectRow) {
+    const parts: string[] = [];
+    if (p.expense_cents) parts.push(`支出 ${yuan(p.expense_cents)}`);
+    if (p.income_cents) parts.push(`收入 ${yuan(p.income_cents)}`);
+    return parts.join(" · ");
+  }
+
   /** 项目改名：只改后端映射表里的显示名，账本里的事件一字不动。 */
   async function saveRename() {
     const name = renameText.trim();
@@ -1532,7 +1542,9 @@ export default function Workbench() {
                           <div className="proj-del">
                             <div className="pd-title">
                               删除「{p.name}」？
-                              {p.count > 0 ? `它名下已有 ${p.count} 笔账单。` : "它名下还没有账单。"}
+                              {p.count > 0
+                                ? `它名下已有 ${p.count} 笔账单${projAmountText(p) ? `，合计 ${projAmountText(p)}` : ""}。`
+                                : "它名下还没有账单。"}
                             </div>
                             <div className="pd-opt">
                               <button className="btn-mini" onClick={() => deleteProject(p.id, false, p.name)}>
@@ -1549,7 +1561,7 @@ export default function Workbench() {
                                 <button className="btn-mini danger" onClick={() => deleteProject(p.id, true, p.name)}>
                                   连账单一起删
                                 </button>
-                                <span>这 {p.count} 笔同时作废，界面与统计都不再计入。</span>
+                                <span>这 {p.count} 笔（{projAmountText(p) || "—"}）同时作废，界面与统计都不再计入。</span>
                               </div>
                             )}
                             <div className="pd-opt">
