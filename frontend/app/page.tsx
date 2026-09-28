@@ -245,7 +245,10 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
     if (b.text_amount_drafts) {
       // 候选草稿是"把图里出现的金额都列出来"，合计会把合计行与重复行也算进去 ——
       // 不提醒的话，用户会以为这一批真的要花这么多（2026-09-28 真机：12 条候选合计 ¥3,163.03）。
-      lines.push(`  其中 ${b.text_amount_drafts} 条来自图内文字（含合计行与重复行，请只挑该报的）`);
+      // 整批都是候选时别说「其中」（读着像还有别的）—— 直接说清"这些都只是候选"
+      lines.push(b.text_amount_drafts >= b.draft_count
+        ? `  这 ${b.text_amount_drafts} 条都是"图里出现的金额"候选（含合计行与重复行，请只挑该报的）`
+        : `  其中 ${b.text_amount_drafts} 条来自图内文字（含合计行与重复行，请只挑该报的）`);
     }
     if (b.declared_total_cents) {
       const diff = b.reconcile_diff_cents ?? 0;
