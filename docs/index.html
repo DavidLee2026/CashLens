@@ -563,7 +563,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="card">
         <div class="card-num">归拢 · 采集</div>
         <h3>说一句、拖一份，都记进同一本账</h3>
-        <p>1. 图片：发票或小票 JPG / PNG，真实数电发票实弹已过；2. PDF：数电发票 PDF 有文本层就本机直读；3. Excel 报销表：读表取数，并提取表内嵌入的票据图做双源核对，以表内数字为准；4. CSV 账单：微信、支付宝官方账单一键导入。说一句（文字或语音）同样能记一笔，语音本地实弹转写已跑通，按复赛节奏接入。拖一整个文件夹进来时，第一层文件夹名就是项目名，导入后随时可改。所有数据汇入一本不可变的“事件账本”，官方导出才是正道，不做不稳定的平台自动同步。<span class="tag tag-ok">四类输入通道已实装</span><span class="tag tag-ok">拖拽导入已接入工作台</span><span class="tag tag-ok">项目归集已实装</span></p>
+        <p>1. 图片：发票或小票 JPG / PNG，真实数电发票实弹已过；2. PDF：数电发票 PDF 有文本层就本机直读；3. Excel 报销表：读表取数，并提取表内嵌入的票据图做双源核对，以表内数字为准；4. CSV 账单：微信、支付宝官方账单一键导入。说一句（文字或语音）同样能记一笔，语音本地实弹转写已跑通，按复赛节奏接入。拖一整个文件夹进来时，第一层文件夹名就是项目名，导入后随时可改。所有数据汇入一本不可变的“事件账本”，官方导出才是正道，不做不稳定的平台自动同步。<br>拖进来的不一定是一张票：系统先判这一页是什么——票面、付款凭证（取实付）、待支付页、订单列表、聊天 / 文字截图——再决定记不记账，每条都写清为什么；截图里若有退款，实付与退款两个数由识别读出、净额由代码相减，备注把三个数摆出来对账；订单列表与付款凭证按时间配对（同一天且相差 ≤5 分钟算同一笔），没配上的如实列出。读出来的东西不会自己进账：先进“待确认”，你确认（可顺手改归属项目与分类）才入账，也支持批量确认 / 批量丢弃（丢弃进回收站，点一下就能撤回，撤回不写账本）；扫不出来的图直接告诉你是哪几张要重传，导入跑到一半还能取消。<span class="tag tag-ok">四类输入通道已实装</span><span class="tag tag-ok">页面类型判定已实装</span><span class="tag tag-ok">待确认与人工确认已接入工作台</span><span class="tag tag-ok">导入可中途取消</span><span class="tag tag-ok">项目归集已实装</span></p>
       </div>
       <div class="card edge-income">
         <div class="card-num">照见 · 理解</div>
@@ -573,7 +573,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="card edge-warning">
         <div class="card-num">建议 · 决策</div>
         <h3>在决策点上，给一句有依据的话</h3>
-        <p>这单接不接、报多少，结合现金垫底、历史回款周期、时间成本给出报价区间与理由；缺口提前 30 天预警，把“怕断粮”变成“提前备粮”。</p>
+        <p>这单接不接、报多少，结合现金垫底、历史回款周期、时间成本给出报价下限与理由；缺口提前 30 天预警，把“怕断粮”变成“提前备粮”。</p>
       </div>
     </div>
   </div>
@@ -610,7 +610,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         </div>
         <div class="scene-col">
           <h4>CashLens 怎么解决</h4>
-          <div class="solve-item"><span class="s-tag">接单报价</span><p><b>接单报价决策</b>，接单前自动查三件事：未来 30 天现金垫底够不够、这个客户历史回款周期多长、这单要占用多少档期；然后给一个报价区间和理由。<small>把“拍脑袋定价”变成“有依据的定价”，这是 CashLens 最强的代差能力。</small><span class="tag tag-fix">SKILL 已有 · 闭环开发中</span></p></div>
+          <div class="solve-item"><span class="s-tag">接单报价</span><p><b>接单报价决策</b>，接单前自动查三件事：未来 30 天现金垫底够不够、这个客户历史回款周期多长、这单要占用多少档期；然后给一个报价下限和理由。<small>把“拍脑袋定价”变成“有依据的定价”，这是 CashLens 最强的代差能力。下限由账本里的历史时薪反推，账本里没有带工时的收入记录时它直接说“算不出”，不拿默认值假装算出报价。</small><span class="tag tag-ok">后端已实装 · 工作台已出决策卡</span></p></div>
           <div class="solve-item"><span class="s-tag">CashPulse</span><p><b>现金流预测</b>，按你的收入节奏预测未来 30/90 天区间（带置信带），缺口提前预警，把“怕断粮”变成“提前备粮”。</p></div>
           <div class="solve-item"><span class="s-tag">记忆体</span><p><b>假设检验闭环</b>，报价时说“3 天回款”，账本发现该客户实际要 3 周，就自动标记偏差，下次报价自动参考。<span class="tag tag-plan">规划中</span></p></div>
           <div class="solve-item"><span class="s-tag">报税</span><p><b>报税收入归集</b>，收入自动按季度归集，按分类、客户、月份拆开，不再临时翻流水。<small>到点主动提醒尚未实装。</small><span class="tag tag-fix">归集已实装 · 提醒规划中</span></p></div>
@@ -623,9 +623,9 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
               <div class="row"><span class="k">垫底检查</span><span class="v" style="color:var(--color-warning)">30 天后缺口约 ¥2,400</span></div>
               <div class="row"><span class="k">回款认知</span><span class="v">该客户历史 3 周，非 3 天（已纠偏）</span></div>
               <div class="row"><span class="k">档期占用</span><span class="v">14 天</span></div>
-              <div class="row"><span class="k">报价建议</span><span class="v"><b class="num">¥5,500 – ¥7,000</b> 建议首付 50%</span></div>
+              <div class="row"><span class="k">报价下限</span><span class="v"><b class="num">¥5,500</b>（由历史时薪 × 工时反推）</span></div>
             </div>
-            <div class="ss-cap">示意：由财务状态引擎 + 决策引擎生成</div>
+            <div class="ss-cap">示意：按决策引擎的输出结构绘制（实际输出报价下限 + 三道闸门判定，不替你拍板）</div>
           </div>
         </div>
       </div>
@@ -769,7 +769,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <div class="flow-step"><div class="step-no">STEP 3</div><h4>建议</h4><p>决策点给依据：接单报价、缺口预警；报税提醒属规划。</p><span class="flow-arrow">→</span></div>
       <div class="flow-step"><div class="step-no">STEP 4</div><h4>反馈</h4><p>周报 + 假设检验回灌账本，修正下一次建议。<span class="tag tag-plan">规划中</span></p></div>
     </div>
-    <div class="decision-sample">💡 一个真实决策点：“这单 ¥5,000、2 周交付，接不接？”先查 <b>未来 30 天现金垫底够不够</b>，再结合该客户<b>历史回款周期</b>给出报价区间与理由。</div>
+    <div class="decision-sample">💡 一个真实决策点：“这单 ¥5,000、2 周交付，接不接？”先查 <b>未来 30 天现金垫底够不够</b>，再结合该客户<b>历史回款周期</b>给出报价下限与理由。</div>
   </div>
 </section>
 
@@ -802,7 +802,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
     <div class="sec-eyebrow">PROOF · 实弹证据</div>
     <h2>用真实票据验证，而不是嘴上说说</h2>
     <p class="plain-lead">我们不说“技术领先”，只说跑过什么、错在哪、打算怎么修。</p>
-    <p class="sec-intro">核心工程链路已实测，以下是三项代表性实弹记录，如实呈现，包括发现的问题与修复结果。其余标注“规划中”的能力尚未实装。</p>
+    <p class="sec-intro">核心工程链路已实测，以下是四项代表性实弹记录，如实呈现，包括发现的问题与修复结果。其余标注“规划中”的能力尚未实装。</p>
     <div class="grid grid-2">
       <div>
         <h3 style="font-size:var(--font-size-18)">1. 云端 LLM 视觉识别 · 真实数电发票 <span class="tag tag-ok">2026-09-04 实弹</span></h3>
@@ -841,11 +841,25 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         <tr><td>开票 / 报税归集</td><td>账本同源聚合：按客户、按季度两个维度</td><td class="ok">端到端通过</td></tr>
         <tr><td>本地模型档（本机推理）</td><td>本机视觉模型识别同一张真实发票</td><td class="ok">6 字段全对</td></tr>
         <tr><td>接单决策（报价该不该接）</td><td>确定性计算：历史时薪由账本反推（收入中位数 ÷ 总工时），三道闸门（现金流垫底 / 回款周期 / 税后到手），报价下限 = 时薪 × 工时 ×（1 + 税负 + 平台抽成）</td><td class="ok">实弹：历史时薪 ¥105.77/时 · 报价下限 ¥2,115.40 · 低于成本线判「不接」</td></tr>
-        <tr><td>工程规模</td><td>后端端点 25 个 · 后端单测 · 页面行为回归 16 项</td><td class="ok">全部通过</td></tr>
+        <tr><td>工程规模</td><td>后端端点 26 个 · 后端单测 · 页面行为回归 16 项</td><td class="ok">全部通过</td></tr>
       </table>
       <p class="proof-note">以上各项均已在真实材料上跑通。号码这条最关键：漏位是票据识别里的稳定缺陷，修复不靠反复重试模型，而是加两道确定性关卡。一是格式硬校验，20 位不匹配就不得自动入账；二是用数电发票 PDF 自带的版式文本层做双源交叉核对，只在两源恰好差一个 0 时采纳文本层值，候选不唯一一律转人工。真实票据复测已拿回完整 20 位号码，全程在本机完成。本地模型档用本机视觉模型识别同一张发票，金额、日期、商户、分类与 20 位号码全部正确（单张样本，不作强弱结论）。工时表与归集同理：认不出的列交用户确认，只出参考表与事实归集，不猜、不替用户下结论。</p>
       <p class="proof-note">四类输入通道这条同样是真材料实弹：客户的发票形式与统计形式各不相同，所以图片、PDF、报销表、账单四类都要能在基础功能里收。用一份真实项目材料（一张酒店数电发票 PDF，加一张 10 行的 Excel 报销表）走完整流程：把文件夹拖进来就自动建好项目，11 条草稿合计 ¥1,346.35，与表内总计差额 ¥0.00，双源核对 10/10 全对。报销表以表内数字为准，嵌入图的识别结果只用于核对，机器不覆盖人写的数。</p>
       <p class="proof-note">接单决策这条要说清它「不做什么」。它给的是报价下限与三道闸门，不是替你拍板：历史时薪从账本反推，所以账本里没有带工时的收入记录时，它会直接说「算不出你的历史时薪」，而不是拿一个默认值假装算出报价；引用现金流预测时同时标注这是「近 90 天累计净流」的代理口径，因为账本里没有「当前余额」这个量，它需要你自己填。实测两种情形都验过：构造账本下算出时薪 ¥105.77/时、下限 ¥2,115.40；空账本下判定为「再考虑」、报价下限留空。税后口径也单独设了一道闸门，因为「税前看着达标、税后并不达标」是这个人群最常见的误判。</p>
+    </div>
+    <div class="card" style="margin-top:var(--space-8)">
+      <h3>4. 采集判定：一页一页认，谁该记、谁不该记 <span class="tag tag-ok">2026-09-28 实弹</span></h3>
+      <table class="proof-tbl">
+        <tr><th>实弹项</th><th>做法</th><th>结果</th></tr>
+        <tr><td>付款凭证当票据</td><td>先判这一页是什么：账单详情页与支付成功页各取一条“实付”；待支付页不记账、改为列成候选，备注写清付款状态由你判</td><td class="ok">真图四笔各就各位（11.20 经营 / 77.00 人情 / 72.00 经营 / 57.70 交通）</td></tr>
+        <tr><td>退款减净额</td><td>识别只负责读“实付”与“已退款”两个数，净额由代码相减，备注把三个数摆出来对账</td><td class="ok">78 − 6 = 72，按净额入账</td></tr>
+        <tr><td>订单列表 ↔ 付款凭证配对</td><td>同一天且相差 ≤5 分钟算同一笔，金额只作附注；没配到的如实列出、不自动记账</td><td class="ok">实测相差 44 秒判为同一笔，另一条如实列为没配到</td></tr>
+        <tr><td>聊天 / 文字截图按图里结构记账</td><td>不是票面时逐行读回文字，只列该付的钱；图里自己算出的合计、以及算式里被再引用一次的数都不重复列</td><td class="ok">那张报账图正好 3 条：186.79 交通 / 110 经营 / 549.6 餐饮</td></tr>
+        <tr><td>导入中途取消</td><td>点“取消”断开那条进度流：正在读的那张会跑完，后面的文件一个都不开始</td><td class="ok">隔离后端实测：取消后两个 CSV 零草稿</td></tr>
+        <tr><td>读不出来就请他重传</td><td>扫不出金额的图不再沉默：逐文件与汇总都点名是哪几张，建议重新上传</td><td class="ok">同一张图两次结果不一致的缺陷已如实记录</td></tr>
+        <tr><td>丢弃可撤回</td><td>丢弃改成软删除进回收站，那句小字后面一个「撤回」，撤回不写任何账本事件</td><td class="ok">界面级核对 9 项全过（拦住端点造假数据，账本零写入）</td></tr>
+      </table>
+      <p class="proof-note">这批口径全部由真实用户拿真图逐张验收后定下来，也包含被他当场纠正的地方。最典型的是订单列表：最早的改法是“列表页一律不记账”，用户反问“你是不是只从 78 元这个数字判断的？我是按一张图的支付时间和另一张图的打印时间来判定的”——于是重做成按时间配对（同一天且相差 ≤5 分钟算同一笔），金额只作附注。另有一条我自己造成的静默失灵：改了识别提示词却忘了推进版本号，缓存继续返回旧结构的识别结果，症状是字段都在、内容是旧的；现在指纹改成提示词正文的哈希，改一个字旧缓存自动失效。金额仍然全部来自原文，记哪几笔由你在“待确认”里决定，机器不替你挑、不自动入账。</p>
     </div>
     <p class="quote" style="margin-top:var(--space-8)">纪律：AI 自报不可信。每个 SKILL 都要配 golden case 与真实数据实弹验证，这条纪律从第一天就写在开发规范里。</p>
   </div>
