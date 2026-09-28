@@ -51,6 +51,13 @@ _OPERATION_PROMPT = """【操作层：语义理解与动作输出】
 {"actions":[], "reply":"给用户的一句简短中文回复"}
 actions 只能使用以下白名单（不能发明其他 kind）：
 
+0. record_timesheet 记工时/工分（**只在用户说"干了多久/多少工分"时用，钱走 record**）：
+   {"kind":"record_timesheet","person":"姓名","qty":数字,"unit":"hours|points","rate_cents":整数单价(以分计,可空),"person_kind":"outsourced|contract","project":"项目(可空)","date":"YYYY-MM-DD(可空)","note":"要点"}
+   - 「阿明今天 8 小时，时薪 50」→ {person:"阿明", qty:8, unit:"hours", rate_cents:5000}
+   - 「小周 120 工分，单价 5」→ {person:"小周", qty:120, unit:"points", rate_cents:500}
+   - person_kind 默认 outsourced（**外包按小时**）；说了「合同工 / 正式工 / 社保 / 公积金 / 交金」→
+     person_kind 填 contract，**后端会如实说明暂未支持**，你不要编算法也不要转成金额。
+   - ⚠️ 工时/工分**不是钱**：绝不能把 8 小时写成 800 元，也不能给它生成一笔 record。
 1. record 记账：{"kind":"record","direction":"income|expense","amount_cents":整数金额(以分计),"channel":"wechat|alipay|bank|cash|receipt|voice|manual","category":"见分类表","counterparty":"对手方(可空)","note":"要点"}
    - 金额以分为单位：299 元 = 29900；一句话可含多笔（每笔一个 record action）。
    - 方向：有显式收入信号（收到/客户支付/进账/尾款到账/退款）→ income；否则 expense。
