@@ -423,10 +423,17 @@ def test_unpaid_page_with_an_amount_makes_a_candidate_draft(tmp_path, monkeypatc
     drafts = pending.list_all(tmp_path)
     assert [d["amount_cents"] for d in drafts] == [5770], "待支付也要列一条候选"
     assert drafts[0]["category"] == "交通"
-    assert "待支付" in drafts[0]["note"] and "去支付" in drafts[0]["note"], (
+    # 付款状态必须写进备注（状态可能来自模型，也可能由我们补），且不能同一件事说两遍
+    note = drafts[0]["note"]
+    assert any(w in note for w in ("待支付", "去支付", "未完成付款")), (
         "付款状态必须写进备注，不能只报一个金额"
     )
-    assert "请确认" in drafts[0]["note"]
+    assert "请确认这笔是否已付" in note
+    assert note.count("去支付") == 1, f"同一件事不许说两遍：{note}"
+    # 模型没写状态时，由我们补一句（两个分支都要成立）
+    assert intake._unpaid_note("发票号码存疑") == (
+        "发票号码存疑；待支付页面：截图时还没付款（按钮是「去支付」），请确认这笔是否已付")
+    assert intake._unpaid_note("页面显示去支付") == "页面显示去支付；请确认这笔是否已付"
     it = out["batches"][0]["files"][0]
     assert it["doc_kind"] == "unpaid" and it.get("unpaid") is True
 

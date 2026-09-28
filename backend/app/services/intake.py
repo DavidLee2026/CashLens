@@ -356,6 +356,20 @@ def _drop_split_duplicates(cands: list[dict]) -> list[dict]:
     return out
 
 
+def _unpaid_note(note: str) -> str:
+    """待支付页的备注：状态模型已经写了就不再重复一遍，只补「请你确认」。
+
+    实弹（2026-09-28）第一版把两句话都拼上了，读起来是
+    「页面显示去支付，尚未完成付款；…；待支付页面：截图时还没付款（按钮是「去支付」），请确认…」——
+    同一件事说了两遍。**状态归模型写，确认提示归我们补**，各说一句就够。
+    """
+    status_words = ("未付", "去支付", "待支付", "未完成付款")
+    tail = "请确认这笔是否已付"
+    if any(w in str(note or "") for w in status_words):
+        return f"{note}；{tail}"
+    return f"{note}；待支付页面：截图时还没付款（按钮是「去支付」），{tail}"
+
+
 def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dict:
     """图片：逐张识别 → 草稿，并记录识别明细供人工核对。"""
     drafts, items, errors = [], [], []
@@ -427,7 +441,7 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                 continue
             d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                        amount_cents=cents, category=cat,
-                       note=f"{note}；待支付页面：截图时还没付款（按钮是「去支付」），请确认这笔是否已付",
+                       note=_unpaid_note(note),
                        counterparty=merchant, date=date, source="识别", image_name=f["name"])
             if d:
                 drafts.append(d)
