@@ -87,7 +87,7 @@ pnpm install && pnpm dev
 python3 scripts/batch_recognize.py samples/
 
 # 5) 测试
-python3 -m pytest tests/            # 后端单测（当前 234 个用例）
+python3 -m pytest tests/            # 后端单测
 node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 ```
 
@@ -100,7 +100,7 @@ node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 - 账本与金额计算始终在本地磁盘完成；金额与现金流数值不依赖任何外部服务
 - 启用云端 LLM 时，仅对话文本会发送给所选 LLM 服务商（页面上明示）；关闭 LLM 即全本地
 - 网页演示在浏览器本地完成，不采集任何数据
-- 纪律：AI 自报不可信（R38）——本仓库每个对外声称都尽量带真实实测证据或如实标注"示意/规划"
+- 纪律：AI 自报不可信 —— 本仓库每个对外声称都尽量带真实实测证据或如实标注"示意/规划"
 
 ## License
 
