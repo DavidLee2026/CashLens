@@ -793,9 +793,19 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
     how = "识别结果只进「待确认清单」，你确认后才入账"
     if ext == ".pdf" and not got.get("cloud_uploaded"):
         how = "PDF 本机直读文本层；" + how
+    # 聊天/文字截图（不是票面、图里有多笔金额）：如实说清"金额是从文字里读出来的候选"，
+    # 别让用户以为系统替他把账算好了 —— 记哪几笔由他在待确认里挑。
+    n_txt = int(got.get("text_amounts") or 0)
+    recognized = " · ".join(bits) if bits else "没识别到金额"
+    if n_txt:
+        # 这一档不要"置信度 0"那种噪音：它不是票面，用户要看的是"读到了几个金额"
+        recognized = (f"不是票面：图里读到 {n_txt} 个金额（聊天/文字截图），"
+                      f"已按原文逐条列进「待确认」")
+        made = (f"生成 {draft_count} 条候选草稿（金额来自图中文字，可能含合计，请只挑该报的）"
+                if draft_count else f"图里读到 {n_txt} 个金额，但都没能建出草稿")
+        how = "金额是从图里文字读出来的，记哪几笔由你决定；你确认后才入账"
     return {"read": "1 个 PDF" if ext == ".pdf" else "1 张图片",
-            "recognized": " · ".join(bits) if bits else "没识别到金额",
-            "processed": made, "how": how}
+            "recognized": recognized, "processed": made, "how": how}
 
 
 def _merge_batches(batches: list[dict]) -> list[dict]:

@@ -198,6 +198,97 @@ def _merchant_by_category(candidates: list[str], category: str) -> str:
     return hits[0] if len(hits) == 1 else ""
 
 
+# ── 聊天/文字截图里的金额：只做**形式化**提取，不猜语义、不做算术 ──────────────
+# 起因（2026-09-28 真机）：用户把微信群里的报账截图拖进来（图里写着
+# 「打车 186.79+闪送 110=296.79」「午饭晚饭水一共 549.6」），模型**完全读得出来**
+# （逐行抄对，实测 18 秒），但票据提示词只会回答"一张票一个金额"，于是：
+# 金额 0 → 按"没金额不建草稿"的闸门 → 三张图全部「未生成草稿」，界面上什么也没说。
+# 现在：引擎层把图里的文字逐行抄回来（`text_lines`），这一层只负责**从原文里挑出金额**，
+# 而且**每条都进待确认让人挑** —— 不挑合计、不算总数、不判断哪笔该报。
+_MASK_NOISE = re.compile(
+    r"\d{4}-\d{1,2}-\d{1,2}"          # 2026-09-24
+    r"|\d{1,2}月\d{1,2}日"             # 9月24日
+    r"|\d{1,2}:\d{2}"                  # 11:56
+    r"|周[一二三四五六日]|星期[一二三四五六日]"
+    r"|\d+(?:\.\d+)?\s*"
+    r"(?:KB|MB|GB|G|kg|g|ml|L|%|人|份|张|个|次|岁|楼|号|点"
+    r"|公里|千米|米|分钟|小时|秒|天|周|月|年|km|min)",  # 83KB / 5G / 13人 / 10.73公里 / 33分钟
+    re.I)
+# 强金额：带货币符号 / 带「元、块」/ 带 1-2 位小数（人写金额几乎都这样）
+_STRONG_AMOUNT = re.compile(
+    r"[¥￥]\s*(\d[\d,]*(?:\.\d{1,2})?)"          # ¥186.79
+    r"|(\d[\d,]*(?:\.\d{1,2})?)\s*[元块]"          # 120 元 / 549.6元
+    r"|(\d[\d,]*)\.(\d{1,2})(?!\d)")              # 186.79
+# 弱金额：整数。只在**这一行已经有强金额**时才采信（否则「13 人」「0918」都会被当钱）
+_WEAK_AMOUNT = re.compile(r"(?<![\d.,])(\d{2,6})(?![\d.,])")
+_TEXT_AMOUNT_MAX = 12          # 单张图最多挑几个候选，防一张长截图刷出几十条草稿
+_TEXT_AMOUNT_CEIL_CENTS = 10_000_00   # 单笔上限 1 万，防卡号/长数字
+
+
+def text_amount_candidates(lines: list[str] | None, limit: int = _TEXT_AMOUNT_MAX) -> list[dict]:
+    """从图里的文字行中挑出金额候选：返回 [{line, amount_cents, is_total}]。
+
+    **只做形式化提取**（这一步是"读原文"，不是"判语义"）：
+      - 先遮掉日期 / 时间 / 星期 / 容量单位这些数字（11:56、0918、83KB、5G 不是钱）；
+      - 一行里**只要没有强金额**（带小数或带 ¥），这一行整行不采信；
+      - 有强金额的行里，连"整数写法"（「闪送110」）一起挑，且跳过已经是强金额的那段；
+      - 出现在 `=` 左边的金额是加数、`=` 右边的是合计 —— 只是**标注**「is_total」，不删。
+    选哪笔、报不报，交给用户在待确认里决定。
+    """
+    out: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for raw in lines or []:
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        masked = _MASK_NOISE.sub(" ", line)
+        strong: list[tuple[str, int, int]] = []
+        for m in _STRONG_AMOUNT.finditer(masked):
+            tok = m.group(1) or m.group(2) or f"{m.group(3)}.{m.group(4)}"
+            strong.append((tok, m.start(), m.end()))
+        if not strong:
+            continue                      # 这一行没有"人写的金额"，不是金额行
+        picks = list(strong)
+        spans = [(a, b) for _, a, b in strong]
+        for m in _WEAK_AMOUNT.finditer(masked):
+            if any(a <= m.start() < b for a, b in spans):
+                continue                  # 已经作为强金额挑过了
+            picks.append((m.group(1), m.start(), m.end()))
+        for tok, start, _end in picks:
+            try:
+                cents = int(round(float(str(tok).replace(",", "")) * 100))
+            except ValueError:
+                continue
+            if cents <= 0 or cents > _TEXT_AMOUNT_CEIL_CENTS:
+                continue
+            key = (line, cents)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"line": line, "amount_cents": cents,
+                        "is_total": "=" in masked[:start]})
+            if len(out) >= limit:
+                return _drop_split_duplicates(out)
+    return _drop_split_duplicates(out)
+
+
+def _drop_split_duplicates(cands: list[dict]) -> list[dict]:
+    """同一笔在两行里各出现一次（OCR 把一行拆成两行，如「¥100.00」与「的¥100.00」）→ 合并。
+
+    只在**金额相同、且一条原文包含另一条**时才合并：两笔真实的、碰巧同额的消费
+    （比如两次 28 元打车）原文互不包含，必须都留着 —— 那才是用户要挑的东西。
+    """
+    out: list[dict] = []
+    for c in cands:
+        same = next((d for d in out if d["amount_cents"] == c["amount_cents"]
+                     and (c["line"] in d["line"] or d["line"] in c["line"])), None)
+        if same is None:
+            out.append(c)
+        elif len(c["line"]) > len(same["line"]):
+            out[out.index(same)] = c
+    return out
+
+
 def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dict:
     """图片：逐张识别 → 草稿，并记录识别明细供人工核对。"""
     drafts, items, errors = [], [], []
@@ -228,6 +319,32 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
         note = res.get("note") or f["name"]
         if not merchant and (res.get("merchant_candidates") or []):
             note += "（票面主体名称不唯一，商户请人工核对）"
+        if cents <= 0:
+            # 不是票面（聊天记录 / 转账截图 / 账单列表）：图里的文字里有没有金额？
+            # 有就**每条金额建一条待确认草稿**（标「请人工核对」），让用户挑该报哪几笔；
+            # 一条都没有才如实报「未生成草稿」——这与"读到了但没建"是两回事。
+            cands = text_amount_candidates(res.get("text_lines"))
+            if cands:
+                made = []
+                for c in cands:
+                    cnote = f"图里文字中的金额（原文：{c['line']}）"
+                    if c["is_total"]:
+                        cnote += "；这是等号右边的合计，别重复记"
+                    cnote += "；请人工核对这一笔该不该报"
+                    d = _draft(data_dir, pid, direction="expense",
+                               amount_cents=c["amount_cents"],
+                               category=categories.match_category(c["line"]),
+                               note=cnote, source="识别", image_name=f["name"])
+                    if d:
+                        made.append(d)
+                if made:
+                    drafts += made
+                    items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                                  "text_amounts": len(cands), "draft_count": len(made),
+                                  "date": "", "merchant": "", "category": "",
+                                  "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                                  "confidence": res.get("confidence")})
+                    continue
         d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                    amount_cents=cents, category=cat,
                    note=note, counterparty=merchant,
