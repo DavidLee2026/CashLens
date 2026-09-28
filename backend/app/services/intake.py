@@ -58,7 +58,7 @@ _RECOG_CACHE_MAX = 500             # 只留最近这么多条，别让缓存无�
 # 提示词/输出结构的版本号：只要识别结果的字段有增删就把它改一下，
 # 让旧缓存**自动失效** —— 否则缓存里存的是旧结构的结果（缺新字段），
 # 命中缓存后新功能会静默失灵（2026-09-28 加 text_lines 时差点踩到）。
-_RECOG_PROMPT_VERSION = "2026-09-28-payment-voucher"
+_RECOG_PROMPT_VERSION = "2026-09-28-doc-kind-refund"
 
 
 def _model_fingerprint() -> str:
@@ -99,7 +99,8 @@ def _cache_save(data_dir, cache: dict) -> None:
 # 只缓存核对用得上的字段：识别结果里那些本机路径、渠道标记不进缓存。
 # ⚠️ `text_lines`（聊天/文字截图的原文行）必须一起缓存 —— 少了它，命中缓存的那次
 # 就没有原文可用，"聊天截图的金额候选"会静默失灵。
-_CACHE_FIELDS = ("amount", "date", "merchant", "invoice_no", "text_lines")
+_CACHE_FIELDS = ("amount", "date", "merchant", "invoice_no", "text_lines",
+                 "doc_kind", "refund_amount", "items")
 
 
 def _recognize_cached(img_path: Path, data_dir, cache: dict, fingerprint: str) -> dict:
@@ -367,6 +368,12 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
             items.append({"file": f["name"], "ok": False, "error": res["error"]})
             continue
         cents = int(round(float(res.get("amount") or 0) * 100))
+        # 引擎层只读两个数（实付 / 退款），**减法在这一层做**（2026-09-28 用户口径：
+        # 账单上「-78.00」+「已退款 ¥6.00」→ 实际入账 -72.00）。
+        # 不合规的做法是让模型自己算净额 —— 它只要把两个数读准，算术由代码负责。
+        refund_cents = int(round(float(res.get("refund_amount") or 0) * 100))
+        net_cents = cents - refund_cents
+        doc_kind = str(res.get("doc_kind") or "").strip().lower()
         # 分类看「商户 + 模型给的分类 + **票面项目名目**」，**不传 note**。
         # 踩过的坑（2026-09-24 实弹）：PDF 本机回退说明里含 "API HTTP 400"，
         # 把 "api" 当成了经营成本关键词，一张酒店发票被判成「经营」。
@@ -385,6 +392,50 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
         note = res.get("note") or f["name"]
         if not merchant and (res.get("merchant_candidates") or []):
             note += "（票面主体名称不唯一，商户请人工核对）"
+        # ── 页面类型分流（2026-09-28 用户口径）────────────────────────────
+        #   unpaid（待支付）与 list（订单列表）：**都不建草稿** ——
+        #   一个钱还没出去，一个只是同一笔钱的另一个视角（实弹：一个「我的订单」列表里
+        #   那笔 78 元，和另一张账单详情里的 78 元是**同一笔**，两张都记就是记两遍）。
+        #   如实说清是哪种（前端靠 no_draft_reason 出对应文案），不假装"未识别到金额"。
+        if doc_kind in ("unpaid", "list"):
+            items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                          "doc_kind": doc_kind, "refund_cents": 0,
+                          "no_draft_reason": doc_kind, "text_amounts": 0,
+                          "date": "", "merchant": "", "category": "",
+                          "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                          "confidence": res.get("confidence")})
+            continue
+        #   receipt / payment：**一张凭证一条草稿**，金额 = 实付 − 退款（减法在代码里做）。
+        if doc_kind in ("receipt", "payment") and cents > 0:
+            if net_cents <= 0:
+                # 全额退款（当前状态「已退款」且退款额 = 实付）→ 这笔没有实际支出
+                items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                              "doc_kind": doc_kind, "refund_cents": refund_cents,
+                              "gross_cents": cents, "no_draft_reason": "fully_refunded",
+                              "text_amounts": 0,
+                              "date": res.get("date", ""), "merchant": merchant,
+                              "category": cat, "invoice_no": res.get("invoice_no", ""),
+                              "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                              "confidence": res.get("confidence")})
+                continue
+            d = _draft(data_dir, pid, direction=res.get("type") or "expense",
+                       amount_cents=net_cents, category=cat,
+                       note=(note if refund_cents <= 0 else
+                             f"{note}；实付 {cents / 100:.2f} 元，已退款 {refund_cents / 100:.2f} 元，"
+                             f"净额 {net_cents / 100:.2f} 元"),
+                       counterparty=merchant,
+                       date=res.get("date", ""), source="识别", image_name=f["name"])
+            if d:
+                drafts.append(d)
+            items.append({"file": f["name"], "ok": True, "amount_cents": net_cents,
+                          "doc_kind": doc_kind, "refund_cents": refund_cents,
+                          "gross_cents": cents, "text_amounts": 0,
+                          "date": res.get("date", ""), "merchant": merchant,
+                          "category": cat, "invoice_no": res.get("invoice_no", ""),
+                          "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                          "confidence": res.get("confidence")})
+            continue
+
         if cents <= 0:
             # 不是票面（聊天记录 / 转账截图 / 账单列表）：图里的文字里有没有金额？
             # 有就**每条金额建一条待确认草稿**（标「请人工核对」），让用户挑该报哪几笔；

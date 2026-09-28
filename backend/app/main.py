@@ -799,6 +799,31 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
     n_tr = int(got.get("transfer_amounts") or 0)
     n_tot = int(got.get("total_amounts") or 0)
     recognized = " · ".join(bits) if bits else "没识别到金额"
+    # ── 页面类型：待支付 / 订单列表 / 全额退款（2026-09-28 用户口径）──────────
+    # 这几种都**不建草稿**，而且不许含糊成「未生成草稿」—— 每一种都要说清为什么，
+    # 否则用户看到的是一句无法分辨的话（"没读到"和"读到了但不算"是两件事）。
+    reason = str(got.get("no_draft_reason") or "")
+    refund = int(got.get("refund_cents") or 0)
+    gross = int(got.get("gross_cents") or 0)
+    if reason == "unpaid":
+        recognized = "待支付页面：这张单**还没付款**"
+        made = "未生成草稿——钱还没出去，不算支出"
+        how = "等真的付了款、拿到付款凭证再记；这张只当参考"
+    elif reason == "list":
+        recognized = "订单列表（不是付款凭证）"
+        made = "未生成草稿——订单列表只是同一笔钱的另一个视角，记了就会和付款详情重复"
+        how = "要记这一笔，请用付款详情/支付成功那张；这张留着核对"
+    elif reason == "fully_refunded":
+        recognized = (f"实付 {gross / 100:.2f} 元 · 已全额退款"
+                      if gross else "已全额退款")
+        made = "未生成草稿——全额退款，这笔没有实际支出"
+        how = "退款金额以页面上的退款记录为准；确认后仍要记的话请手工记一笔"
+    elif refund > 0:
+        # 有退款但是部分退：金额已经按净额建了草稿，这里必须把两个数摆出来让人能对账
+        recognized = (f"实付 {gross / 100:.2f} 元 · 已退款 {refund / 100:.2f} 元 · "
+                      f"净额 {(gross - refund) / 100:.2f} 元" if gross else recognized)
+        made = f"生成 1 条待确认草稿（按净额 {max(gross - refund, 0) / 100:.2f} 元，已扣掉退款）"
+        how = "实付与退款都从页面上读出，净额由系统相减；你确认后才入账"
     if n_txt:
         # 这一档不要"置信度 0"那种噪音：它不是票面，用户要看的是"读到了几个金额"
         # 「图里自己算的合计」要如实说：读到的金额数比列出来的多，用户得知道多在哪。
