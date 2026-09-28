@@ -158,6 +158,9 @@ type IntakeBatch = {
   /* 这次导入是否**跳过了**核对（开关关着）。必须跟"核对了但一张都没对"区分开：
      后者是 0/0，前者根本没跑 —— 混在一起会变成"0/0 张与表内金额一致"这种假汇报。 */
   reconcile_skipped?: boolean;
+  /* 这批里有多少条草稿是"图内文字金额"的候选（含合计行、重复行）——
+     汇总的合计会把它们全加起来，所以必须提醒用户"别全确认"。 */
+  text_amount_drafts?: number;
   errors: { file?: string; error: string }[];
 };
 type IntakeResult = {
@@ -238,6 +241,11 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
   for (const b of batches) {
     if (b.draft_count > 0) {
       lines.push(`【${b.project_name}】生成 ${b.draft_count} 条待确认草稿，合计 ${yuan(b.identified_total_cents)}`);
+    }
+    if (b.text_amount_drafts) {
+      // 候选草稿是"把图里出现的金额都列出来"，合计会把合计行与重复行也算进去 ——
+      // 不提醒的话，用户会以为这一批真的要花这么多（2026-09-28 真机：12 条候选合计 ¥3,163.03）。
+      lines.push(`  其中 ${b.text_amount_drafts} 条来自图内文字（含合计行与重复行，请只挑该报的）`);
     }
     if (b.declared_total_cents) {
       const diff = b.reconcile_diff_cents ?? 0;
