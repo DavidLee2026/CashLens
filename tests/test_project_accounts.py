@@ -164,3 +164,33 @@ def test_rule_reply_draft_uses_current_project(temp_data):
     p = projects.create(temp_data, "919 昆明项目")
     r = main._rule_reply("打车 28", p["id"])
     assert r["pending"][0]["project"] == p["id"]
+
+
+# ─── 建完项目要切到它（2026-09-28 用户要求）───
+
+def _page_tsx() -> str:
+    return (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(
+        encoding="utf-8")
+
+
+def test_creating_a_project_activates_the_new_project():
+    """新建项目后必须**切到新项目**，否则等于白建。
+
+    起因（2026-09-28 用户）：「默认是激活在总项目上面的，当我新建了一个项目以后，
+    应该激活是在新项目上面，而不是还在总项目上面」—— 建完还停在总账户，
+    下一步记账/导入又落到总账上，用户得再手动点一下才生效。
+
+    ⚠️ 这条还钉住一个**顺序坑**：页面里有一条「activeProject 不在项目列表里就清空」
+    的守护 effect。若写成"先 setActiveProject(新 id)、再去 refresh()"，那一次渲染里
+    列表还没有新项目 → 守护立刻把 id 清掉，看起来就是"切了没生效"。
+    正确写法：先把含新项目的列表取回来，再与 activeProject 在同一次更新里提交。
+    """
+    src = _page_tsx()
+    body = src[src.index("async function createProject"):]
+    body = body[:body.index("\n  /**")]
+    assert "setActiveProject(res.project?.id" in body, "建完要切到刚建的项目"
+    assert "setProjView(view)" in body, "要先把含新项目的列表取回来"
+    assert body.index("setProjView(view)") < body.index("setActiveProject(res.project?.id"), \
+        "列表必须在设置 activeProject 之前就位，否则会被守护 effect 清掉"
+    assert "refresh();" not in body, \
+        "别在这里用 refresh() —— 它的列表更新晚一拍，会把刚设的项目 id 清掉"
