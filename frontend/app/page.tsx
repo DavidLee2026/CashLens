@@ -1070,56 +1070,6 @@ export default function Workbench() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">
-            <span className="brand-mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round">
-                <circle cx="11" cy="11" r="7" />
-                <line x1="16.5" y1="16.5" x2="21" y2="21" />
-              </svg>
-            </span>
-            CashLens <span className="brand-sub">本地工作台</span>
-          </div>
-          <div className="topbar-right">
-            {/* 状态标签（「学习中」那个）已按 David 要求从右上角撤掉：孤零零一个词看不明白。
-                同样的信息移到左栏「财务状态」卡片里，那里有上下文。
-                顶栏只在后端真连不上时提示一句 —— 线上出问题时这是第一线索，不能一并抹掉。 */}
-            {!apiOk && (
-              <span className="tag t-unknown">
-                <span className="dot" />
-                后端未连接
-              </span>
-            )}
-            {loginOpen ? (
-              <span className="login-edit">
-                <input
-                  value={nameText}
-                  onChange={(e) => setNameText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveUser();
-                    if (e.key === "Escape") setLoginOpen(false);
-                  }}
-                  placeholder="你的名字，如「小李」"
-                  aria-label="用户名"
-                  autoFocus
-                />
-                <button className="btn-mini ok" onClick={saveUser}>保存</button>
-                <button className="btn-mini" onClick={() => setLoginOpen(false)}>取消</button>
-              </span>
-            ) : (
-              <button
-                className="btn-mini"
-                onClick={() => { setNameText(user); setLoginOpen(true); }}
-                title={user ? "点击修改用户名；清空后保存即退出" : "输入一个用户名，只存在这台电脑上"}
-              >
-                {user || "登录"}
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
       <div className="main">
         <div className="grid">
           {/* 对话区：支持拖入文件 / 整个文件夹 */}
@@ -1135,6 +1085,16 @@ export default function Workbench() {
               await uploadFiles(items);
             }}
           >
+            {/* 窄屏才显示品牌行：宽屏的品牌在左栏顶部（窄屏左栏被排到对话下面去了） */}
+            <div className="brandbar">
+              <span className="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="16.5" y1="16.5" x2="21" y2="21" />
+                </svg>
+              </span>
+              CashLens <span className="brand-sub">本地工作台</span>
+            </div>
             {dragActive && (
               <div className="drop-overlay" aria-hidden="true">
                 <b>松手即导入</b>
@@ -1482,6 +1442,55 @@ export default function Workbench() {
 
           {/* 右侧面板 */}
           <aside className="side" aria-label="现金流面板">
+            {/* 品牌 + 登录搬到左栏顶部（2026-09-28 用户要求：账目信息贴最左、顶部是 CashLens 的 logo）。
+                宽屏时这一行就是整个工作台的顶部；窄屏时左栏被排到对话下方，改用 .convo 里那行 .brandbar。
+                只有中间那段（.side-body）跟着滚，品牌与登录始终留在顶上。 */}
+            <div className="side-head">
+              <span className="brand">
+                <span className="brand-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round">
+                    <circle cx="11" cy="11" r="7" />
+                    <line x1="16.5" y1="16.5" x2="21" y2="21" />
+                  </svg>
+                </span>
+                CashLens <span className="brand-sub">本地工作台</span>
+              </span>
+              <span className="side-head-right">
+                {/* 后端连不上时这一句是第一线索，不能抹掉（「学习中」那个状态标签已撤） */}
+                {!apiOk && (
+                  <span className="tag t-unknown">
+                    <span className="dot" />
+                    后端未连接
+                  </span>
+                )}
+                {loginOpen ? (
+                  <span className="login-edit">
+                    <input
+                      value={nameText}
+                      onChange={(e) => setNameText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveUser();
+                        if (e.key === "Escape") setLoginOpen(false);
+                      }}
+                      placeholder="你的名字，如「小李」"
+                      aria-label="用户名"
+                      autoFocus
+                    />
+                    <button className="btn-mini ok" onClick={saveUser}>保存</button>
+                    <button className="btn-mini" onClick={() => setLoginOpen(false)}>取消</button>
+                  </span>
+                ) : (
+                  <button
+                    className="btn-mini"
+                    onClick={() => { setNameText(user); setLoginOpen(true); }}
+                    title={user ? "点击修改用户名；清空后保存即退出" : "输入一个用户名，只存在这台电脑上"}
+                  >
+                    {user || "登录"}
+                  </button>
+                )}
+              </span>
+            </div>
+            <div className="side-body">
             {/* 项目维度：账本按项目归集，这里是项目的唯一入口 */}
             <section className="sect">
               <div className="sect-head">
@@ -1995,6 +2004,7 @@ export default function Workbench() {
                 </>
               )}
             </section>
+            </div>
           </aside>
         </div>
         <p className="footnote">
