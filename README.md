@@ -87,7 +87,7 @@ pnpm install && pnpm dev
 python3 scripts/batch_recognize.py samples/
 
 # 5) 测试
-python3 -m pytest tests/            # 后端单测（当前 191 个用例）
+python3 -m pytest tests/            # 后端单测（当前 195 个用例）
 node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 ```
 
