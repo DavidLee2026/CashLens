@@ -248,22 +248,48 @@ def test_workbench_summary_reports_the_pairing():
 
 
 def test_file_stages_explains_unpaid_list_and_refund():
-    """待支付 / 订单列表 / 全额退款 / 带退款 —— 四段里都要说得出来（不许只写「未生成草稿」）。"""
-    def st(item):
+    """待支付 / 订单列表 / 全额退款 —— 三种都要说得出来，且不许含糊成「未生成草稿」。
+
+    待支付这条 2026-09-28 按用户口径改过：**有应付金额就列一条候选**（他说
+    「一个过去、一个回来的打车记录，车牌号不一样，57.7 是应该被记录的」），
+    状态写进备注让人判断；只有读不到金额时才真的不记。
+    """
+    def st(item, draft_count=0, total=0):
         return _file_stages("x.jpg", [{"ok": True, "amount_cents": 0, "confidence": 0.5, **item}],
-                            [], 0, 0)
+                            [], draft_count, total)
 
-    unpaid = st({"no_draft_reason": "unpaid"})
-    assert "还没付款" in unpaid["recognized"] and "钱还没出去" in unpaid["processed"]
+    paid_pending = st({"doc_kind": "unpaid", "amount_cents": 5770}, draft_count=1, total=5770)
+    assert "待支付" in paid_pending["recognized"] and "去支付" in paid_pending["recognized"]
+    assert "候选草稿" in paid_pending["processed"] and "是否已付" in paid_pending["processed"]
+    assert "由你确认" in paid_pending["how"], "付没付由用户确认，机器不替他决定"
 
-    listed = st({"no_draft_reason": "list"})
-    assert "订单列表" in listed["recognized"]
-    assert "重复" in listed["processed"], "要说清为什么不能记（会和付款详情重复）"
-    assert "付款详情" in listed["how"], "要告诉用户该用哪张"
+    no_amount = st({"doc_kind": "unpaid", "no_draft_reason": "unpaid"})
+    assert "没有金额可记" in no_amount["processed"]
 
     full = st({"no_draft_reason": "fully_refunded", "gross_cents": 7800})
     assert "全额退款" in full["recognized"] and "没有实际支出" in full["processed"]
     assert "78.00" in full["recognized"], "实付金额要摆出来"
+
+
+def test_file_stages_names_which_image_the_order_list_duplicates():
+    """订单列表不记账，但**必须点名和哪张图重复**（用户 2026-09-28：
+    「最好能记录下是和哪个图片的信息有重复，方便我排查」）。"""
+    got = {"file": "…123055.jpg", "ok": True, "amount_cents": 0, "doc_kind": "list",
+           "confidence": 0.5, "no_draft_reason": "list",
+           "list_match": {
+               "matched": [{"at": "2026-09-18 11:55:53", "amount_cents": 7800,
+                            "name": "A4文档(彩色单面)", "status": "已退款",
+                            "voucher_file": "微信图片_20260924123051.jpg",
+                            "delta_seconds": 44, "amount_differs": False}],
+               "unmatched": [{"at": "2026-09-18 12:14:55", "amount_cents": 0,
+                              "name": "A4文档(彩色单面)", "status": "已完成"}]}}
+    st = _file_stages("微信图片_20260924123055.jpg", [got], [], 0, 0)
+    assert "微信图片_20260924123051.jpg" in st["processed"], "点名是哪张图重复"
+    assert "44 秒" in st["processed"] and "78.00" in st["processed"]
+    assert "微信图片_20260924123051.jpg" in st["how"], "「要记就用那张」也要点名"
+    assert "没配到付款凭证的 1 笔" in st["how"], "没配到的照样列出来"
+    assert "12:14:55" in st["how"]
+    assert "1 笔与另一张图是同一笔" in st["recognized"]
 
 
 def test_file_stages_shows_gross_refund_and_net_when_partially_refunded():
@@ -401,6 +427,42 @@ def test_stream_survives_every_file_failing(monkeypatch):
     assert [e["index"] for e in failed] == [1, 2]
     assert "模型服务超时" in failed[0]["error"]
     assert events[-1]["stage"] == "all_done"          # 两个都失败，收尾照样发出来
+
+
+def test_stream_sends_file_update_naming_the_voucher(tmp_path, monkeypatch):
+    """订单列表那一行要在**收尾时补上「和哪张图重复」**，并且是原地更新（不新增行、不换位置）。
+
+    用户 2026-09-28：「最好能记录下是和哪个图片的信息有重复，方便我排查」。
+    配对要等整批读完（流式逐个文件跑），所以逐文件那行发出去之后再补发一次 `file_update`。
+    """
+    import app.main as main
+
+    def fake_ingest(data_dir, files, project_ref=None, reconcile=True, progress=None):
+        n = files[0]["name"]
+        if n == "v.jpg":
+            item = {"file": n, "ok": True, "amount_cents": 7800, "gross_cents": 7800,
+                    "doc_kind": "payment", "occurred_at": "2026-09-18 11:56:37"}
+        else:
+            item = {"file": n, "ok": True, "amount_cents": 0, "doc_kind": "list",
+                    "no_draft_reason": "list",
+                    "orders": [{"at": "2026-09-18 11:55:53", "amount": 78.0, "name": "A4文档"}]}
+        return {"batches": [{"project_name": "p", "draft_count": 0,
+                             "identified_total_cents": 0, "errors": [], "files": [item]}]}
+
+    monkeypatch.setattr(main.intake, "ingest", fake_ingest)
+    files = [{"name": "l.jpg", "rel_path": "p/l.jpg", "content": b"x"},
+             {"name": "v.jpg", "rel_path": "p/v.jpg", "content": b"x"}]
+    events = [json.loads(line) for line in _intake_stream_events(files, None, False, tmp_path)]
+
+    upd = [e for e in events if e["stage"] == "file_update"]
+    assert len(upd) == 1, f"只该补发一次（订单列表那张）：{upd}"
+    assert upd[0]["index"] == 1 and upd[0]["file"] == "l.jpg", "要更新的是订单列表那一行"
+    assert "v.jpg" in upd[0]["stages"]["processed"], "必须点名是哪张图重复"
+    assert "44 秒" in upd[0]["stages"]["processed"], "时间差也要写出来"
+    assert "78.00" in upd[0]["stages"]["processed"]
+    # 不许新增行：文件级事件只有「两个 file_done + 一次 file_update」
+    assert [e["stage"] for e in events if e["stage"].startswith("file_")] == \
+        ["file_done", "file_done", "file_update"]
 
 
 def test_stream_stops_remaining_files_when_the_client_disconnects(tmp_path, monkeypatch):

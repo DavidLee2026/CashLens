@@ -245,6 +245,8 @@ type IntakeEvent =
   | { stage: "file_done"; index: number; total: number; file: string; project_name: string;
       draft_count: number; identified_total_cents: number; stages?: IntakeStages; errors?: string[] }
   | { stage: "file_failed"; index: number; total: number; file: string; error: string }
+  /* 收尾补发：配对结果要写回那张订单列表的四段（「和哪张图重复」），按 index 原地更新 */
+  | { stage: "file_update"; index: number; total: number; file: string; stages: IntakeStages }
   | { stage: "all_done"; batches: IntakeBatch[] };
 
 /** 导入结果汇总：一个项目一段（沿用原有文案与口径，流式和非流式共用）。 */
@@ -1084,6 +1086,18 @@ export default function Workbench() {
                         how: `${ev.error}——已跳过，不影响其他文件` },
             };
             paint("继续处理剩下的文件…");
+          } else if (ev.stage === "file_update") {
+            /* 订单列表「和哪张图重复」要等整批读完才配得出来 → 收尾时补发一次四段，
+               按 index **原地更新那一行**（不新增行、不换位置）。 */
+            const st = ev.stages ?? blank();
+            const i = ev.index - 1;
+            if (blocks[i]) {
+              const brief = st.processed === "未生成草稿"
+                ? `${st.processed} · ${st.recognized}`
+                : st.processed;
+              blocks[i] = { ...blocks[i], done: true, stages: st, brief };
+              paint("正在收尾：把草稿归到项目里…");
+            }
           } else if (ev.stage === "all_done") {
             summary = summarizeIntake(ev.batches ?? [], false).join("\n");
           }

@@ -402,6 +402,35 @@ def test_unpaid_list_and_full_refund_make_no_draft_but_say_which(tmp_path, monke
         assert out["batches"][0]["draft_count"] == 0
 
 
+def test_unpaid_page_with_an_amount_makes_a_candidate_draft(tmp_path, monkeypatch):
+    """待支付页（按钮还是「去支付」）**也要列一条候选**。
+
+    用户 2026-09-28 真机：`123115`（支付成功 46.17）与 `123111`（订单支付页 57.7）是
+    「一个过去、一个回来的打车记录，因为车牌号是不一样的」，他说「57.7 是应该被记录的」。
+    所以这类不是"读错"，是**口径**：行程的应付金额是真实支出，但**付款状态必须写进备注**，
+    付没付由他在待确认里判 —— 机器既不替他决定，也不替他隐瞒。
+    """
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "doc_kind": "unpaid", "amount": 57.7, "refund_amount": 0,
+        "occurred_at": "2026-09-18 13:25:00", "date": "2026-09-18",
+        "merchant": "高德打车平台由北京易行出行旅游有限公司运营并提供服务",
+        "category": "交通", "items": [{"name": "特惠快车行程", "amount": 0}],
+        "note": "页面显示去支付，尚未完成付款", "text_lines": [], "confidence": 0.8,
+    })
+    out = intake.ingest(tmp_path, [
+        {"name": "微信图片_20260924123111.jpg", "rel_path": "919昆明项目/x.jpg", "content": b"x"},
+    ])
+    drafts = pending.list_all(tmp_path)
+    assert [d["amount_cents"] for d in drafts] == [5770], "待支付也要列一条候选"
+    assert drafts[0]["category"] == "交通"
+    assert "待支付" in drafts[0]["note"] and "去支付" in drafts[0]["note"], (
+        "付款状态必须写进备注，不能只报一个金额"
+    )
+    assert "请确认" in drafts[0]["note"]
+    it = out["batches"][0]["files"][0]
+    assert it["doc_kind"] == "unpaid" and it.get("unpaid") is True
+
+
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
     """有票面金额的图照旧走原路：不许因为图里同时有别的数字就多建候选草稿。"""
     monkeypatch.setattr(intake, "recognize_file", lambda p: {

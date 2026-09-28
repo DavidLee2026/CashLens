@@ -401,7 +401,7 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
         #   一个钱还没出去，一个只是同一笔钱的另一个视角（实弹：一个「我的订单」列表里
         #   那笔 78 元，和另一张账单详情里的 78 元是**同一笔**，两张都记就是记两遍）。
         #   如实说清是哪种（前端靠 no_draft_reason 出对应文案），不假装"未识别到金额"。
-        if doc_kind in ("unpaid", "list"):
+        if doc_kind == "list":
             items.append({"file": f["name"], "ok": True, "amount_cents": 0,
                           "doc_kind": doc_kind, "refund_cents": 0,
                           "no_draft_reason": doc_kind, "text_amounts": 0,
@@ -409,6 +409,34 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                           "orders": res.get("orders") or [],
                           "date": "", "merchant": "", "category": "",
                           "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                          "confidence": res.get("confidence")})
+            continue
+        if doc_kind == "unpaid":
+            # 待支付（截图上按钮还是「去支付」）**也要列一条候选**（用户 2026-09-28：
+            # 「一个过去、一个回来的打车记录，车牌号不一样，57.7 是应该被记录的」）——
+            # 打车这类行程的应付金额是真实支出，只是**付款状态要在备注里写清**，
+            # 付没付、该不该报由用户在待确认里判（机器不替他决定，也不替他隐瞒）。
+            if cents <= 0:
+                items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                              "doc_kind": doc_kind, "refund_cents": 0,
+                              "no_draft_reason": "unpaid", "text_amounts": 0,
+                              "occurred_at": occurred_at,
+                              "date": date, "merchant": merchant, "category": cat,
+                              "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                              "confidence": res.get("confidence")})
+                continue
+            d = _draft(data_dir, pid, direction=res.get("type") or "expense",
+                       amount_cents=cents, category=cat,
+                       note=f"{note}；待支付页面：截图时还没付款（按钮是「去支付」），请确认这笔是否已付",
+                       counterparty=merchant, date=date, source="识别", image_name=f["name"])
+            if d:
+                drafts.append(d)
+            items.append({"file": f["name"], "ok": True, "amount_cents": cents,
+                          "doc_kind": doc_kind, "unpaid": True, "refund_cents": 0,
+                          "occurred_at": occurred_at, "text_amounts": 0,
+                          "date": date, "merchant": merchant, "category": cat,
+                          "invoice_no": res.get("invoice_no", ""),
+                          "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                           "confidence": res.get("confidence")})
             continue
         #   receipt / payment：**一张凭证一条草稿**，金额 = 实付 − 退款（减法在代码里做）。
