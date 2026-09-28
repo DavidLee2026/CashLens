@@ -1783,7 +1783,7 @@ export default function Workbench() {
               </div>
               <div>
                 <dt>数据</dt>
-                <dd>账本与预估存在本机 data/ 目录；识别结果一律先经你确认才入账。</dd>
+                <dd>账本与预估存在本机 data/ 目录；票据识别按你选择的模型档位进行，可随时切到本地模型；识别结果一律先经你确认才入账。</dd>
               </div>
             </dl>
             <p className="about-note">只做事实陈述与依据呈现，不构成记账、税务或投资意见。</p>
