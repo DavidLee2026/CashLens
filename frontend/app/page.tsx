@@ -626,13 +626,17 @@ export default function Workbench() {
     setActingIds((prev) => new Set(prev).add(p.id));
     // 确认时把"这一笔归哪个项目"一起提交（下拉里选的；没动过就是草稿原来的项目）
     const proj = draftProject[p.id] ?? p.project ?? "";
-    // 分类同理：只对「待确认」的行提供下拉，选了就按选的写；没选就留空（后端落「未分类」）
-    const cat = draftCategory[p.id] ?? "";
+    // 分类同理：只对「待确认」的行提供下拉。**没选过就不要带这个字段** ——
+    // 空字符串在后端会被当成"用户指定了空分类"，把草稿识别出来的分类冲成「其他」
+    // （2026-09-28 真机：18 笔全变「其他」，就是这么来的）。
+    const cat = draftCategory[p.id];
     try {
       const res = await j<{ ok: boolean; project_name?: string; appended?: boolean }>(
         `/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`,
         { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(acceptIt ? { project: proj, category: cat } : { project: proj }) }
+          body: JSON.stringify(acceptIt
+            ? { project: proj, ...(cat ? { category: cat } : {}) }
+            : { project: proj }) }
       );
       // 只在**真的注销掉这条草稿**时才把它从气泡里移除。
       // 「确认入账」被去重挡下时（appended=false）草稿还在待确认里，按钮要留着让用户能改能弃。
@@ -694,7 +698,9 @@ export default function Workbench() {
         const proj = draftProject[p.id] ?? p.project ?? "";
         const r = await j<{ appended?: boolean }>(`/api/pending/${p.id}/accept`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project: proj, category: draftCategory[p.id] ?? "" }),
+          // 同单笔那条：没选过分类就不带这个字段（带了空串会把草稿分类冲成「其他」）
+          body: JSON.stringify({ project: proj,
+            ...(draftCategory[p.id] ? { category: draftCategory[p.id] } : {}) }),
         });
         // ⚠️ 只把**真写进账本**的算作已入账。以前不看 appended 就 +1，
         // 于是一次批量报了「4 笔（支出 ¥112.00）」而账本只有 1 笔（2026-09-28 真机）。
