@@ -5,8 +5,10 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 type PendingDraft = {
   id: string; direction: "income" | "expense"; amount_cents: number; category: string;
   channel: string; project?: string; project_name?: string;
-  /** 识别通道会写入票据上的日期（聊天记账的草稿没有，用 created 兜底显示） */
+  /** 票据上认出的日期；认不出就是空——界面上如实显示「日期待补」，不拿导入日充数 */
   date?: string; counterparty?: string; created?: string;
+  /** 草稿来自哪条通道（报销表 / 识别 / 对话…）与提示语：用于如实标注第四段是什么字段 */
+  source?: string; note?: string;
 };
 /** 总账户合计（全部项目 ＋ 未归项目）：左栏第一行用，也是"查询口径"的那本账。 */
 function accountTotals(v: ProjectsView | null) {
@@ -317,6 +319,11 @@ export default function Workbench() {
      所以必须有"加载时拉取"这一处，否则刷新页面后再也点不到它们（2026-09-28 修）。 */
   const [pendingList, setPendingList] = useState<PendingDraft[]>([]);
   const [pendingOpen, setPendingOpen] = useState(false);
+  /* 批量确认：默认收起，点「全部确认」才展开一次确认条。
+     ⚠️ 不做成一键直入账——合规红线是「用户确认环节不得为体验而取消」，
+     所以这里仍然是用户显式点的，而且要先把「共几笔 / 多少钱 / 其中几笔带核对提示」摆出来。 */
+  const [batchAsk, setBatchAsk] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
   const [projMsg, setProjMsg] = useState("");
@@ -605,6 +612,48 @@ export default function Workbench() {
       });
     }
   }
+
+  /** 这一笔是否带「需人工核对」提示（发票号存疑 / 分类待定等）。
+      批量确认时必须单独点出来：这些正是"机器认不准、要人看原件"的那些。 */
+  function needsReview(p: PendingDraft) {
+    return p.category === "待确认" || /存疑|人工核对|需确认|未识别|退款|待确认/.test(p.note ?? "");
+  }
+
+  /** 批量确认：逐笔走同一个 accept 端点（不新增接口，端点数不变）。
+      中途失败即停并如实报告已入账几笔——不能假装全成功。 */
+  async function actBatch(ids: string[]) {
+    const targets = pendingList.filter((p) => ids.includes(p.id));
+    if (!targets.length || batchBusy) return;
+    setBatchBusy(true);
+    let done = 0, incomeCents = 0, expenseCents = 0;
+    try {
+      for (const p of targets) {
+        const proj = draftProject[p.id] ?? p.project ?? "";
+        await j(`/api/pending/${p.id}/accept`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project: proj }),
+        });
+        done += 1;
+        if (p.direction === "income") incomeCents += p.amount_cents;
+        else expenseCents += p.amount_cents;
+      }
+      setMsgs((m) => [...m, { role: "ai", text:
+        `已确认入账 ${done} 笔（支出 ${yuan(expenseCents)}${incomeCents ? `、收入 ${yuan(incomeCents)}` : ""}）。` }]);
+    } catch {
+      setMsgs((m) => [...m, { role: "ai", text:
+        `批量确认中断：已入账 ${done} 笔，其余未动。请确认后端在运行后重试。` }]);
+    } finally {
+      setBatchBusy(false);
+      setBatchAsk(false);
+      refresh();
+    }
+  }
+
+  // 批量确认条要摆出来的数字：每次渲染现算，不缓存（草稿随时在变）
+  const reviewIds = pendingList.filter(needsReview).map((x) => x.id);
+  const reviewFree = pendingList.filter((x) => !needsReview(x));
+  const batchExpense = pendingList.reduce((s, x) => s + (x.direction === "expense" ? x.amount_cents : 0), 0);
+  const batchIncome = pendingList.reduce((s, x) => s + (x.direction === "income" ? x.amount_cents : 0), 0);
 
   /** 项目改名：只改后端映射表里的显示名，账本里的事件一字不动。 */
   async function saveRename() {
@@ -1483,18 +1532,68 @@ export default function Workbench() {
               <section className="sect">
                 <div className="sect-head">
                   <h3>待确认（{pendingList.length}）</h3>
-                  <span className="sect-note">确认后才入账</span>
+                  {batchAsk ? (
+                    <span className="sect-note">确认后才入账</span>
+                  ) : (
+                    <button
+                      className="btn-mini"
+                      disabled={batchBusy || actingIds.size > 0}
+                      title="一次确认多笔：仍然由你点，机器不会自动入账；会先把总笔数、总额与带「需核对」提示的笔数摆出来"
+                      onClick={() => setBatchAsk(true)}
+                    >
+                      {batchBusy ? "入账中…" : "全部确认"}
+                    </button>
+                  )}
                 </div>
+                {batchAsk && (
+                  <div className="pd-confirm">
+                    <p>
+                      将 <b>{pendingList.length}</b> 笔入账：支出 <b>{yuan(batchExpense)}</b>
+                      {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
+                      {reviewIds.length > 0 && (
+                        <> 其中 <b>{reviewIds.length}</b> 笔带「需核对」提示（发票号存疑 / 分类待定），建议先对原件。</>
+                      )}
+                    </p>
+                    <div className="pd-confirm-acts">
+                      {reviewFree.length > 0 && (
+                        <button className="btn-mini ok" disabled={batchBusy}
+                                onClick={() => actBatch(reviewFree.map((x) => x.id))}>
+                          只确认无提示的 {reviewFree.length} 笔
+                        </button>
+                      )}
+                      <button className="btn-mini" disabled={batchBusy}
+                              onClick={() => actBatch(pendingList.map((x) => x.id))}>
+                        确认全部 {pendingList.length} 笔
+                      </button>
+                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(false)}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {(pendingOpen ? pendingList : pendingList.slice(0, 4)).map((p) => (
                   <div className="pd-row" key={p.id}>
                     <div className="pd-main">
                       <span className={`pd-amt num ${p.direction === "income" ? "in" : ""}`}>
                         {p.direction === "income" ? "+" : "−"}{yuan(p.amount_cents)}
                       </span>
-                      <span className="pd-meta">
+                      <span
+                        className="pd-meta"
+                        title={[
+                          p.source ? `通道：${p.source}` : "",
+                          p.date ? "" : `导入于 ${p.created ? p.created.slice(0, 10) : "未知"}`,
+                          p.note || "",
+                        ].filter(Boolean).join(" · ")}
+                      >
                         {p.category}
-                        {` · ${p.date || (p.created ? p.created.slice(0, 10) : "—")}`}
-                        {p.counterparty ? ` · ${p.counterparty}` : ""}
+                        {` · ${p.date || "日期待补"}`}
+                        {/* 第四段必须标出它到底是什么：报销表那一列装的是归属（部门/模块），
+                            不是商户。此前不标注，界面上会显示成「−¥17.88 餐饮 · 09-28 · 后端」，
+                            看起来像商户叫「后端」（2026-09-28 用户当场问这是啥）。 */}
+                        {p.counterparty
+                          ? ` · ${p.source === "报销表" ? "表内归属" : "商户"} ${p.counterparty}`
+                          : ""}
+                        {needsReview(p) && <span className="pd-warn">需核对</span>}
                       </span>
                     </div>
                     <div className="pd-acts">

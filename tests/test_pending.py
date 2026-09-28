@@ -114,3 +114,61 @@ def test_pending_endpoint_keeps_panel_fields(tmp_path, monkeypatch):
     assert row["date"] == "2026-09-18"
     assert row["counterparty"] == "云南强林乐家连锁便利店有限公司"
     assert row["project_name"] == "未归项目", "未归项目的草稿也要有可显示的名字"
+
+
+# ---------------------------------------------------------------- 界面护栏
+# 读 page.tsx 源码下断言（同 test_intake_stream.py 的调用点护栏做法）：
+# 这两条锁的是"别人以后容易改回去"的行为，不是实现细节。
+
+def _page_tsx() -> str:
+    return (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(
+        encoding="utf-8")
+
+
+def test_batch_confirm_stays_behind_an_explicit_second_click():
+    """批量确认必须是「用户点了才出现、还要再点一次」——不得做成一键直入账。
+
+    合规红线是「用户确认环节不得为体验而取消」。批量确认只是把 17 次点击并成 2 次，
+    仍然是用户显式发起的；这条测试锁住：
+      ① 存在批量入口「全部确认」，且它只是把确认条打开（setBatchAsk(true)）；
+      ② 确认条里必须先摆出笔数与金额，再给「确认全部 N 笔」；
+      ③ 批量走的是同一个 accept 端点（不新增接口，端点数不变）；
+      ④ 中途失败要如实报告已入账几笔，不许假装全成功。
+    """
+    src = _page_tsx()
+
+    assert "全部确认" in src, "左栏待确认面板应有批量入口"
+    assert "setBatchAsk(true)" in src, "批量入口只能打开确认条，不能直接入账"
+    # 确认条里要摆数字再让用户点
+    assert "batchExpense" in src and "batchIncome" in src, "确认条要先摆出支出/收入合计"
+    assert "确认全部 {pendingList.length} 笔" in src, "确认条里要有明确的「确认全部 N 笔」按钮"
+    assert "只确认无提示的" in src, "带「需核对」提示的笔应可单独排除"
+    # 走同一个端点
+    assert "`/api/pending/${p.id}/accept`" in src, "批量确认应复用单笔 accept 端点"
+    # 失败要如实
+    assert "批量确认中断：已入账" in src, "中途失败必须报告已入账笔数"
+    # 绝不能出现「进页面就自动入账」
+    assert "useEffect(() => {\n    actBatch" not in src and "actBatch(pendingList.map" not in src.split("useEffect")[0], \
+        "不得在加载/副作用里自动批量入账"
+
+
+def test_pending_panel_labels_fourth_field_and_missing_date():
+    """第四段与缺失日期必须如实标注，不能让人猜。
+
+    起因（2026-09-28 真机）：界面显示「−¥17.88 餐饮 · 2026-09-28 · 后端」，
+    用户当场问「这个后端是什么意思」。查证：那是**报销表里一个归属列（部门/模块）
+    被写进了 counterparty**，界面上既不标注含义、又把导入日当成交易日显示，
+    于是看起来像"商户叫后端"。本条锁住两件事：
+      ① 第四段按来源标注：报销表 → 「表内归属」，其余 → 「商户」；
+      ② 认不出日期时如实显示「日期待补」，不拿 created（导入日）冒充交易日
+         （created 只放进 title 里说明"导入于"）。
+    """
+    src = _page_tsx()
+
+    assert "表内归属" in src and "商户" in src, "第四段要按来源标注，不能光甩一个值"
+    assert 'p.source === "报销表"' in src, "来源为报销表时不得标成「商户」"
+    assert "日期待补" in src, "认不出交易日要如实说「日期待补」"
+    assert "p.date || (p.created" not in src, "不得再拿 created（导入日）当交易日显示"
+    assert "导入于" in src, "created 应只作为 title 里的说明出现"
+    # 需核对提示要看得见（批量确认时用户据此决定是否排除）
+    assert "需核对" in src and "needsReview" in src
