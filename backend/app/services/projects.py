@@ -250,6 +250,7 @@ def _empty_group(pid: str, rows: list[dict]) -> dict:
         "income_count": 0,
         "expense_count": 0,
         "by_category": {},
+        "by_income_category": {},
         "duplicates": [],
         "_seen_invoices": {},
     }
@@ -293,6 +294,11 @@ def summary(data_dir: str | Path, events: list[dict] | None,
         if etype in ("income", "refund"):
             g["income_cents"] += amount
             g["income_count"] += 1
+            icat = str(ev.get("category") or "").strip() or "未分类"
+            ic = g["by_income_category"].setdefault(
+                icat, {"category": icat, "amount_cents": 0, "count": 0})
+            ic["amount_cents"] += amount
+            ic["count"] += 1
             continue
         if etype != "expense":
             continue
@@ -323,6 +329,8 @@ def summary(data_dir: str | Path, events: list[dict] | None,
         g.pop("_seen_invoices", None)
         g["net_cents"] = g["income_cents"] - g["expense_cents"]
         g["by_category"] = sorted(g["by_category"].values(), key=lambda c: -c["amount_cents"])
+        g["by_income_category"] = sorted(g["by_income_category"].values(),
+                                         key=lambda c: -c["amount_cents"])
         g["reimbursement"] = {
             "expense_total_cents": g["expense_cents"],
             "expense_count": g["expense_count"],
@@ -347,6 +355,108 @@ def summary(data_dir: str | Path, events: list[dict] | None,
         },
         "dedupe_basis": "同一项目内发票号码相同的事件只计一次；账本未记录发票号码的事件不参与去重（不推断）。",
         "disclaimer": "项目归集由账本事件的项目字段聚合得出，仅为事实陈述，不构成记账或税务结论。",
+    }
+
+
+def detail(data_dir: str | Path, events: list[dict] | None, ref: str) -> dict:
+    """单个项目的明细（详情弹窗用）：合计 + 分类构成 + 报销/发票 + 最近事件 + 时间范围。
+
+    **口径必须复用 `summary()`**（支出侧按发票号去重）：同一个项目在"总览"和"详情"里显示
+    不同金额是硬伤，所以这里不另写一套算法，而是拿 summary 的结果再补"构成与明细"。
+    """
+    # 先解析目标项目（id / 显示名 / 未归项目）：**项目存在但一笔都没有也要能看详情**
+    # （刚建的项目、或删完账单的项目），只有"项目不存在"才算错。
+    raw = str(ref or "").strip()
+    if raw in (UNASSIGNED_LABEL, "unassigned", "-"):
+        pid = UNASSIGNED_PROJECT
+        key: str | None = UNASSIGNED_LABEL          # summary 认这个哨兵值，空串会被当成"全部项目"
+    else:
+        pid = resolve(data_dir, raw)
+        if pid is None:
+            return {"ok": False, "error": f"找不到项目：{ref}"}
+        key = pid
+    out = summary(data_dir, events, project=key)
+    if not out.get("ok"):
+        return out
+    groups = out.get("projects") or []
+    g = groups[0] if groups else None                # 一笔都没有时 g 为 None，下面统一按 0 处理
+    rows = _sync(data_dir, events)
+    deleted_ids = {str(r.get("id")) for r in rows if is_deleted(r)}
+
+    mine: list[dict] = []
+    invoices: dict[str, dict] = {}
+    for ev in events or []:
+        ep = str(ev.get("project") or "")
+        if ep in deleted_ids:                 # 与 summary 一致：已删项目名下的账单回落到未归项目
+            ep = UNASSIGNED_PROJECT
+        if ep != pid:
+            continue
+        mine.append(ev)
+        if str(ev.get("type")) != "expense":
+            continue
+        no = _invoice_no_of(ev)
+        if no and no not in invoices:          # 同号只留第一笔（与 summary 同一套去重口径）
+            invoices[no] = {
+                "invoice_no": no,
+                "amount_cents": int(ev.get("amount_cents") or 0),
+                "date": str(ev.get("ts") or "")[:10],
+                "event_id": ev.get("event_id", ""),
+            }
+
+    def _row(ev: dict) -> dict:
+        evd = ev.get("evidence") if isinstance(ev.get("evidence"), dict) else {}
+        return {
+            "event_id": ev.get("event_id", ""),
+            "date": str(ev.get("ts") or "")[:10],
+            "type": str(ev.get("type") or ""),
+            "amount_cents": int(ev.get("amount_cents") or 0),
+            "category": str(ev.get("category") or "") or "未分类",
+            "counterparty": str(ev.get("counterparty") or ""),
+            "note": str(ev.get("note") or ""),
+            "evidence": str((evd or {}).get("kind") or ""),
+        }
+
+    recent = sorted(mine, key=lambda e: str(e.get("ts") or ""), reverse=True)[:10]
+    dates = [str(e.get("ts") or "")[:10] for e in mine if e.get("ts")]
+    row = get(data_dir, pid) or {}
+    # 一笔都没有的项目：所有数字按 0 走（不编造、也不报错）
+    income = int(g["income_cents"]) if g else 0
+    expense = int(g["expense_cents"]) if g else 0
+    income_count = int(g["income_count"]) if g else 0
+    expense_count = int(g["expense_count"]) if g else 0
+    dupes = list((g or {}).get("duplicates") or [])
+    return {
+        "ok": True,
+        "project": {
+            "id": pid,
+            "name": (g or {}).get("name") or display_name(rows, pid),
+            "named": bool(row.get("named")),
+            "created": str(row.get("created") or ""),
+        },
+        "totals": {
+            "income_cents": income,
+            "expense_cents": expense,
+            "net_cents": income - expense,
+            "income_count": income_count,
+            "expense_count": expense_count,
+            "count": income_count + expense_count,
+        },
+        "expense_by_category": (g or {}).get("by_category") or [],
+        "income_by_category": (g or {}).get("by_income_category") or [],
+        "reimbursement": {
+            "expense_total_cents": expense,
+            "expense_count": expense_count,
+            "invoice_count": len(invoices),
+            "invoices": sorted(invoices.values(), key=lambda x: (-x["amount_cents"], x["date"])),
+            "duplicate_count": len(dupes),
+            "duplicates": dupes,
+            "no_duplicate": len(dupes) == 0,
+        },
+        "recent": [_row(e) for e in recent],
+        "range": {"first_date": min(dates) if dates else "",
+                  "last_date": max(dates) if dates else ""},
+        "dedupe_basis": out.get("dedupe_basis", ""),
+        "disclaimer": "以上为账本事实的归集与构成，仅为事实陈述，不构成记账或税务结论。",
     }
 
 
