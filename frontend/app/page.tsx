@@ -66,6 +66,9 @@ type Msg = {
      每段各自一个框，中间还穿插别的消息，看起来一堆框在刷屏。
      带上这两个标记后，标题 + 逐文件进度 + 最终汇总全部原地落在同一个框里。 */
   isImport?: boolean; importTitle?: string;
+  /* 这次导入的身份：进度靠它原地更新（不能靠「是不是最后一条」—— 用户在导入途中
+     说话/助手回话都会让导入框不再是最后一条，旧写法会因此反复新建导入框）。 */
+  importId?: string;
 };
 type StateT = {
   label: string;
@@ -941,14 +944,24 @@ export default function Workbench() {
 
     let blocks: ProgressBlock[] = [];
     const title = `导入 ${items.length} 个文件`;
+    /* 这次导入的**身份**：进度只认它，不认"是不是最后一条消息"。
+       起因（2026-09-28 用户）：导入还在跑的时候他插了一句话（或助手回了一句），
+       导入框就不再是最后一条了 —— 旧写法用「最后一条是不是导入框」来判断该不该原地更新，
+       于是每刷一次进度就**新建一个导入框**，他看到的是一模一样的导入框反复出现、
+       而且把对话挤得乱七八糟。改成按 id 找到自己那一条、原地替换，位置永远不动。 */
+    const importId = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const blank = (): IntakeStages => ({ read: "读取中…", recognized: "—", processed: "—", how: "—" });
 
-    /** 原地重画这个导入框：文件块 + 一行当前状态，不刷屏、不开新框。 */
+    /** 原地重画**自己这个**导入框（按 importId 找，不按位置）：文件块 + 一行当前状态。 */
     const paint = (live: string, progress = true) => {
       setMsgs((m) => {
-        const last = m[m.length - 1];
-        const msg: Msg = { role: "ai", text: live, blocks: [...blocks], progress, isImport: true, importTitle: title };
-        return last && last.isImport ? [...m.slice(0, -1), msg] : [...m, msg];
+        const msg: Msg = { role: "ai", text: live, blocks: [...blocks], progress,
+                           isImport: true, importTitle: title, importId };
+        const i = m.findIndex((x) => x.importId === importId);
+        if (i < 0) return [...m, msg];
+        const next = [...m];
+        next[i] = msg;
+        return next;
       });
     };
 

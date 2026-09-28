@@ -260,6 +260,20 @@ def test_footer_line_belongs_to_the_right_column_and_left_panel_runs_to_the_bott
     assert "text-align:center" in _tight(_rules(".footnote{")), "口径说明在右栏内居中"
 
 
+def test_import_progress_updates_by_identity_not_by_position():
+    """导入进度必须**按 importId 原地更新**，不能靠「是不是最后一条消息」。
+
+    起因（2026-09-28 用户）：「导入信息干扰了我的对话…我输入信息，导入信息，就刷新一次，
+    重复出现」。根因：导入还在跑的时候他插了一句话（或助手回了一句），导入框就不再是最后一条，
+    而旧写法只在「最后一条是导入框」时才原地更新 —— 于是每刷一次进度就**新建一个导入框**。
+    反向验证：`.logs/verify-import-inplace.mjs` 把这条逻辑改回旧写法，框数立刻从 1 变 2。
+    """
+    src = _page_src()
+    assert "importId" in src, "导入消息要带稳定身份"
+    assert "m.findIndex((x) => x.importId === importId)" in src, "按 id 找到自己那条、原地替换"
+    assert "last && last.isImport" not in src, "不许再用「最后一条是不是导入框」来判断该不该原地更新"
+
+
 def test_no_draft_reason_is_shown_on_the_same_line():
     """「未生成草稿」那一行必须带上**原因**，不能只说"没成"。
 
