@@ -679,10 +679,17 @@ class IntakeFileIn(BaseModel):
 
 
 class IntakeIn(BaseModel):
-    """批量导入：图片 / PDF / Excel / CSV，可按文件夹整批投喂。"""
+    """批量导入：图片 / PDF / Excel / CSV，可按文件夹整批投喂。
+
+    `reconcile`（2026-09-28 新增）：报销表的**双源核对**（逐张识别表内嵌入图，与表内金额对账）
+    要不要跑。默认跑 —— 它能发现"表里写 47.13、票上其实 41.73"这类错。但它是最慢的一步
+    （10 张图串行跑 3 分钟，实测 18 秒/张），而表内数字本来就是权威、核对不是入账必需，
+    所以给用户一个**跳过**的开关（着急时草稿 0 秒就能出）。
+    """
 
     files: list[IntakeFileIn]
     project: str = ""
+    reconcile: bool = True
 
 
 # 单文件与整批的体量上限（防误拖整个目录把内存打满；超限如实报错，不静默截断）
@@ -830,7 +837,8 @@ def intake_upload(body: IntakeIn):
     files = _intake_decode(body)
 
     try:
-        out = intake.ingest(DATA_DIR, files, project_ref=body.project or None)
+        out = intake.ingest(DATA_DIR, files, project_ref=body.project or None,
+                          reconcile=body.reconcile)
     except Exception as e:  # noqa: BLE001 失败要报出来，不吞
         raise HTTPException(status_code=500, detail=f"导入失败：{type(e).__name__}: {str(e)[:200]}")
     out["pending"] = [{"id": d["id"], "direction": d["direction"],
@@ -847,10 +855,17 @@ def intake_upload(body: IntakeIn):
 _INTAKE_TICK_SECONDS = 3
 
 
-def _tick_note(name: str) -> str:
-    """心跳里那句「现在在干什么」：只描述这个文件类型真实发生的动作，不编造百分比。"""
+def _tick_note(name: str, prog: dict | None = None) -> str:
+    """心跳里那句「现在在干什么」：只描述这个文件类型真实发生的动作，不编造百分比。
+
+    `prog` 是**子步骤**进度（目前只有报销表的嵌入图核对会给）：有就把它拼进去 ——
+    否则一张 10 行的报表要跑三分钟而界面只显示一句笼统的话，看着像卡死。
+    """
     low = name.lower()
     if low.endswith((".xlsx", ".xls", ".csv")):
+        if prog and prog.get("total"):
+            return (f"报销表：正在{prog.get('label') or '核对嵌入图'}"
+                    f"（{prog.get('done')}/{prog.get('total')} 张）")
         return "报销表：逐行取值，并逐张核对表内嵌入图（这个类型最慢，请稍等）"
     if low.endswith(".pdf"):
         return "PDF：本机直读文本层"
@@ -890,9 +905,15 @@ def intake_stream(body: IntakeIn):
                 # 把耗时的 ingest 放进工作线程，主线程每几秒推一行心跳。
                 # 这样「进度」是真的（已等秒数），而不是预先算好的假百分比。
                 pool = ThreadPoolExecutor(max_workers=1)
+                # 子步骤进度：worker 里更新，这里的心跳循环读它（同一个 dict，无需加锁 ——
+                # CPython 下 dict.update 是原子的，最坏情况是心跳读到上一拍的数字）
+                prog: dict = {}
                 try:
                     fut = pool.submit(intake.ingest, DATA_DIR, [f],
-                                      project_ref=body.project or None)
+                                      project_ref=body.project or None,
+                                      reconcile=body.reconcile,
+                                      progress=lambda d, t, label: prog.update(
+                                          done=d, total=t, label=label))
                     while not fut.done():
                         time.sleep(_INTAKE_TICK_SECONDS)
                         if fut.done():
@@ -901,7 +922,7 @@ def intake_stream(body: IntakeIn):
                             "stage": "tick", "index": i, "total": total,
                             "file": f["name"],
                             "elapsed": round(time.monotonic() - t0, 1),
-                            "note": _tick_note(f["name"]),
+                            "note": _tick_note(f["name"], prog),
                         }, ensure_ascii=False) + "\n"
                     out = fut.result()      # 异常在这里抛出，走下面的 file_failed，语义不变
                 finally:

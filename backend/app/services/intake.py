@@ -20,11 +20,14 @@
 from __future__ import annotations
 
 import csv as _csv
+import hashlib
 import io
+import json
 import os
 import re
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from . import categories, pending, projects, report_sheet
@@ -39,6 +42,70 @@ CSV_EXT = (".csv",)
 PDF_EXT = (".pdf",)
 # .xls（老格式）与 .numbers 不装第三方库读不了，如实拒绝，不静默丢弃
 UNSUPPORTED_EXT = (".xls", ".numbers", ".et")
+
+
+# ─── 嵌入图核对的提速设施（2026-09-28）──────────────────────────
+# 起因：一张报表 10 行各嵌一张图，核对是**串行**调模型，实测 18 秒/张 → 整批 3 分钟。
+# 而读表本身是 0.00 秒（纯标准库）——慢的从来不是"读取"。
+# 两条提速，互不冲突：
+#   1) 并发：模型调用是 I/O 等待，并行不占 CPU
+#   2) 缓存：图片内容 + 模型指纹都没变，就没必要重算（用户会反复导入同一份表）
+_RECOG_WORKERS = 4                 # 并发路数：别开太大，注意模型服务侧的限流
+_RECOG_CACHE_FILE = "_recog_cache.json"
+_RECOG_CACHE_MAX = 500             # 只留最近这么多条，别让缓存无限长大
+
+
+def _model_fingerprint() -> str:
+    """当前档位 + 型号 + 端点 —— 换模型就让缓存自动失效，不拿旧模型的结果糊弄。"""
+    try:
+        from . import model_config  # noqa: PLC0415 局部导入：只有走缓存时才需要
+        cfg = model_config.active()
+        return f"{cfg.get('tier')}|{cfg.get('model')}|{cfg.get('base_url')}"
+    except Exception:  # noqa: BLE001 取不到指纹就不缓存（不因为缓存把导入搞挂）
+        return ""
+
+
+def _cache_path(data_dir) -> Path:
+    return Path(data_dir) / _RECOG_CACHE_FILE
+
+
+def _cache_load(data_dir) -> dict:
+    p = _cache_path(data_dir)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 缓存坏了就当没有，不影响导入
+        return {}
+
+
+def _cache_save(data_dir, cache: dict) -> None:
+    try:
+        if len(cache) > _RECOG_CACHE_MAX:
+            cache = dict(list(cache.items())[-_RECOG_CACHE_MAX:])
+        _cache_path(data_dir).write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    except Exception:  # noqa: BLE001 写不进去也不该让导入失败
+        pass
+
+
+# 只缓存核对用得上的字段：识别结果里那些本机路径、渠道标记不进缓存
+_CACHE_FIELDS = ("amount", "date", "merchant", "invoice_no")
+
+
+def _recognize_cached(img_path: Path, data_dir, cache: dict, fingerprint: str) -> dict:
+    """识别一张嵌入图，命中缓存就完全不调模型。"""
+    try:
+        key = f"{fingerprint}|{hashlib.sha256(img_path.read_bytes()).hexdigest()}"
+    except Exception:  # noqa: BLE001 读不到文件就走原路（让 recognize_file 去报错）
+        return recognize_file(img_path)
+    hit = cache.get(key)
+    if isinstance(hit, dict):
+        return {**hit, "_from_cache": True}
+    res = recognize_file(img_path)
+    if not res.get("error") and res.get("amount"):
+        cache[key] = {k: res.get(k) for k in _CACHE_FIELDS}
+    return res
 
 
 def classify(name: str) -> str:
@@ -181,7 +248,7 @@ def _ingest_pdf(data_dir, pid: str, files: list[dict], work_dir: Path) -> dict:
 
 
 def _ingest_sheet(data_dir, pid: str, files: list[dict], work_dir: Path,
-                  image_dir: Path) -> dict:
+                  image_dir: Path, reconcile: bool = True, progress=None) -> dict:
     """Excel 报销表：表内数字入账（优先），嵌入图识别做核对（双源）。"""
     drafts, items, errors = [], [], []
     for f in files:
@@ -209,25 +276,47 @@ def _ingest_sheet(data_dir, pid: str, files: list[dict], work_dir: Path,
                 drafts.append(d)
 
         # 2) 嵌入图识别 → 与表内金额核对（机器不覆盖人写的数）
-        checks = []
-        for row in sheet["rows"]:
-            if not row["image_path"]:
-                continue
-            res = recognize_file(row["image_path"])
-            if res.get("error"):
-                checks.append({"image": row["image_name"], "declared_cents": row["amount_cents"],
-                               "recognized_cents": None, "match": None,
-                               "error": res["error"]})
-                continue
-            got = int(round(float(res.get("amount") or 0) * 100))
-            checks.append({
-                "image": row["image_name"],
-                "declared_cents": row["amount_cents"],
-                "recognized_cents": got,
-                "match": got == row["amount_cents"],
-                "merchant": res.get("merchant", ""),
-                "date": res.get("date", ""),
-            })
+        #    ⚠️ 这是整条链路最慢的一步（串行时 10 张 ≈ 3 分钟，实测 18 秒/张）。
+        #    两处提速：**并发**（I/O 等待，并行不占 CPU）+ **按内容与模型指纹缓存**。
+        #    `reconcile=False` 时整步跳过 —— 表内数字本来就是权威，核对只是用来发现
+        #    表和票对不上；着急时可以不要（用户 2026-09-28 要求给个逃生门）。
+        checks: list[dict] = []
+        todo_rows = [r for r in sheet["rows"] if r["image_path"]] if reconcile else []
+        if todo_rows:
+            cache = _cache_load(data_dir)
+            fingerprint = _model_fingerprint()
+            results: list[dict] = [{} for _ in todo_rows]
+            done = 0
+            with ThreadPoolExecutor(max_workers=min(_RECOG_WORKERS, len(todo_rows))) as pool:
+                futs = {pool.submit(_recognize_cached, Path(r["image_path"]), data_dir,
+                                    cache, fingerprint): i
+                        for i, r in enumerate(todo_rows)}
+                for fut in as_completed(futs):
+                    idx = futs[fut]
+                    try:
+                        results[idx] = fut.result() or {}
+                    except Exception as e:  # noqa: BLE001 单张失败不影响其余
+                        results[idx] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+                    done += 1
+                    if progress:
+                        progress(done, len(todo_rows), "核对表内嵌入图")
+            _cache_save(data_dir, cache)
+            for row, res in zip(todo_rows, results):
+                if res.get("error"):
+                    checks.append({"image": row["image_name"], "declared_cents": row["amount_cents"],
+                                   "recognized_cents": None, "match": None,
+                                   "error": res["error"]})
+                    continue
+                got = int(round(float(res.get("amount") or 0) * 100))
+                checks.append({
+                    "image": row["image_name"],
+                    "declared_cents": row["amount_cents"],
+                    "recognized_cents": got,
+                    "match": got == row["amount_cents"],
+                    "merchant": res.get("merchant", ""),
+                    "date": res.get("date", ""),
+                    "from_cache": bool(res.get("_from_cache")),
+                })
 
         matched = sum(1 for c in checks if c.get("match"))
         items.append({
@@ -246,6 +335,7 @@ def _ingest_sheet(data_dir, pid: str, files: list[dict], work_dir: Path,
                 "unreadable": [c for c in checks if c.get("match") is None],
             },
             "checks": checks,
+            "reconcile_skipped": not reconcile,
             "needs_confirm": sheet["needs_confirm"],
         })
     return {"drafts": drafts, "items": items, "errors": errors}
@@ -290,7 +380,8 @@ def _ingest_csv(data_dir, pid: str, files: list[dict], work_dir: Path) -> dict:
 
 
 def ingest(data_dir, files: list[dict], work_root: str | Path | None = None,
-           project_ref: str | None = None) -> dict:
+           project_ref: str | None = None, reconcile: bool = True,
+           progress=None) -> dict:
     """主入口。
 
     files: [{name, rel_path?, content: bytes}]
@@ -362,7 +453,8 @@ def ingest(data_dir, files: list[dict], work_root: str | Path | None = None,
             draft_total += sum(d["amount_cents"] for d in r["drafts"])
             draft_count += len(r["drafts"])
         if "sheet" in buckets:
-            r = _ingest_sheet(data_dir, pid, buckets["sheet"], work_dir, image_dir)
+            r = _ingest_sheet(data_dir, pid, buckets["sheet"], work_dir, image_dir,
+                             reconcile=reconcile, progress=progress)
             batch["files"] += r["items"]
             batch["errors"] += r["errors"]
             draft_total += sum(d["amount_cents"] for d in r["drafts"])

@@ -183,7 +183,12 @@ def test_stream_pushes_heartbeat_while_a_file_is_slow(monkeypatch):
     """慢文件必须边跑边推心跳（带真实已等秒数），否则连接静默太久会被掐断。"""
     import app.main as main
 
-    def slow_ingest(data_dir, files, project_ref=None):
+    def slow_ingest(data_dir, files, project_ref=None, reconcile=True, progress=None):
+        # 桩要接住 real 签名（2026-09-28 加了 reconcile / progress）。
+        # 顺便模拟一次"核到第 3/10 张"，验证子进度能进心跳 ——
+        # 一张 10 行的报表跑三分钟却只显示一句笼统的话，用户会以为卡死了。
+        if progress:
+            progress(3, 10, "核对表内嵌入图")
         time.sleep(0.08)
         return {"batches": []}
 
@@ -201,6 +206,8 @@ def test_stream_pushes_heartbeat_while_a_file_is_slow(monkeypatch):
     assert all(e["index"] == 1 and e["file"] == "云南报销.xlsx" for e in ticks)
     assert ticks[0]["elapsed"] >= 0 and ticks[-1]["elapsed"] >= ticks[0]["elapsed"]
     assert "已等" not in ticks[0]["note"] and "报销表" in ticks[0]["note"]
+    # 子进度要如实出现（后端给了就显示，不编百分比）
+    assert any("3/10" in e["note"] for e in ticks), [e["note"] for e in ticks]
     # 心跳也不许泄露内部值（与四段反馈同一口径）
     assert "unknown" not in " ".join(e["note"] for e in ticks)
 
@@ -209,7 +216,7 @@ def test_stream_survives_every_file_failing(monkeypatch):
     """单个文件炸掉不能把整批带崩，也不能让这条流半路断掉（要照常收到 all_done）。"""
     import app.main as main
 
-    def boom(data_dir, files, project_ref=None):
+    def boom(data_dir, files, project_ref=None, reconcile=True, progress=None):
         raise ValueError("模型服务超时")
 
     monkeypatch.setattr(main.intake, "ingest", boom)
@@ -276,3 +283,21 @@ def test_workbench_chat_request_carries_the_local_user_name():
     call = src[i:i + 420]
     assert "user" in call, "对话请求体要带 user（本机登录名）"
     assert "user }" in call or "user," in call or "user:" in call, "要真的把它放进请求体"
+
+
+def test_workbench_intake_request_carries_the_reconcile_switch():
+    """导入请求必须能把「核对表内发票」这个开关带上。
+
+    起因（2026-09-28 用户）：一张 10 行的报销表导入跑了 3 分钟，时间全在逐张核对嵌入图。
+    表内数字本来就是权威、核对不是入账必需 —— 所以界面上给了开关，**调用点必须真的传它**，
+    否则又是一个"能力实现了但用户走不到"（与 project 那次同型）。
+    """
+    src = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(
+        encoding="utf-8")
+    i = src.index('"/api/intake/stream"')
+    body = src[i:i + 700]
+    assert "reconcile" in body, "导入请求体要带 reconcile"
+    # 界面上要真的有这个开关，且默认开着（核对是默认行为，关掉是例外）
+    assert "核对表内发票" in src, "界面上要有「核对表内发票」开关"
+    # ⚠️ 别用 split("reconcile") 定位 —— 这个文件里 reconcile 早就出现在批次类型里了
+    assert "const [reconcile, setReconcile] = useState(true)" in src, "开关默认应当是开（核对是默认行为）"

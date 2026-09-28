@@ -381,6 +381,11 @@ export default function Workbench() {
   const [intakeBusy, setIntakeBusy] = useState(false);
   // 附件入口：一个「＋」按钮，配三个隐藏选择器（图片 / 文件 / 整个文件夹）
   const [attachOpen, setAttachOpen] = useState(false);
+  /* 报销表要不要做「双源核对」（逐张识别表内嵌入图，与表内金额对账）。
+     默认开 —— 它能发现"表里写 47.13、票上其实 41.73"。但它是整条链路最慢的一步
+     （10 张图实测 3 分钟串行 / 75 秒并发），而表内数字本来就是权威、核对不是入账必需，
+     所以给用户一个能关的开关（用户 2026-09-28 提的"3 分钟太慢"）。 */
+  const [reconcile, setReconcile] = useState(true);
   const imageRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -940,7 +945,7 @@ export default function Workbench() {
         // **必须带当前选中项目**：后端归属优先级是「显式指定 > 文件夹名 > 未归」，
         // 漏传这一项时，选了项目也会被文件夹名新建一个项目盖掉（2026-09-28 真机踩到：
         // 选了「919 昆明项目」，拖「919昆明项目发票」文件夹却又建出一个同名项目）。
-        body: JSON.stringify({ files, project: activeProject }),
+        body: JSON.stringify({ files, project: activeProject, reconcile }),
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -1247,6 +1252,17 @@ export default function Workbench() {
             <div className="scope-bar">
               正在记入：<b>{activeProjectName}</b>
               <span className="sb-note">查询始终是全部项目合计（总账户）</span>
+              <label
+                className="sb-toggle"
+                title="报销表里的嵌入发票会逐张识别、与表内金额核对，能发现「表和票对不上」。关掉就只用表内数字（表内数字本来就是权威），导入快很多。"
+              >
+                <input
+                  type="checkbox"
+                  checked={reconcile}
+                  onChange={(e) => setReconcile(e.target.checked)}
+                />
+                核对表内发票
+              </label>
             </div>
             <div className="inputrow">
               <div className="attach">

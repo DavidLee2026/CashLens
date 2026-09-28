@@ -245,3 +245,69 @@ def test_category_can_come_from_the_invoice_item_name_alone():
     assert categories.match_category("", "", "打车费") == "交通"
     # 名目认不出时仍如实落占位符，不硬猜
     assert categories.match_category("", "", "某个说不清的名目") == categories.UNCONFIRMED_CATEGORY
+
+
+# ─── 报销表核对：能跳过、要留痕、有缓存（2026-09-28 用户提的"3 分钟太慢"）───
+
+def _fake_sheet(image: Path) -> dict:
+    """一张只有一行、行内嵌一张图的假报销表（省掉真 xlsx 的构造）。"""
+    return {
+        "ok": True, "row_count": 1, "embedded_image_count": 1,
+        "category_column_semantics": "", "declared_total_cents": 4713,
+        "sum_amount_cents": 4713, "needs_confirm": [], "total_row": None,
+        "rows": [{"amount_cents": 4713, "category": "交通", "category_raw": "交通",
+                  "note": "打车", "owner": "", "date": "2026-09-18",
+                  "image_name": image.name, "image_path": str(image)}],
+    }
+
+
+def test_reconcile_can_be_skipped_and_says_so(tmp_path, monkeypatch):
+    """关掉双源核对时**不许调模型**，而且必须如实标注"跳过了"。
+
+    起因（2026-09-28 用户）：一张 10 行的报销表导入跑了 3 分钟 —— 实测读表 0.00 秒，
+    时间全在「逐张识别表内嵌入图」。表内数字本来就是权威（以表内数字为准），
+    核对只用来发现"表和票对不上"，所以给用户一个能关的开关；关掉要留痕，
+    不能让界面看起来像"核对过了、都没问题"。
+    """
+    img = tmp_path / "a.jpeg"
+    img.write_bytes(b"fake-image")
+    monkeypatch.setattr(intake.report_sheet, "analyze", lambda body, image_dir=None: _fake_sheet(img))
+
+    def must_not_be_called(*a, **kw):
+        raise AssertionError("reconcile=False 时不该调用识别通道")
+
+    monkeypatch.setattr(intake, "recognize_file", must_not_be_called)
+    out = intake.ingest(tmp_path, [{"name": "x.xlsx", "rel_path": "x.xlsx", "content": b"x"}],
+                        work_root=tmp_path / "w", reconcile=False)
+    item = out["batches"][0]["files"][0]
+    assert item["reconcile"]["checked"] == 0
+    assert item["reconcile_skipped"] is True, "跳过了就要如实标注"
+    assert out["batches"][0]["draft_count"] == 1, "表内数字照样要出草稿（核对不是入账必需）"
+
+
+def test_reconcile_result_is_cached_by_image_and_model(tmp_path, monkeypatch):
+    """同一张图 + 同一个模型 → 第二次不再调模型（用户会反复导入同一份表）。
+
+    实测（真实报表 10 张嵌入图）：串行 ~180 秒 → 并发 4 路 **75.5 秒** → 命中缓存 **0.0 秒**。
+    """
+    img = tmp_path / "a.jpeg"
+    img.write_bytes(b"same-bytes")
+    monkeypatch.setattr(intake.report_sheet, "analyze", lambda body, image_dir=None: _fake_sheet(img))
+
+    calls = {"n": 0}
+
+    def fake_recognize(path, *a, **kw):
+        calls["n"] += 1
+        return {"amount": 47.13, "date": "2026-09-18", "merchant": "某出行", "invoice_no": ""}
+
+    monkeypatch.setattr(intake, "recognize_file", fake_recognize)
+    files = [{"name": "x.xlsx", "rel_path": "x.xlsx", "content": b"x"}]
+
+    first = intake.ingest(tmp_path, files, work_root=tmp_path / "w1")
+    second = intake.ingest(tmp_path, files, work_root=tmp_path / "w2")
+
+    assert calls["n"] == 1, f"第二次应当命中缓存、不再调模型，实际调了 {calls['n']} 次"
+    c1 = first["batches"][0]["files"][0]["checks"][0]
+    c2 = second["batches"][0]["files"][0]["checks"][0]
+    assert c1["match"] is True and c2["match"] is True
+    assert not c1.get("from_cache") and c2.get("from_cache") is True, "要如实标注这条来自缓存"
