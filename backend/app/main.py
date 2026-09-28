@@ -1276,11 +1276,32 @@ def pending_accept(pid: str, body: PendingAcceptIn | None = None):
 
 
 @app.post("/api/pending/{pid}/decline")
-def pending_decline(pid: str):
-    """不要这笔：丢弃草稿，不入账。"""
-    if not pending.decline(DATA_DIR, pid):
+def pending_decline(pid: str, group: str = ""):
+    """不要这笔：丢弃草稿，不入账。
+
+    **软删除**：草稿进回收站（打 `discarded_at`），界面上消失但随时能撤回。
+    `group` 由前端给（一次批量丢弃用同一个），撤回时按它一次放回来。
+    """
+    g = pending.decline(DATA_DIR, pid, group=group)
+    if g is None:
         raise HTTPException(status_code=404, detail="待确认草稿不存在")
-    return {"ok": True}
+    return {"ok": True, "id": pid, "group": g}
+
+
+class PendingRestoreIn(BaseModel):
+    ids: list[str] | None = None
+    group: str | None = None
+
+
+@app.post("/api/pending/restore")
+def pending_restore(body: PendingRestoreIn):
+    """撤回丢弃：把刚丢掉的草稿放回「待确认」（按 id 或按组件）。
+
+    用户 2026-09-28 要求「已丢弃 N 笔…」那句小字后面加一个撤回按钮 ——
+    丢弃本来就没动账本，撤回只是把草稿从回收站拿回来，**不产生任何账本事件**。
+    """
+    rows = pending.restore(DATA_DIR, ids=body.ids, group=body.group)
+    return {"ok": True, "restored": len(rows), "ids": [d["id"] for d in rows]}
 
 
 @app.post("/api/chat")

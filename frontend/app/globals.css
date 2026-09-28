@@ -128,6 +128,13 @@ button{font-family:inherit}
   border-radius:999px;font-family:inherit;font-size:12px;font-weight:600;
   color:var(--text-2);padding:1px 10px;cursor:pointer;line-height:1.7}
 .pb-cancel:hover{border-color:var(--brand);color:var(--brand)}
+/* 丢弃草稿后的「撤回」：贴着那句小字，做得很小 —— 撤销入口不该比主操作显眼。
+   丢弃是软删除（草稿进回收站），撤回不产生任何账本事件。 */
+.undo{margin-left:8px;border:1px solid var(--border);background:var(--white);
+  border-radius:999px;font-family:inherit;font-size:12px;font-weight:600;
+  color:var(--text-2);padding:0 10px;cursor:pointer;line-height:1.7}
+.undo:hover:not(:disabled){border-color:var(--brand);color:var(--brand)}
+.undo:disabled{opacity:.5;cursor:default}
 /* 逐文件：**一行一个**。完成的只留「文件名 + 结果」，正在跑的那个展开四段明细；
    想细看已完成的点文件名展开（一次一个）。十几个文件各四段叠起来能刷满整屏。 */
 .pb-list{display:flex;flex-direction:column;gap:3px;margin-bottom:2px}

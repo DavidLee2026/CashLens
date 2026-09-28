@@ -69,6 +69,9 @@ type Msg = {
   /* 这次导入的身份：进度靠它原地更新（不能靠「是不是最后一条」—— 用户在导入途中
      说话/助手回话都会让导入框不再是最后一条，旧写法会因此反复新建导入框）。 */
   importId?: string;
+  /* 丢弃草稿后跟着一个「撤回」（用户 2026-09-28 要求：那句小字后面加撤回按钮）。
+     丢弃是**软删除**，撤回只是把草稿从回收站放回来，账本一动没动。 */
+  undo?: { group: string; count: number };
   /* 这次导入还在跑（后端还在逐个文件处理）→ 框头显示「取消」。
      取消 = 断开这条流：后面的文件不再处理；**正在读的那个会跑完**（识别在工作线程里，
      没有中断点），所以文案必须如实说这一句，见 cancelImport。 */
@@ -281,7 +284,10 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
       if (m.matched.length) {
         const secs = m.matched.find((x) => x.delta_seconds !== null)?.delta_seconds;
         const gap = secs === undefined || secs === null ? "" : `（时间相差 ${secs} 秒）`;
-        lines.push(`  订单列表里有 ${m.matched.length} 笔与付款凭证是同一笔${gap}，只按付款凭证记一次`);
+        // **必须点名是哪张图**（用户 2026-09-28：「这里订单列表指的是哪里？如果是图的话，
+        // 说一下是哪个图，或者文件吧，有点莫名」）—— 否则他不知道该去核对哪一张。
+        lines.push(`  「${m.file}」（订单列表截图）里有 ${m.matched.length} 笔与付款凭证`
+          + `「${m.matched[0]?.voucher_file ?? ""}」是同一笔${gap}，只按付款凭证记一次`);
         for (const x of m.matched.filter((y) => y.amount_differs)) {
           lines.push(`    ⚠️ ${x.at} 时间对得上但金额不一致（列表 ${yuan(x.amount_cents)}），请核对`);
         }
@@ -290,7 +296,7 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
         const shown = m.unmatched.slice(0, 3)
           .map((x) => `${x.at || "时间未读到"} ${yuan(x.amount_cents)}`).join("、");
         const more = m.unmatched.length > 3 ? ` 等 ${m.unmatched.length} 笔` : "";
-        lines.push(`  订单列表里还有 ${m.unmatched.length} 笔没配到付款凭证：${shown}${more}`
+        lines.push(`  「${m.file}」（订单列表截图）里还有 ${m.unmatched.length} 笔没配到付款凭证：${shown}${more}`
           + `——列表页只有总价，需要的话你自己记一笔`);
       }
     }
@@ -403,6 +409,7 @@ export default function Workbench() {
      ⚠️ 不做成一键直入账——合规红线是「用户确认环节不得为体验而取消」，
      所以这里仍然是用户显式点的，而且要先把「共几笔 / 多少钱 / 其中几笔带核对提示」摆出来。 */
   const [batchAsk, setBatchAsk] = useState<null | "accept" | "decline">(null);
+  const [undoBusy, setUndoBusy] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
@@ -690,9 +697,12 @@ export default function Workbench() {
     // 空字符串在后端会被当成"用户指定了空分类"，把草稿识别出来的分类冲成「其他」
     // （2026-09-28 真机：18 笔全变「其他」，就是这么来的）。
     const cat = draftCategory[p.id];
+    /* 丢弃用同一个 group，撤回时按它一次放回来（软删除，见后端 pending.decline） */
+    const undoGroup = `undo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     try {
       const res = await j<{ ok: boolean; project_name?: string; appended?: boolean }>(
-        `/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`,
+        `/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`
+          + (acceptIt ? "" : `?group=${undoGroup}`),
         { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(acceptIt
             ? { project: proj, ...(cat ? { category: cat } : {}) }
@@ -719,7 +729,9 @@ export default function Workbench() {
               // 用户会以为钱记上了（2026-09-28 真机：报 4 笔、账本只有 1 笔）。
               ? `这笔与账本里已有的一笔完全相同（同金额 / 同分类 / 同日期 / 同项目），没有重复入账。`
                 + `草稿还留在「待确认」里 —— 如果它其实是另一笔，换个金额或分类再确认，或点「不要」。`
-              : `已确认入账 ${yuan(p.amount_cents)}（${p.category}），归入「${res.project_name || "未归项目"}」。` },
+              : `已确认入账 ${yuan(p.amount_cents)}（${p.category}），归入「${res.project_name || "未归项目"}」。`,
+          ...(acceptIt ? {} : { undo: { group: undoGroup, count: 1 } }),
+        },
       ]);
       refresh();
     } catch {
@@ -786,27 +798,50 @@ export default function Workbench() {
   }
 
   /** 批量取消（丢弃草稿）：拖错文件夹时用，省得一笔一笔点「不要」。
-      ⚠️ 它**不写账本** —— 这些草稿本来就还没入账，所以「全部取消」不产生任何账本记录，
-      也没有"能不能撤回"的问题：文件还在原处，重新拖进来就回来了。 */
+      ⚠️ 它**不写账本** —— 这些草稿本来就还没入账，所以「全部取消」不产生任何账本记录；
+      丢弃是**软删除**（草稿进回收站），那句话后面跟着「撤回」按钮，点了就放回来。 */
   async function actBatchDecline(ids: string[]) {
     const targets = pendingList.filter((p) => ids.includes(p.id));
     if (!targets.length || batchBusy) return;
     setBatchBusy(true);
     let done = 0;
+    const group = `undo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     try {
       for (const p of targets) {
-        await j(`/api/pending/${p.id}/decline`, { method: "POST" });
+        await j(`/api/pending/${p.id}/decline?group=${group}`, { method: "POST" });
         done += 1;
       }
       setMsgs((m) => [...m, { role: "ai", text:
-        `已丢弃 ${done} 笔待确认草稿，账本未变动。需要时把文件重新拖进来即可。` }]);
+        `已丢弃 ${done} 笔待确认草稿，账本未变动。需要时把文件重新拖进来即可。`,
+        undo: done ? { group, count: done } : undefined }]);
     } catch {
       setMsgs((m) => [...m, { role: "ai", text:
-        `批量取消失败：已丢弃 ${done} 笔，其余仍在待确认里。请确认后端在运行后重试。` }]);
+        `批量取消失败：已丢弃 ${done} 笔，其余仍在待确认里。请确认后端在运行后重试。`,
+        undo: done ? { group, count: done } : undefined }]);
     } finally {
       setBatchBusy(false);
       setBatchAsk(null);
       refresh();
+    }
+  }
+
+  /** 撤回丢弃：把刚丢掉的草稿放回「待确认」（**不产生任何账本事件** —— 丢弃本来就没动账本）。 */
+  async function actUndo(idx: number) {
+    const msg = msgs[idx];
+    if (!msg?.undo || undoBusy) return;
+    setUndoBusy(true);
+    try {
+      const res = await j<{ ok: boolean; restored: number }>("/api/pending/restore",
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ group: msg.undo.group }) });
+      setMsgs((m) => m.map((x, i) => i === idx
+        ? { ...x, undo: undefined, text: `已撤回：${res.restored} 笔回到「待确认」里，账本没有动过。` }
+        : x));
+      refresh();
+    } catch {
+      setMsgs((m) => [...m, { role: "ai", text: "撤回失败：请确认后端在运行后重试。" }]);
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -1361,7 +1396,16 @@ export default function Workbench() {
                       <div className="dc-foot">{m.decision.disclaimer}</div>
                     </div>
                   ) : (
-                    m.text
+                    <>
+                      {m.text}
+                      {m.undo && (
+                        <button type="button" className="undo" disabled={undoBusy}
+                          onClick={() => actUndo(i)}
+                          title="把刚丢掉的草稿放回「待确认」；账本一动没动">
+                          撤回
+                        </button>
+                      )}
+                    </>
                   )}
                   {m.pending && m.pending.length > 0 && (
                     <div className="acts">

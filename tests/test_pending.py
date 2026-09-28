@@ -14,9 +14,23 @@ def test_create_list_decline(tmp_path):
     assert d["id"]
     assert len(pending.list_all(tmp_path)) == 1
     assert pending.get(tmp_path, d["id"])["amount_cents"] == 2800
-    assert pending.decline(tmp_path, d["id"]) is True
-    assert pending.list_all(tmp_path) == []
-    assert pending.decline(tmp_path, "不存在") is False
+    # 丢弃 = **软删除**（用户 2026-09-28 要求「后面增加一个撤回按钮」）：
+    # 界面上消失（list_all 过滤掉），但草稿进回收站、随时能放回来。
+    g = pending.decline(tmp_path, d["id"], group="undo_1")
+    assert g == "undo_1"
+    assert pending.list_all(tmp_path) == [], "丢弃后不再出现在待确认里"
+    assert len(pending.list_trash(tmp_path)) == 1, "但要进回收站，否则没法撤回"
+    assert pending.decline(tmp_path, "不存在") is None
+
+    back = pending.restore(tmp_path, group="undo_1")
+    assert [x["id"] for x in back] == [d["id"]], "按 group 撤回：回来了"
+    assert len(pending.list_all(tmp_path)) == 1 and pending.list_trash(tmp_path) == []
+
+    # 按 id 撤回；什么都不给时**什么都不做**（不许"手一抖全恢复"）
+    pending.decline(tmp_path, d["id"], group="undo_2")
+    assert pending.restore(tmp_path) == []
+    assert len(pending.list_all(tmp_path)) == 0
+    assert [x["id"] for x in pending.restore(tmp_path, ids=[d["id"]])] == [d["id"]]
 
 
 def test_accept_invokes_append(tmp_path):
@@ -321,7 +335,9 @@ def test_batch_decline_asks_first_and_never_touches_the_ledger():
     assert 'setBatchAsk("decline")' in src, "批量丢弃入口只能打开确认条，不能直接丢"
     assert "确认全部不要" in src, "确认条里要有明确的「确认全部不要」按钮"
     assert "账本不受影响" in src, "要如实说明丢弃草稿不影响账本"
-    assert "`/api/pending/${p.id}/decline`" in src, "批量丢弃应复用单笔 decline 端点"
+    assert "`/api/pending/${p.id}/decline?group=${group}`" in src, (
+        "批量丢弃仍复用单笔 decline 端点（带上同一个 group，方便一次撤回）"
+    )
     assert "批量取消失败：已丢弃" in src, "中途失败必须报告已丢弃笔数"
     # 两个入口互斥：开了确认条就不再露出入口，避免"点了一下不知道会发生什么"
     assert 'batchAsk === "accept"' in src and 'batchAsk === "decline"' in src
@@ -428,3 +444,38 @@ def test_confirm_reports_truthfully_when_a_draft_is_deduped():
     assert "r.appended === false" in src, "批量确认要按 appended 计数"
     assert "skipped" in src, "批量要把被去重挡下的笔数单独报出来"
     assert "没有重复入账" in src, "要说清为什么没入账，不能只说成功"
+
+
+def test_dropped_drafts_can_be_restored_by_the_undo_button(tmp_path, monkeypatch):
+    """「已丢弃 N 笔…」后面那个「撤回」：按 group 一次放回来，**账本一动没动**。
+
+    用户 2026-09-28：「这段小字是我删除记录时候的小字，后面增加一个撤回按钮」。
+    丢弃本来就是软删除（草稿进回收站、没有入账），所以撤回只是把草稿拿回来 ——
+    这条测试同时守住两件事：能撤回、撤回不产生任何账本事件。
+    """
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    (tmp_path / "pending.json").write_text(json.dumps([
+        {"id": f"d{i}", "direction": "expense", "amount_cents": 1000 + i,
+         "category": "交通", "channel": "receipt", "note": "", "counterparty": "",
+         "project": "", "created": "2026-09-28T11:00:00"} for i in (1, 2)
+    ], ensure_ascii=False), encoding="utf-8")
+    client = TestClient(main.app)
+
+    assert client.post("/api/pending/d1/decline", params={"group": "undo_x"}).json()["group"] == "undo_x"
+    client.post("/api/pending/d2/decline", params={"group": "undo_x"})
+    assert client.get("/api/pending").json()["pending"] == [], "丢弃后面板里就没有它们了"
+
+    back = client.post("/api/pending/restore", json={"group": "undo_x"}).json()
+    assert back["restored"] == 2 and sorted(back["ids"]) == ["d1", "d2"]
+    assert len(client.get("/api/pending").json()["pending"]) == 2, "撤回了就回到「待确认」"
+
+    # 什么都不给 → 不许"手一抖全恢复"
+    assert client.post("/api/pending/restore", json={}).json()["restored"] == 0
+    # 撤回**不写账本**（丢弃本来就没入账）
+    assert not (tmp_path / "finance_events.jsonl").exists()

@@ -242,7 +242,8 @@ def test_workbench_summary_reports_the_pairing():
     不然用户看到列表页"没生成草稿"会以为系统漏了。"""
     src = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
     assert "list_matches" in src
-    assert "与付款凭证是同一笔" in src and "只按付款凭证记一次" in src
+    assert "是同一笔" in src and "只按付款凭证记一次" in src
+    assert "「${m.file}」（订单列表截图）里有" in src, "要点名是哪张图（用户说「有点莫名」）"
     assert "没配到付款凭证" in src, "没配到的要如实列出来"
     assert "需要的话你自己记一笔" in src, "把决定权交回用户（列表页只有总价）"
 
