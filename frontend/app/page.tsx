@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
-type PendingDraft = { id: string; direction: "income" | "expense"; amount_cents: number; category: string; channel: string; project?: string; project_name?: string };
+type PendingDraft = {
+  id: string; direction: "income" | "expense"; amount_cents: number; category: string;
+  channel: string; project?: string; project_name?: string;
+  /** 识别通道会写入票据上的日期（聊天记账的草稿没有，用 created 兜底显示） */
+  date?: string; counterparty?: string; created?: string;
+};
 /** 总账户合计（全部项目 ＋ 未归项目）：左栏第一行用，也是"查询口径"的那本账。 */
 function accountTotals(v: ProjectsView | null) {
   const rows = v?.projects ?? [];
@@ -307,6 +312,11 @@ export default function Workbench() {
   const [customVision, setCustomVision] = useState(true);
   // 项目维度：列表 + 内联改名（改名只改显示名映射，账本不动）
   const [projView, setProjView] = useState<ProjectsView | null>(null);
+  /* 待确认草稿（「识别 → 确认 → 入账」里的确认环节）。
+     导入产生的草稿**不会**出现在对话气泡里（只有一句话记账那条路会带 pending），
+     所以必须有"加载时拉取"这一处，否则刷新页面后再也点不到它们（2026-09-28 修）。 */
+  const [pendingList, setPendingList] = useState<PendingDraft[]>([]);
+  const [pendingOpen, setPendingOpen] = useState(false);
   const [renamingId, setRenamingId] = useState("");
   const [renameText, setRenameText] = useState("");
   const [projMsg, setProjMsg] = useState("");
@@ -376,6 +386,12 @@ export default function Workbench() {
       setProjView(await j<ProjectsView>("/api/projects"));
     } catch {
       setProjView(null);
+    }
+    // 待确认草稿也单独取：这是它们唯一的常驻入口（导入产生的草稿不经过对话气泡）
+    try {
+      setPendingList((await j<{ pending: PendingDraft[] }>("/api/pending")).pending ?? []);
+    } catch {
+      /* 读不到就保留上一次的列表，不伪装成「没有待确认」——否则用户会以为账都清了 */
     }
   }
 
@@ -1459,6 +1475,57 @@ export default function Workbench() {
               )}
               {projMsg && <div className="fc-note">{projMsg}</div>}
             </section>
+
+            {/* 待确认草稿：「识别 → 确认 → 入账」里的确认环节。
+                导入（拍票 / 拖表）产生的草稿不会出现在对话气泡里，这里是它们唯一的常驻入口；
+                归属可以在确认那一刻改（沿用 2026-09-26 定的规则）。2026-09-28 补。 */}
+            {pendingList.length > 0 && (
+              <section className="sect">
+                <div className="sect-head">
+                  <h3>待确认（{pendingList.length}）</h3>
+                  <span className="sect-note">确认后才入账</span>
+                </div>
+                {(pendingOpen ? pendingList : pendingList.slice(0, 4)).map((p) => (
+                  <div className="pd-row" key={p.id}>
+                    <div className="pd-main">
+                      <span className={`pd-amt num ${p.direction === "income" ? "in" : ""}`}>
+                        {p.direction === "income" ? "+" : "−"}{yuan(p.amount_cents)}
+                      </span>
+                      <span className="pd-meta">
+                        {p.category}
+                        {` · ${p.date || (p.created ? p.created.slice(0, 10) : "—")}`}
+                        {p.counterparty ? ` · ${p.counterparty}` : ""}
+                      </span>
+                    </div>
+                    <div className="pd-acts">
+                      <select
+                        className="proj-pick"
+                        value={draftProject[p.id] ?? p.project ?? ""}
+                        onChange={(e) => setDraftProject((s) => ({ ...s, [p.id]: e.target.value }))}
+                        aria-label={`「${p.category} ${yuan(p.amount_cents)}」归入哪个项目`}
+                        disabled={actingIds.has(p.id)}
+                      >
+                        <option value="">未归项目（总账户）</option>
+                        {(projView?.projects ?? []).map((x) => (
+                          <option key={x.id} value={x.id}>{x.name}</option>
+                        ))}
+                      </select>
+                      <button className="btn-mini ok" disabled={actingIds.has(p.id)} onClick={() => act(p, true)}>
+                        {actingIds.has(p.id) ? "处理中…" : "确认入账"}
+                      </button>
+                      <button className="btn-mini" disabled={actingIds.has(p.id)} onClick={() => act(p, false)}>
+                        {actingIds.has(p.id) ? "处理中…" : "不要"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {pendingList.length > 4 && (
+                  <button className="btn-mini pd-more" onClick={() => setPendingOpen((v) => !v)}>
+                    {pendingOpen ? "收起" : `展开其余 ${pendingList.length - 4} 笔`}
+                  </button>
+                )}
+              </section>
+            )}
 
             <section className="sect">
               <div className="sect-head">

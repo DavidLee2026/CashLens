@@ -186,9 +186,16 @@ def _append_event(direction: str, amount_cents: int, category: str, channel: str
 
 
 def _project_label(pid: str) -> str:
-    """project id → 显示名；找不到或为空时回落成「未归项目」。"""
+    """project id → 显示名；找不到、为空、或**项目已删**时回落成「未归项目」。
+
+    已删项目要回落，是为了和账本视图口径一致：账本里已删项目名下的事件在视图里
+    也回落成「未归项目」（见 `projects.detail`）。否则同一笔钱在草稿和账本里
+    会显示成两个不同的归属（2026-09-28 修：此前草稿挂在已删项目上会照旧显示旧名）。
+    """
     row = projects.get(DATA_DIR, pid) if pid else None
-    return str((row or {}).get("name") or projects.UNASSIGNED_LABEL)
+    if row and not projects.is_deleted(row):
+        return str(row.get("name") or projects.UNASSIGNED_LABEL)
+    return projects.UNASSIGNED_LABEL
 
 
 def _scope_note(project_ref: str) -> str:
@@ -839,8 +846,16 @@ def intake_stream(body: IntakeIn):
 
 @app.get("/api/pending")
 def pending_list():
-    """待确认草稿列表（识别→确认→入账）。"""
-    return {"pending": pending.list_all(DATA_DIR)}
+    """待确认草稿列表（识别 → 确认 → 入账）。
+
+    项目名在**读取时**从映射表解析，不写进草稿：草稿只存稳定 id，
+    这样项目改名后草稿跟着显示新名（与账本同一条纪律：只存 id、显示名走映射表），
+    项目被删掉时也如实回落成「未归项目」，与账本事件的回落口径一致。
+    """
+    items = pending.list_all(DATA_DIR)
+    for d in items:
+        d["project_name"] = _project_label(d.get("project", ""))
+    return {"pending": items}
 
 
 @app.post("/api/pending/{pid}/accept")
