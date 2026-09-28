@@ -1463,7 +1463,7 @@ export default function Workbench() {
                 原先挂在 .main 上，结果是跨整窗居中、还让左栏底部空出一条。
                 放进对话栏之后：它在右栏居中，左栏就能一通到底。 */}
             <p className="footnote">
-              CashLens · 本地优先 · 数据留在磁盘 · 证据驱动（R38 纪律：此处每个数字都来自真实计算）
+              CashLens · 本地优先 · 数据留在磁盘 · 证据驱动
               <button className="link-about" onClick={() => setAboutOpen(true)}>关于</button>
             </p>
             {/* 三个隐藏的文件选择器：图片 / 文件 / 整个文件夹，都由左侧「＋」触发 */}
