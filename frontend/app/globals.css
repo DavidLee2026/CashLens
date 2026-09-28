@@ -61,7 +61,9 @@ button{font-family:inherit}
    于是**左栏自己滚、右栏自己滚**（各一条滚动条，互不影响，顶部文字不跟着对方跑）。
    上一版曾把两栏都改成"跟内容长高、整页滚一个滚动条"，用户当场否掉：
    「应该是左边管左边，右边管右边，怎么我上下滚动的时候，左边和右边顶部的文字在滚动？」 */
-.main{height:100vh;display:flex;flex-direction:column;padding:0}
+/* .main 只装 .grid 一个子项（底部那行口径说明已移进右栏）：
+   grid 吃掉整屏高度 → **左栏一通到底**（用户 2026-09-28：「左边应该是通到底部的一整个区域」） */
+.main{height:100vh;display:flex;padding:0}
 .grid{flex:1;min-height:0;display:grid;
   grid-template-columns:340px minmax(0,1fr);gap:0}
 .convo{grid-column:2;grid-row:1}
@@ -140,7 +142,7 @@ button{font-family:inherit}
 /* 输入区是右栏底部一个**圆角填充框**（照 deepseek harness 的做法）：整组包在框里、
    四周留白，比"一条横线切到底"更像一个可操作的入口，也不用给整列加边框。
    ⚠️ 里面的 .scope-bar / .inputrow / .inputfoot 自带左右内边距，所以这个框自身不再加横向 padding。 */
-.composer{flex:0 0 auto;margin:0 20px 14px;
+.composer{flex:0 0 auto;margin:0 20px 8px;
   border:1px solid var(--border);border-radius:14px;background:var(--card);
   box-shadow:0 1px 2px rgba(10,37,64,.04)}
 .inputrow{display:flex;flex-wrap:wrap;align-content:space-between;align-items:center;gap:10px;
@@ -467,7 +469,8 @@ button{font-family:inherit}
    指标气泡要改成右对齐、向左展开 —— 230px 的气泡挂在 360px 宽的左栏里，
    若仍 left:0 会有 150px 被右边缘切掉（2026-09-28 实测）。 */
 .kpi .cell:last-child .hint-q .q-tip{left:auto;right:0}
-.footnote{flex:0 0 auto;font-size:11px;color:var(--text-3);text-align:center;padding:6px 0 8px}
+/* 底部口径说明：对话栏里的最后一行，**在右栏内居中**（挂在 .main 上会跨整窗居中） */
+.footnote{flex:0 0 auto;font-size:11px;color:var(--text-3);text-align:center;padding:2px 20px 9px}
 /* 底部「关于」：灰色小字，不抢眼 */
 .link-about{margin-left:8px;border:none;background:transparent;color:var(--text-3);
   font-size:11px;font-family:inherit;text-decoration:underline;cursor:pointer;padding:0}
