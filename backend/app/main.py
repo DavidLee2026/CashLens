@@ -882,16 +882,50 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
     # 这几种都**不建草稿**，而且不许含糊成「未生成草稿」—— 每一种都要说清为什么，
     # 否则用户看到的是一句无法分辨的话（"没读到"和"读到了但不算"是两件事）。
     reason = str(got.get("no_draft_reason") or "")
+    doc_kind = str(got.get("doc_kind") or "")
     refund = int(got.get("refund_cents") or 0)
     gross = int(got.get("gross_cents") or 0)
-    if reason == "unpaid":
-        recognized = "待支付页面：这张单**还没付款**"
-        made = "未生成草稿——钱还没出去，不算支出"
-        how = "等真的付了款、拿到付款凭证再记；这张只当参考"
+    if reason == "unpaid" or (doc_kind == "unpaid" and draft_count):
+        # 待支付页（按钮还是「去支付」）：**有应付金额就列一条候选**（用户 2026-09-28 口径：
+        # 「一个过去、一个回来的打车记录，车牌号不一样，57.7 是应该被记录的」）——
+        # 状态必须写清，付没付由用户确认；只有读不到金额时才真的不记。
+        if draft_count:
+            recognized = "待支付页面：截图时还没付款（按钮是「去支付」）"
+            made = (f"生成 {draft_count} 条候选草稿，合计 {total_cents / 100:.2f} 元"
+                    f"——请确认这笔是否已付、该不该报")
+            how = "金额与付款状态都从页面读出；付没付由你确认，机器不替你决定"
+        else:
+            recognized = "待支付页面：这张单**还没付款**（页面上没读到应付金额）"
+            made = "未生成草稿——没有金额可记"
+            how = "等付了款、拿到付款凭证再记；这张只当参考"
     elif reason == "list":
-        recognized = "订单列表（不是付款凭证）"
-        made = "未生成草稿——订单列表只是同一笔钱的另一个视角，记了就会和付款详情重复"
-        how = "要记这一笔，请用付款详情/支付成功那张；这张留着核对"
+        # 订单列表不记账，但**必须点名和哪张图重复**（用户 2026-09-28 要求：
+        # 「最好能记录下是和哪个图片的信息有重复，方便我排查」）。
+        lm = got.get("list_match") or {}
+        hit = lm.get("matched") or []
+        miss = lm.get("unmatched") or []
+        def _amt(c: int) -> str:
+            return f"{c / 100:.2f} 元"
+        names = "、".join(f"「{h.get('voucher_file', '')}」" for h in hit[:2])
+        recognized = ("订单列表（不是付款凭证）："
+                      f"{len(hit)} 笔与另一张图是同一笔，{len(miss)} 笔没配到付款凭证"
+                      if miss else
+                      f"订单列表（不是付款凭证）：{len(hit)} 笔与另一张图是同一笔")
+        if hit:
+            first = hit[0]
+            gap = (f"，付款时间相差 {first['delta_seconds']} 秒"
+                   if first.get("delta_seconds") is not None else "")
+            made = (f"未生成草稿——{first.get('at', '')} 的 {_amt(first.get('amount_cents', 0))}"
+                    f"与{names}是同一笔{gap}，记了就会重复")
+        else:
+            made = "未生成草稿——订单列表只是同一笔钱的另一个视角，记了就会和付款详情重复"
+        if miss:
+            shown = "、".join(f"{m.get('at', '')} {_amt(m.get('amount_cents', 0))}" for m in miss[:2])
+            more = f" 等 {len(miss)} 笔" if len(miss) > 2 else ""
+            tail = f"没配到付款凭证的 {len(miss)} 笔（{shown}{more}）列表页只有总价，需要的话你自己记一笔"
+        else:
+            tail = "列表里没有需要单独记的"
+        how = (f"要记这一笔，请用{names}那张；{tail}" if hit else tail)
     elif reason == "fully_refunded":
         recognized = (f"实付 {gross / 100:.2f} 元 · 已全额退款"
                       if gross else "已全额退款")
@@ -1088,6 +1122,21 @@ def _intake_stream_events(files: list[dict], project: str | None = None,
     # 流式是逐个文件跑的，列表页可能先到、凭证后到，边跑边配会漏。
     for b in merged:
         b["list_matches"] = _match_list_orders(b.get("files") or [])
+    # 配对结果要**补写回那张订单列表的四段**（用户 2026-09-28：「最好能记录下是和哪个图片的
+    # 信息有重复，方便我排查」）——逐文件那行是在配对之前发出去的，所以这里补发一次，
+    # 前端按 index 原地更新那一行，位置与条数都不变。
+    by_file = {m["file"]: m for b in merged for m in (b.get("list_matches") or [])}
+    if by_file:
+        items_by_file = {it.get("file"): it for b in merged for it in (b.get("files") or [])}
+        for idx, f in enumerate(files, 1):
+            m = by_file.get(f["name"])
+            it = items_by_file.get(f["name"])
+            if not m or not it:
+                continue
+            yield json.dumps({
+                "stage": "file_update", "index": idx, "total": total, "file": f["name"],
+                "stages": _file_stages(f["name"], [dict(it, list_match=m)], [], 0, 0),
+            }, ensure_ascii=False) + "\n"
     yield json.dumps({"stage": "all_done", "batches": merged},
                      ensure_ascii=False) + "\n"
 
