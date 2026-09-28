@@ -911,18 +911,28 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
                       f"{len(hit)} 笔与另一张图是同一笔，{len(miss)} 笔没配到付款凭证"
                       if miss else
                       f"订单列表（不是付款凭证）：{len(hit)} 笔与另一张图是同一笔")
+        drafted = lm.get("drafted") or []
         if hit:
             first = hit[0]
             gap = (f"，付款时间相差 {first['delta_seconds']} 秒"
                    if first.get("delta_seconds") is not None else "")
             made = (f"未生成草稿——{first.get('at', '')} 的 {_amt(first.get('amount_cents', 0))}"
                     f"与{names}是同一笔{gap}，记了就会重复")
+        elif drafted:
+            made = (f"生成 {draft_count} 条候选草稿，合计 {total_cents / 100:.2f} 元"
+                    f"——订单列表里没配到付款凭证的那几笔（员工先垫付、第二天报销是正常的），"
+                    f"请确认该不该报")
         else:
             made = "未生成草稿——订单列表只是同一笔钱的另一个视角，记了就会和付款详情重复"
         if miss:
             shown = "、".join(f"{m.get('at', '')} {_amt(m.get('amount_cents', 0))}" for m in miss[:2])
             more = f" 等 {len(miss)} 笔" if len(miss) > 2 else ""
-            tail = f"没配到付款凭证的 {len(miss)} 笔（{shown}{more}）列表页只有总价，需要的话你自己记一笔"
+            if drafted:
+                tail = (f"没配到付款凭证的 {len(miss)} 笔（{shown}{more}）**已列进「待确认」**"
+                        f"（员工先垫付、第二天报销是正常的），请确认该不该报")
+            else:
+                tail = (f"没配到付款凭证的 {len(miss)} 笔（{shown}{more}）"
+                        f"要么是退款、要么没金额，没有建草稿")
         else:
             tail = "列表里没有需要单独记的"
         how = (f"要记这一笔，请用{names}那张；{tail}" if hit else tail)
@@ -1018,6 +1028,17 @@ def intake_upload(body: IntakeIn):
     out["batches"] = _merge_batches(out.get("batches") or [])
     for b in out["batches"]:
         b["list_matches"] = _match_list_orders(b.get("files") or [])
+    for b in out["batches"]:
+        pid = str(b.get("project_id") or "")
+        for m in b["list_matches"]:
+            made = [d for d in (intake.draft_for_list_order(DATA_DIR, pid, o, m["file"])
+                                for o in (m.get("unmatched") or [])) if d]
+            if made:
+                m["drafted"] = [{"amount_cents": d["amount_cents"], "category": d["category"]}
+                                for d in made]
+                b["draft_count"] = int(b.get("draft_count") or 0) + len(made)
+                b["identified_total_cents"] = (int(b.get("identified_total_cents") or 0)
+                                               + sum(d["amount_cents"] for d in made))
     out["pending"] = [{"id": d["id"], "direction": d["direction"],
                        "amount_cents": d["amount_cents"], "category": d["category"],
                        "project": d.get("project", ""),
@@ -1122,6 +1143,23 @@ def _intake_stream_events(files: list[dict], project: str | None = None,
     # 流式是逐个文件跑的，列表页可能先到、凭证后到，边跑边配会漏。
     for b in merged:
         b["list_matches"] = _match_list_orders(b.get("files") or [])
+    # 没配到付款凭证的那几行**也要列成候选**（用户 2026-09-28 口径：昨天员工先垫付「是做数的」，
+    # 第二天才拿来报销，这个时间差是正常的、客户也认）——不列就等于漏账。
+    # 退款状态与金额 0 的不列（钱回来了 / 没有金额）。
+    for b in merged:
+        pid = str(b.get("project_id") or "")
+        for m in b["list_matches"]:
+            made = []
+            for o in m.get("unmatched") or []:
+                d = intake.draft_for_list_order(root, pid, o, m["file"])
+                if d:
+                    made.append(d)
+            if made:
+                m["drafted"] = [{"amount_cents": d["amount_cents"], "category": d["category"]}
+                                for d in made]
+                b["draft_count"] = int(b.get("draft_count") or 0) + len(made)
+                b["identified_total_cents"] = (int(b.get("identified_total_cents") or 0)
+                                               + sum(d["amount_cents"] for d in made))
     # 配对结果要**补写回那张订单列表的四段**（用户 2026-09-28：「最好能记录下是和哪个图片的
     # 信息有重复，方便我排查」）——逐文件那行是在配对之前发出去的，所以这里补发一次，
     # 前端按 index 原地更新那一行，位置与条数都不变。
@@ -1133,9 +1171,12 @@ def _intake_stream_events(files: list[dict], project: str | None = None,
             it = items_by_file.get(f["name"])
             if not m or not it:
                 continue
+            drafted = m.get("drafted") or []
             yield json.dumps({
                 "stage": "file_update", "index": idx, "total": total, "file": f["name"],
-                "stages": _file_stages(f["name"], [dict(it, list_match=m)], [], 0, 0),
+                "stages": _file_stages(f["name"], [dict(it, list_match=m)], [],
+                                       len(drafted),
+                                       sum(x["amount_cents"] for x in drafted)),
             }, ensure_ascii=False) + "\n"
     yield json.dumps({"stage": "all_done", "batches": merged},
                      ensure_ascii=False) + "\n"

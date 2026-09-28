@@ -356,6 +356,38 @@ def _drop_split_duplicates(cands: list[dict]) -> list[dict]:
     return out
 
 
+# 「订单列表」里**没配到付款凭证**的那几行：也要列成候选（用户 2026-09-28 口径 —
+# 「昨天员工先买单，是做数的，之后找客户报销，所以报销的时间是第二天了，客户也是认可的」）。
+# 它们**不是重复**（对应的付款凭证不在这一批里），不列就等于漏账；
+# 但列表页毕竟只有总价与相对时间，所以**只进待确认**、备注写清来龙去脉，由用户确认。
+_LIST_REFUND_WORDS = ("退款", "已退", "退货", "退票")
+
+
+def draft_for_list_order(data_dir, pid: str, order: dict, list_file: str):
+    """把订单列表里的一行变成一条**候选**草稿；退款状态或金额 0 的返回 None。"""
+    # 两种形状都要吃：**模型读出来的原始订单行**是 amount（元），
+    # 而 `_match_list_orders` 吐出来的未配到条目是 amount_cents（分）。
+    raw = order.get("amount")
+    cents = (int(order.get("amount_cents") or 0) if raw in (None, "")
+             else int(round(float(raw) * 100)))
+    if cents <= 0:
+        return None
+    status = str(order.get("status") or "")
+    if any(w in status for w in _LIST_REFUND_WORDS):
+        return None                      # 钱退回来了，不是支出
+    name = str(order.get("name") or "").strip()
+    at = str(order.get("at") or "").strip()
+    note = (f"订单列表里的一笔（{at or '页面没给时间'}，{name or '没写商品名'}"
+            f"；状态 {status or '没写'}）：这一批里**没配到对应的付款凭证**")
+    if any(w in at for w in ("昨天", "今天", "前天", "上午", "下午")):
+        note += "；列表页写的是相对时间，具体哪一天请核对"
+    note += "；员工先垫付、第二天报销是正常的，请确认这一笔该不该报"
+    return _draft(data_dir, pid, direction="expense", amount_cents=cents,
+                  category=categories.match_category(name) if name
+                  else categories.UNCONFIRMED_CATEGORY,
+                  note=note, source="识别", image_name=list_file)
+
+
 def _unpaid_note(note: str) -> str:
     """待支付页的备注：状态模型已经写了就不再重复一遍，只补「请你确认」。
 
