@@ -264,7 +264,13 @@ def test_file_stages_explains_unpaid_list_and_refund():
     assert "由你确认" in paid_pending["how"], "付没付由用户确认，机器不替他决定"
 
     no_amount = st({"doc_kind": "unpaid", "no_draft_reason": "unpaid"})
-    assert "没有金额可记" in no_amount["processed"]
+    assert "重新上传一次" in no_amount["processed"], "读不出金额要给可执行的下一步：重传这张"
+
+    # 彻底没读出来（没金额、没文字、没订单行）→ 明说 + 请重传
+    blank = st({"no_draft_reason": "unreadable"})
+    assert "没读出来" in blank["recognized"]
+    assert "重新上传一次" in blank["processed"]
+    assert "重传一次最省事" in blank["how"]
 
     full = st({"no_draft_reason": "fully_refunded", "gross_cents": 7800})
     assert "全额退款" in full["recognized"] and "没有实际支出" in full["processed"]
@@ -438,6 +444,22 @@ def test_stream_survives_every_file_failing(monkeypatch):
     assert [e["index"] for e in failed] == [1, 2]
     assert "模型服务超时" in failed[0]["error"]
     assert events[-1]["stage"] == "all_done"          # 两个都失败，收尾照样发出来
+
+
+def test_retry_files_are_listed_for_unreadable_and_failed_files():
+    """读不出来的图要在**批次汇总里点名**，让用户知道重传哪几张（2026-09-28 用户建议）。"""
+    from app.main import _retry_files
+
+    files = [
+        {"file": "读出来的.jpg", "ok": True, "amount_cents": 4050},
+        {"file": "没读出来.jpg", "ok": True, "amount_cents": 0, "no_draft_reason": "unreadable"},
+        {"file": "识别失败.jpg", "ok": False, "error": "模型服务超时"},
+        {"file": "订单列表.jpg", "ok": True, "amount_cents": 0, "no_draft_reason": "list"},
+        {"file": "待支付.jpg", "ok": True, "amount_cents": 5770, "doc_kind": "unpaid"},
+    ]
+    assert _retry_files(files) == ["没读出来.jpg", "识别失败.jpg"], (
+        "要重传的是「没读出来」和「识别失败」这两类；订单列表/待支付不需要重传"
+    )
 
 
 def test_stream_sends_file_update_naming_the_voucher(tmp_path, monkeypatch):

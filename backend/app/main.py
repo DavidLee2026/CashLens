@@ -828,7 +828,7 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
         if "暂不支持" in reason:
             reason = "暂不支持这种文件类型"
         return {"read": "—", "recognized": "—", "processed": "未生成草稿",
-                "how": f"{reason}——已跳过，不影响其他文件"}
+                "how": f"{reason}——已跳过，不影响其他文件；**请把这张图重新上传一次**"}
 
     if kind == "sheet":
         read = f"表内 {got.get('row_count', 0)} 行"
@@ -885,7 +885,12 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
     doc_kind = str(got.get("doc_kind") or "")
     refund = int(got.get("refund_cents") or 0)
     gross = int(got.get("gross_cents") or 0)
-    if reason == "unpaid" or (doc_kind == "unpaid" and draft_count):
+    if reason == "unreadable":
+        # 没读出来就直说，并给出**可执行的下一步**：重新上传这一张（用户 2026-09-28 的建议）
+        recognized = "这张没读出来（没识别到金额，也没有可用的文字）"
+        made = "未生成草稿——**请把这张图重新上传一次**（尽量用原图、别截屏压缩）"
+        how = "识别没结果时不猜、不凑数：重传一次最省事，也可以自己手工记一笔"
+    elif reason == "unpaid" or (doc_kind == "unpaid" and draft_count):
         # 待支付页（按钮还是「去支付」）：**有应付金额就列一条候选**（用户 2026-09-28 口径：
         # 「一个过去、一个回来的打车记录，车牌号不一样，57.7 是应该被记录的」）——
         # 状态必须写清，付没付由用户确认；只有读不到金额时才真的不记。
@@ -896,8 +901,8 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
             how = "金额与付款状态都从页面读出；付没付由你确认，机器不替你决定"
         else:
             recognized = "待支付页面：这张单**还没付款**（页面上没读到应付金额）"
-            made = "未生成草稿——没有金额可记"
-            how = "等付了款、拿到付款凭证再记；这张只当参考"
+            made = "未生成草稿——没读到金额，**请把这张图重新上传一次**"
+            how = "等付了款、拿到付款凭证再记；重传后如果还是读不出金额，就手工记一笔"
     elif reason == "list":
         # 订单列表不记账，但**必须点名和哪张图重复**（用户 2026-09-28 要求：
         # 「最好能记录下是和哪个图片的信息有重复，方便我排查」）。
@@ -973,6 +978,19 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
             "recognized": recognized, "processed": made, "how": how}
 
 
+def _retry_files(files: list[dict]) -> list[str]:
+    """这一批里**需要用户重新上传**的文件：识别失败、或彻底没读出来的那些。
+
+    用户 2026-09-28 的建议：「如果有扫不出来，建议用户重新上传一下没有扫出来的图」——
+    逐文件那行说一次还不够，汇总里要能一眼看到**是哪几张**，他才好重传。
+    """
+    out: list[str] = []
+    for it in files or []:
+        if it.get("ok") is False or str(it.get("no_draft_reason") or "") == "unreadable":
+            out.append(str(it.get("file") or ""))
+    return [x for x in out if x]
+
+
 def _merge_batches(batches: list[dict]) -> list[dict]:
     """把「逐个文件」跑出来的批次按项目合并，让最终汇总仍是「一个项目一行」。"""
     merged: dict[str, dict] = {}
@@ -1004,7 +1022,11 @@ def _merge_batches(batches: list[dict]) -> list[dict]:
             m["reconcile_skipped"] = True
         if not m.get("project_hint") and b.get("project_hint"):
             m["project_hint"] = b["project_hint"]
-    return list(merged.values())
+    out = list(merged.values())
+    for b in out:
+        # 需要重传的文件在这里算好（汇总里要一句话说清是哪几张）
+        b["retry_files"] = _retry_files(b.get("files") or [])
+    return out
 
 
 @app.post("/api/intake")

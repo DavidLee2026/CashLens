@@ -629,6 +629,18 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                               "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                               "confidence": res.get("confidence")})
                 continue
+        if cents <= 0:
+            # 到这里说明：没有票面金额、图里也没挑出金额候选（或一条都不该列）、没有订单行 ——
+            # **彻底没读出来**。用户 2026-09-28 的建议：这种情况要**明确请他重新上传这张图**，
+            # 而不是只写一句「未生成草稿」让他猜（他自己也遇到过同一张图两次跑结果不一样的波动）。
+            items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                          "doc_kind": doc_kind, "no_draft_reason": "unreadable",
+                          "text_amounts": len(res.get("text_lines") or []),
+                          "date": date, "merchant": merchant, "category": cat,
+                          "invoice_no": res.get("invoice_no", ""),
+                          "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                          "confidence": res.get("confidence")})
+            continue
         d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                    amount_cents=cents, category=cat,
                    note=note, counterparty=merchant,

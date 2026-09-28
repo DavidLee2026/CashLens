@@ -167,6 +167,9 @@ type IntakeBatch = {
   text_amount_drafts?: number;
   /* 订单列表 ↔ 付款凭证的配对结论（后端按**时间**配对：实弹那两张相差 44 秒）。
      命中的只是"把结论说出来"（列表页本来就不建草稿）；没配到的要如实列出来。 */
+  /* 这一批里**没读出来、需要重新上传**的文件（用户 2026-09-28：「如果有扫不出来，
+     建议用户重新上传一下没有扫出来的图」）——逐文件那行会说一次，这里再汇总点名。 */
+  retry_files?: string[];
   list_matches?: {
     file: string;
     matched: { at: string; amount_cents: number; name: string; status: string;
@@ -265,6 +268,12 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
       lines.push(b.text_amount_drafts >= b.draft_count
         ? `  这 ${b.text_amount_drafts} 条都是从图里文字读出来的候选（请核对该报哪几笔）`
         : `  其中 ${b.text_amount_drafts} 条来自图内文字（请核对该报哪几笔）`);
+    }
+    if (b.retry_files?.length) {
+      // 读不出来的图**直接给下一步**：重新上传这几张（不是"未生成草稿"了事）
+      lines.push(`  这 ${b.retry_files.length} 张没读出来，建议重新上传：`
+        + b.retry_files.slice(0, 5).join("、")
+        + (b.retry_files.length > 5 ? ` 等 ${b.retry_files.length} 张` : ""));
     }
     for (const m of b.list_matches ?? []) {
       // 订单列表与付款凭证的配对（时间为主）：**同一笔只记一次**这句话必须让用户看见，
