@@ -100,7 +100,7 @@ def _cache_save(data_dir, cache: dict) -> None:
 # ⚠️ `text_lines`（聊天/文字截图的原文行）必须一起缓存 —— 少了它，命中缓存的那次
 # 就没有原文可用，"聊天截图的金额候选"会静默失灵。
 _CACHE_FIELDS = ("amount", "date", "merchant", "invoice_no", "text_lines",
-                 "doc_kind", "refund_amount", "items")
+                 "doc_kind", "refund_amount", "items", "occurred_at", "orders")
 
 
 def _recognize_cached(img_path: Path, data_dir, cache: dict, fingerprint: str) -> dict:
@@ -374,6 +374,10 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
         refund_cents = int(round(float(res.get("refund_amount") or 0) * 100))
         net_cents = cents - refund_cents
         doc_kind = str(res.get("doc_kind") or "").strip().lower()
+        # 完整时间（付款凭证的支付时间要**读到时分秒** —— 用户判定"这两张是同一笔"靠的正是它）
+        occurred_at = str(res.get("occurred_at") or "").strip()
+        # 模型只给了时分秒级的时间、没给 date 时，用它兜底，别让日期空着
+        date = res.get("date") or (occurred_at[:10] if occurred_at else "")
         # 分类看「商户 + 模型给的分类 + **票面项目名目**」，**不传 note**。
         # 踩过的坑（2026-09-24 实弹）：PDF 本机回退说明里含 "API HTTP 400"，
         # 把 "api" 当成了经营成本关键词，一张酒店发票被判成「经营」。
@@ -401,6 +405,8 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
             items.append({"file": f["name"], "ok": True, "amount_cents": 0,
                           "doc_kind": doc_kind, "refund_cents": 0,
                           "no_draft_reason": doc_kind, "text_amounts": 0,
+                          "occurred_at": occurred_at,
+                          "orders": res.get("orders") or [],
                           "date": "", "merchant": "", "category": "",
                           "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                           "confidence": res.get("confidence")})
@@ -412,8 +418,8 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                 items.append({"file": f["name"], "ok": True, "amount_cents": 0,
                               "doc_kind": doc_kind, "refund_cents": refund_cents,
                               "gross_cents": cents, "no_draft_reason": "fully_refunded",
-                              "text_amounts": 0,
-                              "date": res.get("date", ""), "merchant": merchant,
+                              "text_amounts": 0, "occurred_at": occurred_at,
+                              "date": date, "merchant": merchant,
                               "category": cat, "invoice_no": res.get("invoice_no", ""),
                               "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                               "confidence": res.get("confidence")})
@@ -424,13 +430,14 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                              f"{note}；实付 {cents / 100:.2f} 元，已退款 {refund_cents / 100:.2f} 元，"
                              f"净额 {net_cents / 100:.2f} 元"),
                        counterparty=merchant,
-                       date=res.get("date", ""), source="识别", image_name=f["name"])
+                       date=date, source="识别", image_name=f["name"])
             if d:
                 drafts.append(d)
             items.append({"file": f["name"], "ok": True, "amount_cents": net_cents,
                           "doc_kind": doc_kind, "refund_cents": refund_cents,
                           "gross_cents": cents, "text_amounts": 0,
-                          "date": res.get("date", ""), "merchant": merchant,
+                          "occurred_at": occurred_at,
+                          "date": date, "merchant": merchant,
                           "category": cat, "invoice_no": res.get("invoice_no", ""),
                           "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                           "confidence": res.get("confidence")})

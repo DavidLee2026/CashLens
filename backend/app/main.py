@@ -11,6 +11,7 @@ import base64
 import functools
 import json
 import os
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -726,6 +727,84 @@ def _first_ok(items: list[dict]) -> dict:
     return {}
 
 
+# 订单列表那行与付款凭证的时间窗（秒）。用户口径（2026-09-28）：这两张是不是同一笔
+# **看时间** —— 付款凭证的支付时间 11:56:37 对上订单列表那条的打印时间 11:55:53（差 44 秒）。
+# 金额只作附注（78 这种数字很容易撞车），所以时间对不上就不配。
+_LIST_MATCH_WINDOW_SECONDS = 300
+
+
+def _parse_ts(value: str) -> tuple[str, int | None] | None:
+    """把 ``YYYY-MM-DD HH:MM:SS`` / ``YYYY-MM-DD`` 解析成 (日期, 当天秒数)。
+
+    秒数可能是 None（页面上只有日期，没有时分秒）—— 这不是错误，调用方会退化处理。
+    """
+    s = str(value or "").strip().replace("/", "-").replace("年", "-").replace("月", "-").replace("日", "")
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
+    if not m:
+        return None
+    y, mo, d, hh, mi, sec = m.groups()
+    day = f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+    secs = int(hh) * 3600 + int(mi) * 60 + int(sec or 0) if hh is not None else None
+    return day, secs
+
+
+def _match_list_orders(records: list[dict]) -> list[dict]:
+    """把「订单列表」页里的每一行配到**同一批**的付款凭证上（确定性，不带模型）。
+
+    为什么要它：一张「我的订单」列表和一 Griff 付款凭证可能是**同一笔钱的两个视角**
+    （实弹：列表里 11:55:53 那笔 ¥78.0 就是账单详情里 11:56:37 那笔），两张都记就是记两遍；
+    反过来，列表里**没配到凭证**的行也不该被悄悄吞掉 —— 要如实说出来。
+
+    匹配规则（用户 2026-09-28 定：以**时间**为主，金额只作附注）：
+      · 两边都有时分秒 → 同一天 且 相差 ≤ 5 分钟 即算同一笔；金额不一致时**附注提示核对**，不否决；
+      · 有一边只有日期（没有时分秒）→ 必须**同一天且金额一致**才算，否则不配（否则一张列表里
+        十条同日订单会全都配到同一张凭证上）。
+    命中不代表"自动记账"：列表页本来就不建草稿，这里只是把结论说出来；
+    没命中的**不自动记账**，只如实列出（列表页只有总价，可能正是那笔已退款的）。
+    """
+    vouchers: list[dict] = []
+    for rec in records or []:
+        if rec.get("ok") is False:
+            continue
+        if str(rec.get("doc_kind") or "") not in ("receipt", "payment"):
+            continue
+        cents = int(rec.get("gross_cents") or rec.get("amount_cents") or 0)
+        ts = _parse_ts(rec.get("occurred_at") or rec.get("date") or "")
+        if cents and ts:
+            vouchers.append({"file": rec.get("file", ""), "cents": cents, "ts": ts})
+
+    out: list[dict] = []
+    for rec in records or []:
+        if str(rec.get("doc_kind") or "") != "list":
+            continue
+        matched, unmatched = [], []
+        for row in rec.get("orders") or []:
+            ts = _parse_ts(row.get("at") or "")
+            cents = int(round(float(row.get("amount") or 0) * 100))
+            hit = None
+            for v in vouchers:
+                if not ts or v["ts"][0] != ts[0]:
+                    continue                       # 先要求同一天
+                if ts[1] is not None and v["ts"][1] is not None:
+                    if abs(ts[1] - v["ts"][1]) > _LIST_MATCH_WINDOW_SECONDS:
+                        continue
+                elif cents != v["cents"]:
+                    continue                       # 没有时分秒 → 必须金额一致
+                hit = {"at": row.get("at", ""), "amount_cents": cents,
+                       "name": row.get("name", ""), "status": row.get("status", ""),
+                       "voucher_file": v["file"],
+                       "delta_seconds": (abs(ts[1] - v["ts"][1])
+                                         if ts[1] is not None and v["ts"][1] is not None else None),
+                       "amount_differs": bool(cents and v["cents"] and cents != v["cents"])}
+                break
+            (matched if hit else unmatched).append(hit or {
+                "at": row.get("at", ""), "amount_cents": cents, "name": row.get("name", ""),
+                "status": row.get("status", "")})
+        if matched or unmatched:
+            out.append({"file": rec.get("file", ""), "matched": matched, "unmatched": unmatched})
+    return out
+
+
 def _file_stages(name: str, items: list[dict], errors: list[dict],
                  draft_count: int, total_cents: int) -> dict:
     """把一个文件的处理过程拆成四段：读取了什么 / 识别了什么 / 处理了什么 / 怎么处理的。
@@ -902,6 +981,9 @@ def intake_upload(body: IntakeIn):
                           reconcile=body.reconcile)
     except Exception as e:  # noqa: BLE001 失败要报出来，不吞
         raise HTTPException(status_code=500, detail=f"导入失败：{type(e).__name__}: {str(e)[:200]}")
+    out["batches"] = _merge_batches(out.get("batches") or [])
+    for b in out["batches"]:
+        b["list_matches"] = _match_list_orders(b.get("files") or [])
     out["pending"] = [{"id": d["id"], "direction": d["direction"],
                        "amount_cents": d["amount_cents"], "category": d["category"],
                        "project": d.get("project", ""),
@@ -1001,7 +1083,12 @@ def _intake_stream_events(files: list[dict], project: str | None = None,
                               "file": f["name"],
                               "error": f"{type(e).__name__}: {str(e)[:200]}"},
                              ensure_ascii=False) + "\n"
-    yield json.dumps({"stage": "all_done", "batches": _merge_batches(batches)},
+    merged = _merge_batches(batches)
+    # 订单列表 ↔ 付款凭证的配对（时间为主）要在**整批都读完**之后做：
+    # 流式是逐个文件跑的，列表页可能先到、凭证后到，边跑边配会漏。
+    for b in merged:
+        b["list_matches"] = _match_list_orders(b.get("files") or [])
+    yield json.dumps({"stage": "all_done", "batches": merged},
                      ensure_ascii=False) + "\n"
 
 

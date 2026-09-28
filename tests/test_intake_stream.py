@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 _ROOT = Path(__file__).resolve().parents[1]
-from app.main import (_file_stages, _intake_stream_events, _merge_batches,  # noqa: E402
-                      _tick_note)
+from app.main import (_file_stages, _intake_stream_events, _match_list_orders,  # noqa: E402
+                      _merge_batches, _parse_ts, _tick_note)
 
 
 def _batch(pid, name, **kw):
@@ -175,6 +175,76 @@ def test_file_stages_says_transfer_only_when_the_money_really_left():
                         [{"ok": True, "amount_cents": 0, "text_amounts": 2, "draft_count": 0,
                           "transfer_amounts": 0, "confidence": 0}], [], 0, 0)
     assert "客户付出去的钱" in none["processed"]
+
+
+def test_order_list_is_matched_to_a_voucher_by_time_not_by_amount():
+    """订单列表 ↔ 付款凭证：**以时间为主**配对（用户 2026-09-28 定的口径）。
+
+    用户的原话：「我不知道你是不是只是从 78 元这个数字来判断，但从我的角度是从一张图的
+    支付时间，和另一张图片的打印时间来判定」—— 实弹那两张就是
+    付款凭证 2026-09-18 **11:56:37** 对上订单列表 **11:55:53**（相差 44 秒）。
+    金额只作附注：78 这种数字很容易撞车，但时间差 44 秒几乎不可能是两件事。
+    """
+    voucher = {"file": "…123051.jpg", "ok": True, "doc_kind": "payment",
+               "gross_cents": 7800, "occurred_at": "2026-09-18 11:56:37"}
+    listed = {"file": "…123055.jpg", "ok": True, "doc_kind": "list", "orders": [
+        {"at": "2026-09-18 12:14:55", "amount": 0.0, "name": "A4文档", "status": "已完成"},
+        {"at": "2026-09-18 11:55:53", "amount": 78.0, "name": "A4文档", "status": "已退款"},
+    ]}
+    out = _match_list_orders([voucher, listed])
+    assert len(out) == 1 and out[0]["file"] == "…123055.jpg"
+    hit = out[0]["matched"]
+    assert [m["at"] for m in hit] == ["2026-09-18 11:55:53"], "时间对得上的那条要配上"
+    assert hit[0]["delta_seconds"] == 44 and hit[0]["voucher_file"] == "…123051.jpg"
+    assert hit[0]["amount_differs"] is False
+    # 另一条 12:14:55 离得远（19 分钟）→ 不配，但**必须列出来**，不能悄悄吞掉
+    assert [m["at"] for m in out[0]["unmatched"]] == ["2026-09-18 12:14:55"]
+
+
+def test_order_list_matching_degrades_safely_without_a_clock():
+    """两边都没有时分秒时，**必须同一天且金额一致**才算同一笔。
+
+    否则一张列表里十条同日订单会全都配到同一张凭证上（时间窗形同虚设）。
+    """
+    day_only = {"file": "v.jpg", "ok": True, "doc_kind": "payment",
+                "gross_cents": 7800, "occurred_at": "2026-09-18"}
+    listed = {"file": "l.jpg", "ok": True, "doc_kind": "list", "orders": [
+        {"at": "2026-09-18", "amount": 78.0}, {"at": "2026-09-18", "amount": 12.5}]}
+    out = _match_list_orders([day_only, listed])[0]
+    assert len(out["matched"]) == 1 and out["matched"][0]["amount_cents"] == 7800
+    assert len(out["unmatched"]) == 1 and out["unmatched"][0]["amount_cents"] == 1250
+
+    # 时间差超过窗口 → 不配（金额一致也不行）
+    far = dict(day_only, occurred_at="2026-09-18 14:00:00")
+    listed2 = {"file": "l.jpg", "ok": True, "doc_kind": "list",
+               "orders": [{"at": "2026-09-18 11:55:53", "amount": 78.0}]}
+    assert _match_list_orders([far, listed2])[0]["matched"] == []
+
+    # 时间对得上但金额不一致 → 仍算同一笔，但**标出来让人核对**（不否决）
+    odd = dict(day_only, occurred_at="2026-09-18 11:56:37")
+    listed3 = {"file": "l.jpg", "ok": True, "doc_kind": "list",
+               "orders": [{"at": "2026-09-18 11:55:53", "amount": 72.0}]}
+    m = _match_list_orders([odd, listed3])[0]["matched"][0]
+    assert m["amount_differs"] is True and m["delta_seconds"] == 44
+
+
+def test_prompt_reads_full_timestamps_and_order_rows():
+    """引擎层要读全时间与订单行 —— 时间正是"这两张是不是同一笔"的判据。"""
+    src = (Path(__file__).resolve().parents[1] / "engine" / "mcp" / "receipt_mcp.py").read_text(encoding="utf-8")
+    assert '"occurred_at"' in src and '"orders"' in src
+    assert "YYYY-MM-DD HH:MM:SS" in src, "要读到时分秒"
+    assert "不要自己编时分秒" in src, "读不到就不许编"
+    assert "一行一条，不要漏、不要自己算合计" in src, "订单列表要逐行抄，不许算合计"
+
+
+def test_workbench_summary_reports_the_pairing():
+    """界面上要说出「同一笔只记一次」与「哪几笔没配到」——
+    不然用户看到列表页"没生成草稿"会以为系统漏了。"""
+    src = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+    assert "list_matches" in src
+    assert "与付款凭证是同一笔" in src and "只按付款凭证记一次" in src
+    assert "没配到付款凭证" in src, "没配到的要如实列出来"
+    assert "需要的话你自己记一笔" in src, "把决定权交回用户（列表页只有总价）"
 
 
 def test_file_stages_explains_unpaid_list_and_refund():
