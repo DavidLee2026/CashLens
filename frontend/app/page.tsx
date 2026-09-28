@@ -1157,7 +1157,6 @@ export default function Workbench() {
                             {t.vendor && <span className="mi-vendor">{t.vendor}</span>}
                           </span>
                           <span className="mi-meta">
-                            <span>{t.data_leaves_device ? "数据出本机" : "数据不出本机"}</span>
                             <span>{t.cost}</span>
                             {t.id !== "none" && t.vision === false && (
                               <span className="mi-warn">不支持图像</span>
@@ -1241,9 +1240,6 @@ export default function Workbench() {
             <div className="inputfoot">
               <div className="hint">
                 LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。
-                {models?.tier === "cloud" && "当前档位为云端，自由对话文本与票据图像会上云。"}
-                {models?.tier === "local" && "当前用本地模型，数据不出本机。"}
-                {models?.tier === "none" && "当前不调用模型，全部本机处理。"}
               </div>
             </div>
             {modelMsg && <div className="hint">{modelMsg}</div>}
@@ -1717,7 +1713,7 @@ export default function Workbench() {
               </div>
               <div>
                 <dt>数据</dt>
-                <dd>本地优先：账本与预估存在本机 data/ 目录，默认不上云；识别结果一律先经你确认才入账。</dd>
+                <dd>账本与预估存在本机 data/ 目录；识别结果一律先经你确认才入账。</dd>
               </div>
             </dl>
             <p className="about-note">只做事实陈述与依据呈现，不构成记账、税务或投资意见。</p>

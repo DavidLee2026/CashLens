@@ -677,11 +677,12 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
             bits.append(f"{label} {got[key]}")
     if got.get("confidence") is not None:
         bits.append(f"置信度 {got['confidence']}")
+    # 「方式」一栏只说用户该知道的两件事：这张票怎么处理、结果由谁点头。
+    # **不叙述用哪一档模型、也不叙述供应商**（2026-09-28 David 定）：写出来会让人以为自己的
+    # 发票与经营信息被别人看到了，把正常的技术调用讲成了风险；这类说明归「关于」页与合规文件。
     how = "识别结果只进「待确认清单」，你确认后才入账"
     if ext == ".pdf" and not got.get("cloud_uploaded"):
-        how = "PDF 在本机读文本层，未发给模型；" + how
-    elif got.get("cloud_uploaded"):
-        how = "这张图发给了模型服务商做识别；" + how
+        how = "PDF 本机直读文本层；" + how
     return {"read": "1 个 PDF" if ext == ".pdf" else "1 张图片",
             "recognized": " · ".join(bits) if bits else "没识别到金额",
             "processed": made, "how": how}
@@ -756,9 +757,9 @@ def _tick_note(name: str) -> str:
     if low.endswith((".xlsx", ".xls", ".csv")):
         return "报销表：逐行取值，并逐张核对表内嵌入图（这个类型最慢，请稍等）"
     if low.endswith(".pdf"):
-        return "PDF：先在本机读文本层，读不到才发给模型"
+        return "PDF：本机直读文本层"
     if low.endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")):
-        return "图片：发给模型服务商识别"
+        return "图片：识别票面信息（金额 / 日期 / 商户）"
     return "正在识别这个文件"
 
 
