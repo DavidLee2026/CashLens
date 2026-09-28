@@ -245,7 +245,6 @@ def text_amount_candidates(lines: list[str] | None, limit: int = _TEXT_AMOUNT_MA
     选哪笔、报不报，交给用户在待确认里决定。
     """
     out: list[dict] = []
-    seen: set[tuple[str, int]] = set()
     for raw in lines or []:
         line = str(raw or "").strip()
         if not line:
@@ -270,15 +269,18 @@ def text_amount_candidates(lines: list[str] | None, limit: int = _TEXT_AMOUNT_MA
                 continue
             if cents <= 0 or cents > _TEXT_AMOUNT_CEIL_CENTS:
                 continue
-            key = (line, cents)
-            if key in seen:
-                continue
-            seen.add(key)
             out.append({"line": line, "amount_cents": cents,
                         "is_total": "=" in masked[:start]})
             if len(out) >= limit:
-                return _drop_split_duplicates(out)
-    return _drop_split_duplicates(out)
+                break
+    out = _drop_split_duplicates(out)
+    # 完全相同的原文出现多次：**不合并**（可能是两份，也可能是同一行被 OCR 抄了两遍），
+    # 只打标记，让用户对着原图判 —— 合并了就等于替他决定，而且吞掉的那笔找不回来。
+    from collections import Counter as _Counter
+    same = _Counter((c["line"], c["amount_cents"]) for c in out)
+    for c in out:
+        c["repeat"] = same[(c["line"], c["amount_cents"])] > 1
+    return out
 
 
 def _drop_split_duplicates(cands: list[dict]) -> list[dict]:
@@ -289,7 +291,10 @@ def _drop_split_duplicates(cands: list[dict]) -> list[dict]:
     """
     out: list[dict] = []
     for c in cands:
+        # ⚠️ 只合并**不同但互相包含**的行（「¥100.00」/「的¥100.00」＝同一笔在两个卡片里）；
+        # **完全相同的两行不合**（可能是两份，也可能是一行被抄两遍）—— 那种留给 repeat 标记。
         same = next((d for d in out if d["amount_cents"] == c["amount_cents"]
+                     and c["line"] != d["line"]
                      and (c["line"] in d["line"] or d["line"] in c["line"])), None)
         if same is None:
             out.append(c)
@@ -339,6 +344,8 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                     cnote = f"图里文字中的金额（原文：{c['line']}）"
                     if c["is_total"]:
                         cnote += "；这是等号右边的合计，别重复记"
+                    if c.get("repeat"):
+                        cnote += "；图中另有一行与它完全相同（可能是两份，也可能是同一行被重复抄写），请对照原图"
                     cnote += "；请人工核对这一笔该不该报"
                     d = _draft(data_dir, pid, direction="expense",
                                amount_cents=c["amount_cents"],
@@ -549,6 +556,7 @@ def ingest(data_dir, files: list[dict], work_root: str | Path | None = None,
             "files": [], "errors": [],
             "draft_count": 0, "identified_total_cents": 0,
             "declared_total_cents": 0, "reconcile": None, "reconcile_skipped": False,
+            "text_amount_drafts": 0,
         }
 
         # 同一批里不同类型分开处理（图片和 PDF 共用识别通道）
@@ -602,6 +610,11 @@ def ingest(data_dir, files: list[dict], work_root: str | Path | None = None,
 
         batch["draft_count"] = draft_count
         batch["identified_total_cents"] = draft_total
+        # 这批里有多少条是"图内文字金额"的候选草稿（合计行 / 重复行都在里面）。
+        # ⚠️ 这行原来写在上面"报销表"那个循环里 —— 那个循环只遍历表内条目，图片走不到，
+        # 于是汇总里"别全确认"的提醒一直不出现（实弹 13 条候选却显示 0 条）。改成对所有条目统一算。
+        batch["text_amount_drafts"] = sum(
+            int(it.get("draft_count") or 0) for it in batch["files"] if it.get("text_amounts"))
         if batch["declared_total_cents"]:
             # 与表内「总计」对账时，只拿 Excel 那部分的合计比（口径要一致）
             batch["sheet_draft_total_cents"] = sheet_draft_total

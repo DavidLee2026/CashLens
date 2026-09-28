@@ -200,6 +200,22 @@ def test_text_amount_candidates_merges_ocr_split_duplicates():
     assert [c["amount_cents"] for c in two] == [2800, 2800], "互不包含的同额两笔都要留"
 
 
+def test_identical_lines_are_kept_and_flagged_not_merged():
+    """**完全相同的两行要都留**（可能是两份，也可能是一行被 OCR 抄两遍），只打标记。
+
+    实弹来源（2026-09-28）：一张饿了么订单卡里「辣椒炒肉盖码饭+例… ¥23.55」出现两行。
+    我原来的"完全相同就合并"会把第二份吞掉 —— 用户看不到、也没法补。
+    而**不同但互相包含**的行（「¥100.00」/「的¥100.00」＝同一笔转账在两个卡片里）仍要合并。
+    """
+    rows = intake.text_amount_candidates(["辣椒炒肉盖码饭+例... ¥23.55",
+                                          "辣椒炒肉盖码饭+例... ¥23.55"])
+    assert [c["amount_cents"] for c in rows] == [2355, 2355], "完全相同的两行不能合并"
+    assert all(c["repeat"] for c in rows), "要标记「与另一行完全相同」，让用户对着原图判"
+    merged = intake.text_amount_candidates(["¥100.00", "的¥100.00"])
+    assert [c["amount_cents"] for c in merged] == [10000], "不同但包含的行仍按同一笔合并"
+    assert merged[0]["repeat"] is False
+
+
 def test_text_amount_candidates_ignores_lines_without_amounts():
     assert intake.text_amount_candidates(["客户有五份晚饭", "好的好的，闪送是什么", ""]) == []
     assert intake.text_amount_candidates(None) == []
@@ -228,6 +244,8 @@ def test_chat_screenshot_creates_candidate_drafts(tmp_path, monkeypatch):
     b = out["batches"][0]
     assert b["draft_count"] == 4
     assert b["files"][0]["text_amounts"] == 4
+    # 汇总要靠这个数才知道"这批是候选，别全确认"（之前写错位置，图片走不到，一直显示 0）
+    assert b["text_amount_drafts"] == 4
 
 
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
