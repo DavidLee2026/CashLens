@@ -242,6 +242,24 @@ def test_recent_events_has_no_inner_scrollbar():
     assert "showAllEvents ? events.length : EV_WINDOW" in src, "默认只露 EV_WINDOW 条，展开才全量"
 
 
+def test_footer_line_belongs_to_the_right_column_and_left_panel_runs_to_the_bottom():
+    """用户 2026-09-28：① 底部那行口径说明要在**右侧区域居中**；② 左边要通到底部一整块。
+
+    这其实是同一个结构问题：那行说明原先挂在 `.main` 上（两栏之外），于是它跨**整窗**居中，
+    还在左栏底下留出一条空带、左栏看起来没到底。搬进 `.convo` 之后两件事一起解决。
+    """
+    src = _page_src()
+    i_foot = src.index('className="footnote"')
+    assert i_foot < src.index('<aside className="side"'), (
+        "口径说明必须在右栏（.convo）里 —— DOM 顺序是对话栏在前，所以它的位置要早于 .side"
+    )
+    assert i_foot > src.index('className="composer"'), "它在输入区下面"
+    main = _tight(_rules(".main{"))
+    assert "height:100vh" in main, "grid 要吃掉整屏高度，左栏才能一通到底"
+    assert "flex-direction:column" not in main, "`.main` 现在只装 .grid 一个子项"
+    assert "text-align:center" in _tight(_rules(".footnote{")), "口径说明在右栏内居中"
+
+
 # ------------------------------------------------------- 一次导入只占一个框
 
 
