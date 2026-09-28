@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+_ROOT = Path(__file__).resolve().parents[1]
 from app.main import _file_stages, _merge_batches, _tick_note  # noqa: E402
 
 
@@ -103,6 +104,34 @@ def test_file_stages_sheet_csv_image():
     # 不叙述用哪一档模型、也不叙述供应商（写了会让人以为经营信息被别人看到）。
     assert "待确认清单" in img["how"] and "确认后才入账" in img["how"]
     assert "模型服务商" not in img["how"]
+
+
+def test_recognition_prompt_asks_for_verbatim_text_lines():
+    """引擎层必须真的让模型把聊天/文字截图里的字**原样抄回来**，且不许它替用户挑金额。
+
+    这条护栏的意义：提示词是这个能力的唯一入口 —— 少了一句指令，模型就会像 2026-09-28
+    那次一样答「无法识别」，用户看到的是「未生成草稿」，而图里明明写着
+    「打车 186.79+闪送 110=296.79」。提示词是纯**追加**字段，票据路径不受影响。
+    """
+    rp = _ROOT / "engine" / "mcp" / "receipt_mcp.py"
+    src = rp.read_text(encoding="utf-8")
+    assert "text_lines" in src, "提示词要有一个字段装「图里的文字，一行一条」"
+    assert "逐行原样" in src, "必须要求逐行原样抄，不许它合并/改写"
+    assert "不要替用户挑金额" in src and "不要算合计" in src, (
+        "机器只抄原文；挑哪几笔、算不算合计是用户的事（不碰机器不猜这条线）"
+    )
+    assert "text_lines 填空数组" in src, "发票/小票那档要明确填空，避免多出一堆噪音行"
+
+
+def test_file_stages_explains_text_amount_candidates():
+    """聊天截图那一档的四段文案：说清"不是票面、读到了几个金额、记哪几笔由你决定"。"""
+    st = _file_stages("微信图片_1.jpg",
+                      [{"ok": True, "amount_cents": 0, "text_amounts": 5, "draft_count": 5,
+                        "confidence": 0}], [], 5, 145439)
+    assert "不是票面" in st["recognized"] and "5 个金额" in st["recognized"]
+    assert "候选草稿" in st["processed"] and "只挑该报的" in st["processed"]
+    assert "由你决定" in st["how"]
+    assert "置信度" not in st["recognized"], "这一档不该带「置信度 0」这种噪音"
 
 
 def test_file_stages_never_mentions_vendor_or_cloud_tier():

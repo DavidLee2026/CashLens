@@ -149,6 +149,88 @@ def test_sheet_reconcile_stage_text_distinguishes_skipped_from_no_image():
     assert "2/2" in done["recognized"]
 
 
+# ─── 聊天/文字截图：图里文字中的金额 → 候选草稿（2026-09-28）──────────
+# 起因：用户把微信群里的报账截图拖进来（「打车 186.79+闪送 110=296.79」），
+# 模型完全读得出来，但票据提示词只会答"一张票一个金额" → 金额 0 → 三张图全部「未生成草稿」。
+# 现在引擎层把文字逐行抄回来（text_lines），这里只做**形式化提取**、每条都进待确认让人挑。
+
+def test_text_amount_candidates_reads_amounts_from_chat_lines():
+    """只挑金额，不挑噪音：日期/时间/人数/文件大小不是钱。"""
+    got = intake.text_amount_candidates([
+        "打车186.79+闪送110=296.79",
+        "午饭晚饭水一共549.6",
+        "296.79+549.6=846.39",
+        "客户有五份晚饭",
+        "11:56 5G 71",
+        "0918-19豫园中秋晚会(13)",
+        "滴滴电子发票 A(12).pdf 83KB",
+        "打车 120 元",
+        "全程10.73公里，33分钟",      # 里程与时长不是钱（实弹里被抓成过两笔）
+        "全程12.3公里，25分钟",
+    ])
+    cents = [c["amount_cents"] for c in got]
+    assert 18679 in cents and 11000 in cents and 54960 in cents and 84639 in cents
+    assert 12000 in cents, "「120 元」这种整数带元的也要认（人写的金额常常不带小数）"
+    for noise in (7100, 1300, 8300, 1200, 1073, 1230, 3300, 2500):
+        assert noise not in cents, f"{noise/100} 不是金额，是从日期/时间/人数/文件大小里误抓的"
+    # 等号右边的是合计：只**标注**，不删（删了就等于替用户判断）
+    totals = {c["amount_cents"] for c in got if c["is_total"]}
+    assert 29679 in totals and 84639 in totals
+    assert 18679 not in totals and 54960 not in totals
+
+
+def test_text_amount_candidates_merges_ocr_split_duplicates():
+    """OCR 把一行拆成两行（「¥100.00」与「的¥100.00」）→ 合成一条；
+    但两笔真实的同额消费（两次 28 元）**必须都留着** —— 那才是用户要挑的东西。"""
+    one = intake.text_amount_candidates(["¥100.00", "的¥100.00"])
+    assert [c["amount_cents"] for c in one] == [10000]
+    assert one[0]["line"] == "的¥100.00", "留原文更完整的那条"
+    two = intake.text_amount_candidates(["打车 28 元", "闪送 28 元"])
+    assert [c["amount_cents"] for c in two] == [2800, 2800], "互不包含的同额两笔都要留"
+
+
+def test_text_amount_candidates_ignores_lines_without_amounts():
+    assert intake.text_amount_candidates(["客户有五份晚饭", "好的好的，闪送是什么", ""]) == []
+    assert intake.text_amount_candidates(None) == []
+
+
+def test_chat_screenshot_creates_candidate_drafts(tmp_path, monkeypatch):
+    """聊天截图 → 每条金额一条「需核对」草稿，原文进 note，不自动入账。"""
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "amount": 0, "category": "其他", "note": "不是票据，是聊天/文字截图",
+        "text_lines": ["打车186.79+闪送110=296.79", "午饭晚饭水一共549.6", "客户有五份晚饭"],
+    })
+    out = intake.ingest(tmp_path, [
+        {"name": "微信图片_1.jpg", "rel_path": "919昆明项目发票/微信图片_1.jpg", "content": b"x"},
+    ])
+    drafts = pending.list_all(tmp_path)
+    amounts = sorted(d["amount_cents"] for d in drafts)
+    assert amounts == [11000, 18679, 29679, 54960], f"金额候选不对：{amounts}"
+    # 每条的 note 都要留住原文，且带「请人工核对」→ 面板上的「需核对」徽章靠它亮
+    assert all("原文：" in d["note"] for d in drafts)
+    assert all("请人工核对" in d["note"] for d in drafts)
+    total = next(d for d in drafts if d["amount_cents"] == 29679)
+    assert "合计" in total["note"], "等号右边的是合计，要标注以免用户重复记"
+    # 分类按原文行判（读原文，不推断）：打车/闪送算交通，饭水算餐饮
+    cats = {d["amount_cents"]: d["category"] for d in drafts}
+    assert cats[18679] == "交通" and cats[54960] == "餐饮"
+    b = out["batches"][0]
+    assert b["draft_count"] == 4
+    assert b["files"][0]["text_amounts"] == 4
+
+
+def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
+    """有票面金额的图照旧走原路：不许因为图里同时有别的数字就多建候选草稿。"""
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "amount": 962.00, "date": "2026-09-12", "merchant": "某公司",
+        "category": "住宿", "invoice_no": "26537000000118274568", "confidence": 0.95,
+        "text_lines": ["住宿费 962 元", "打车 186.79"],
+    })
+    intake.ingest(tmp_path, [{"name": "票.jpg", "rel_path": "x/票.jpg", "content": b"x"}])
+    drafts = pending.list_all(tmp_path)
+    assert [d["amount_cents"] for d in drafts] == [96200], "有票面金额时不该再建候选草稿"
+
+
 # ─── 图片：识别 → 草稿 ──────────────────────────────────
 
 def test_image_ingest_creates_drafts(tmp_path, monkeypatch):
