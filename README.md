@@ -60,6 +60,8 @@
 
 ## 快速开始（原型阶段）
 
+> **本仓库为原型，未提供在线服务。** 产品（后端 API + 前端工作台）需按下述步骤在本机启动。`docs/` 是介绍页，已单独发布为静态网站（https://davidlee2026.github.io/CashLens/），不含产品功能。账本与金额计算全部在本机完成。
+
 ```bash
 # 0) 配置环境（可选：不填 LLM API Key 时对话走规则兜底）
 cp .env.example .env
@@ -85,7 +87,7 @@ pnpm install && pnpm dev
 python3 scripts/batch_recognize.py samples/
 
 # 5) 测试
-python3 -m pytest tests/            # 后端单测（当前 152 个用例）
+python3 -m pytest tests/            # 后端单测（当前 191 个用例）
 node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 ```
 
