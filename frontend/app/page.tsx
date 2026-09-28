@@ -608,24 +608,33 @@ export default function Workbench() {
     // 分类同理：只对「待确认」的行提供下拉，选了就按选的写；没选就留空（后端落「未分类」）
     const cat = draftCategory[p.id] ?? "";
     try {
-      const res = await j<{ ok: boolean; project_name?: string }>(
+      const res = await j<{ ok: boolean; project_name?: string; appended?: boolean }>(
         `/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`,
         { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(acceptIt ? { project: proj, category: cat } : { project: proj }) }
       );
-      // 成功即从气泡移除该草稿按钮（已入账/已忽略的不允许再点）
-      setMsgs((m) =>
-        m.map((msg) =>
-          msg.pending && msg.pending.some((x) => x.id === p.id)
-            ? { ...msg, pending: msg.pending.filter((x) => x.id !== p.id) }
-            : msg
-        )
-      );
+      // 只在**真的注销掉这条草稿**时才把它从气泡里移除。
+      // 「确认入账」被去重挡下时（appended=false）草稿还在待确认里，按钮要留着让用户能改能弃。
+      const consumed = !acceptIt || res.appended !== false;
+      if (consumed) {
+        setMsgs((m) =>
+          m.map((msg) =>
+            msg.pending && msg.pending.some((x) => x.id === p.id)
+              ? { ...msg, pending: msg.pending.filter((x) => x.id !== p.id) }
+              : msg
+          )
+        );
+      }
       setMsgs((m) => [
         ...m,
-        { role: "ai", text: acceptIt
-            ? `已确认入账 ${yuan(p.amount_cents)}（${p.category}），归入「${res.project_name || "未归项目"}」。`
-            : "已忽略，这笔不入账。" },
+        { role: "ai", text: !acceptIt
+            ? "已忽略，这笔不入账。"
+            : res.appended === false
+              // 说实话：这笔没进账本，草稿还留着。以前这里不管成没成都说「已确认入账」，
+              // 用户会以为钱记上了（2026-09-28 真机：报 4 笔、账本只有 1 笔）。
+              ? `这笔与账本里已有的一笔完全相同（同金额 / 同分类 / 同日期 / 同项目），没有重复入账。`
+                + `草稿还留在「待确认」里 —— 如果它其实是另一笔，换个金额或分类再确认，或点「不要」。`
+              : `已确认入账 ${yuan(p.amount_cents)}（${p.category}），归入「${res.project_name || "未归项目"}」。` },
       ]);
       refresh();
     } catch {
@@ -658,20 +667,27 @@ export default function Workbench() {
     const targets = pendingList.filter((p) => ids.includes(p.id));
     if (!targets.length || batchBusy) return;
     setBatchBusy(true);
-    let done = 0, incomeCents = 0, expenseCents = 0;
+    let done = 0, skipped = 0, incomeCents = 0, expenseCents = 0;
     try {
       for (const p of targets) {
         const proj = draftProject[p.id] ?? p.project ?? "";
-        await j(`/api/pending/${p.id}/accept`, {
+        const r = await j<{ appended?: boolean }>(`/api/pending/${p.id}/accept`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project: proj, category: draftCategory[p.id] ?? "" }),
         });
+        // ⚠️ 只把**真写进账本**的算作已入账。以前不看 appended 就 +1，
+        // 于是一次批量报了「4 笔（支出 ¥112.00）」而账本只有 1 笔（2026-09-28 真机）。
+        if (r.appended === false) { skipped += 1; continue; }
         done += 1;
         if (p.direction === "income") incomeCents += p.amount_cents;
         else expenseCents += p.amount_cents;
       }
-      setMsgs((m) => [...m, { role: "ai", text:
-        `已确认入账 ${done} 笔（支出 ${yuan(expenseCents)}${incomeCents ? `、收入 ${yuan(incomeCents)}` : ""}）。` }]);
+      const parts = [`已确认入账 ${done} 笔（支出 ${yuan(expenseCents)}`
+        + (incomeCents ? `、收入 ${yuan(incomeCents)}` : "") + "）"];
+      if (skipped) {
+        parts.push(`另有 ${skipped} 笔与账本里已有记录完全相同，没有重复入账 —— 草稿仍留在「待确认」里`);
+      }
+      setMsgs((m) => [...m, { role: "ai", text: parts.join("；") + "。" }]);
     } catch {
       setMsgs((m) => [...m, { role: "ai", text:
         `批量确认中断：已入账 ${done} 笔，其余未动。请确认后端在运行后重试。` }]);
@@ -1598,11 +1614,25 @@ export default function Workbench() {
                     </div>
                   ))}
                   {projView.unassigned.count > 0 && (
+                    /* 「未归项目」不是一个项目文件，只是"没指定项目"的那个桶 ——
+                       所以没有 ⋯（改名）也没有 ×（删除）。但**可以点开看明细**：
+                       后端 `projects.detail` 本来就支持 unassigned 哨兵值。
+                       2026-09-28 用户反馈「未归项目无法点击修改或者删除」——
+                       这里补上能点什么、并用 title 说明为什么没有改名/删除。 */
                     <div className="ev">
-                      <div>
+                      <div
+                        className="ev-pick"
+                        role="button"
+                        tabIndex={0}
+                        title="未归项目是兜底账户：新账没指定项目就进这里。它不是一个项目，所以不能改名或删除；点一下看它名下的明细。"
+                        onClick={() => openDetail("unassigned")}
+                        onKeyDown={(e) => { if (e.key === "Enter") openDetail("unassigned"); }}
+                        aria-label="查看「未归项目」的明细"
+                      >
                         <b>{projView.unassigned.name}</b>
                         <span className="m">
                           支出 {yuan(projView.unassigned.expense_cents)} · {projView.unassigned.count} 笔，还没归项目
+                          <span className="pick-hint"> · 点开明细</span>
                         </span>
                       </div>
                     </div>

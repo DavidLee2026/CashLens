@@ -27,8 +27,14 @@ from .spec import EVENT_TYPES, SCHEMA_VERSION
 VOID_TYPE = "void"
 
 
-def _dedupe_key_of(event: dict) -> str:
-    """去重键（项目 + 渠道 + 金额 + 日期 + 分类 + 对手方）。项目维度 v3 起计入。"""
+def _dedupe_key_of(event: dict, extra: str = "") -> str:
+    """去重键（项目 + 渠道 + 金额 + 日期 + 分类 + 对手方 + 可选盐）。项目维度 v3 起计入。
+
+    `extra` 是可选盐：口述/手工确认的条目会带上自己的 event_id（见 `make_event` 的
+    `dedupe_unique`），让"同金额同分类同日期"的两笔成为两笔。**这个盐是必要的**：
+    去重不只在 `append(strict_dedupe=True)` 里做，`load()` 读的时候也会按这个键折叠，
+    所以键相同的话，即使写进文件也不会出现在任何视图里。
+    """
     ts = _parse_ts(event.get("ts"))
     day = ts.date().isoformat()
     raw = "|".join(
@@ -39,6 +45,7 @@ def _dedupe_key_of(event: dict) -> str:
             day,
             str(event.get("category", "")),
             str(event.get("counterparty", "") or ""),
+            str(extra or ""),
         ]
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -64,11 +71,17 @@ def make_event(
     confirmed: bool = False,
     project: str = "",
     extra: dict | None = None,
+    dedupe_unique: bool = False,
 ) -> dict:
     """构造一条规范事件（recorded_at 自动补当前时间，evidence 带权重）。
 
     project 存的是稳定 id（如 project_a），不是显示名；显示名在 data/projects.json 里查。
     空串表示未归项目（v2 旧事件读取时也是这个语义）。
+
+    `dedupe_unique=True`：把本条自己的 event_id 掺进去重键，于是**不参与去重**。
+    用于**口述/手工确认**的条目 —— 用户说两遍「打车 28」就是两笔真实支出，
+    同金额同分类同日期也不该被折叠（2026-09-28 真机：4 笔 ¥28 被折叠成 1 笔）。
+    文件导入的条目保持默认 False：防的是「同一份票据被导入两次」。
     """
     if event_type not in EVENT_TYPES:
         raise ValueError(f"未知事件类型: {event_type}")
@@ -95,7 +108,7 @@ def make_event(
     }
     if extra:
         event.update(extra)
-    event["dedupe_key"] = _dedupe_key_of(event)
+    event["dedupe_key"] = _dedupe_key_of(event, extra=event["event_id"] if dedupe_unique else "")
     return event
 
 

@@ -120,8 +120,14 @@ def accept(data_dir: str | Path, pid: str, append_fn,
                                      _ledger_category(cat, d["direction"]),
                                      d["channel"], d["note"], d.get("counterparty", ""),
                                      proj)
-            del drafts[i]
-            _save(data_dir, drafts)
+            # ⚠️ 只有**真写进账本**才把草稿弹掉。
+            # 去重挡下时（账本里已有一笔一模一样的）如果照样删草稿，用户就同时失去
+            # 草稿和账目 —— 静默丢数据。2026-09-28 真机：4 笔 ¥28 被去重挡下 3 笔，
+            # 草稿全删了、界面还报「已确认入账 4 笔（支出 ¥112.00）」，账本只有 1 笔。
+            # 留下的草稿会继续显示在「待确认」里，用户看得见、也还能改（或「不要」）。
+            if appended:
+                del drafts[i]
+                _save(data_dir, drafts)
             return {"draft": d, "event": ev, "appended": appended}
     return None
 
