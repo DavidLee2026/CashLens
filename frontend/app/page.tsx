@@ -152,6 +152,9 @@ type IntakeBatch = {
   declared_total_cents: number;
   reconcile_diff_cents?: number;
   reconcile?: { checked: number; matched: number; mismatched: unknown[]; unreadable: unknown[] } | null;
+  /* 这次导入是否**跳过了**核对（开关关着）。必须跟"核对了但一张都没对"区分开：
+     后者是 0/0，前者根本没跑 —— 混在一起会变成"0/0 张与表内金额一致"这种假汇报。 */
+  reconcile_skipped?: boolean;
   errors: { file?: string; error: string }[];
 };
 type IntakeResult = {
@@ -237,8 +240,11 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
       const diff = b.reconcile_diff_cents ?? 0;
       lines.push(`  表内总计 ${yuan(b.declared_total_cents)}，差额 ${yuan(diff)}${diff === 0 ? "（对得上）" : "（有没认出来的，请核对）"}`);
     }
-    if (b.reconcile) {
+    if (b.reconcile && b.reconcile.checked > 0) {
       lines.push(`  双源核对：${b.reconcile.matched}/${b.reconcile.checked} 张与表内金额一致`);
+    } else if (b.reconcile_skipped) {
+      // 没核对就说没核对（开关默认关着）—— 不能让它看起来像"核对过、0 张有问题"
+      lines.push("  本次未核对表内嵌入发票（开关关着）；入账金额以表内数字为准");
     }
     if (b.project_hint) lines.push(`  ${b.project_hint}`);
     // 流式导入时错误已经逐文件内联报过（见 uploadFiles），这里别再重复一遍
@@ -390,10 +396,11 @@ export default function Workbench() {
   // 附件入口：一个「＋」按钮，配三个隐藏选择器（图片 / 文件 / 整个文件夹）
   const [attachOpen, setAttachOpen] = useState(false);
   /* 报销表要不要做「双源核对」（逐张识别表内嵌入图，与表内金额对账）。
-     默认开 —— 它能发现"表里写 47.13、票上其实 41.73"。但它是整条链路最慢的一步
-     （10 张图实测 3 分钟串行 / 75 秒并发），而表内数字本来就是权威、核对不是入账必需，
-     所以给用户一个能关的开关（用户 2026-09-28 提的"3 分钟太慢"）。 */
-  const [reconcile, setReconcile] = useState(true);
+     **默认关**（用户 2026-09-28 定）：它是整条链路最慢的一步（10 张图实测串行 3 分钟 /
+     并发 75 秒），而表内数字本来就是权威、核对不是入账必需 —— 用户要的是"导入别等 3 分钟"，
+     所以默认只用表内数字，想查"表和票对不对得上"再自己勾。
+     ⚠️ 关掉不等于"核对过且没问题"：界面上必须如实说"本次未核对"，不能显示 0/0 一致。 */
+  const [reconcile, setReconcile] = useState(false);
   const imageRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1268,7 +1275,7 @@ export default function Workbench() {
               <span className="sb-note">查询始终是全部项目合计（总账户）</span>
               <label
                 className="sb-toggle"
-                title="报销表里的嵌入发票会逐张识别、与表内金额核对，能发现「表和票对不上」。关掉就只用表内数字（表内数字本来就是权威），导入快很多。"
+                title="默认只用表内数字（快）。勾上会把报销表里的嵌入发票逐张识别、与表内金额逐张核对，能发现「表和票对不上」——每张图要跑一次识别，会慢一些。"
               >
                 <input
                   type="checkbox"

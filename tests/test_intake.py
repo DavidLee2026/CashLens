@@ -111,6 +111,44 @@ def test_sheet_ingest_reports_reconcile_match(tmp_path, monkeypatch):
     assert b["reconcile_diff_cents"] == 38435 - (4713 + 3226)
 
 
+def test_sheet_reconcile_off_skips_recognition_and_says_so(tmp_path, monkeypatch):
+    """关掉「核对表内发票」= **一次识别都不跑**，且结果里要如实说"本次未核对"。
+
+    为什么要专门测：关掉之后 `reconcile.checked` 是 0，跟前端「双源核对 0/0 张一致」
+    长得很像 —— 那是假汇报（听起来像"核过了、都没问题"）。跳过必须在数据层就标出来，
+    前端才有东西可依。
+    """
+    called = []
+    monkeypatch.setattr(intake, "recognize_file",
+                        lambda p: called.append(p) or {"amount": 47.13})
+    out = intake.ingest(tmp_path, [
+        {"name": "云南报销.xlsx", "rel_path": "919昆明项目发票/云南报销.xlsx", "content": _sheet_bytes()},
+    ], reconcile=False)
+    b = out["batches"][0]
+    # 表内数字照旧入账（关掉的只是核对，不是导入）
+    assert len(pending.list_all(tmp_path)) == 2
+    assert b["reconcile_skipped"] is True
+    assert b["reconcile"]["checked"] == 0
+    assert called == [], "关掉核对时不该再去识别任何嵌入图（这正是慢的那一步）"
+
+
+def test_sheet_reconcile_stage_text_distinguishes_skipped_from_no_image():
+    """「跳过核对」和「表里没有嵌入图」是两回事，界面上不能写成同一句。"""
+    from app.main import _file_stages
+    base = {"kind": "sheet", "row_count": 10, "embedded_image_count": 2, "declared_total_cents": 1000}
+    skipped = _file_stages("表.xlsx", [dict(base, reconcile_skipped=True,
+                                             reconcile={"checked": 0, "matched": 0,
+                                                        "mismatched": [], "unreadable": []})], [], 2, 947)
+    assert "本次未核对" in skipped["recognized"] and "2" in skipped["recognized"]
+    assert "没有嵌入图" not in skipped["recognized"], "跳过 ≠ 表里没有图，别混成一句"
+    assert "未" in skipped["how"]
+    # 核对过的那条路照旧报匹配数
+    done = _file_stages("表.xlsx", [dict(base, reconcile_skipped=False,
+                                        reconcile={"checked": 2, "matched": 2,
+                                                   "mismatched": [], "unreadable": []})], [], 2, 947)
+    assert "2/2" in done["recognized"]
+
+
 # ─── 图片：识别 → 草稿 ──────────────────────────────────
 
 def test_image_ingest_creates_drafts(tmp_path, monkeypatch):

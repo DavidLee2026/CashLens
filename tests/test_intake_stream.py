@@ -297,7 +297,15 @@ def test_workbench_intake_request_carries_the_reconcile_switch():
     i = src.index('"/api/intake/stream"')
     body = src[i:i + 700]
     assert "reconcile" in body, "导入请求体要带 reconcile"
-    # 界面上要真的有这个开关，且默认开着（核对是默认行为，关掉是例外）
     assert "核对表内发票" in src, "界面上要有「核对表内发票」开关"
     # ⚠️ 别用 split("reconcile") 定位 —— 这个文件里 reconcile 早就出现在批次类型里了
-    assert "const [reconcile, setReconcile] = useState(true)" in src, "开关默认应当是开（核对是默认行为）"
+    # 默认 = **不核对**（用户 2026-09-28 定）：核对是整条链路最慢的一步（10 张图串行 3 分钟），
+    # 而表内数字本来就是权威；想查「表和票对不对得上」的用户自己勾。
+    assert "const [reconcile, setReconcile] = useState(false)" in src, (
+        "开关默认应当是不核对（用户明确要的默认；核对改成按需）"
+    )
+    # 关掉 ≠ 核对过，界面上必须如实说「本次未核对」，不能出现「0/0 张一致」这种假汇报
+    assert "reconcile_skipped" in src and "本次未核对" in src, (
+        "跳过核对时要在结果里如实说明，并把它与「核对了但一张都没对」区分开"
+    )
+    assert "b.reconcile.checked > 0" in src, "只有真核对过（checked > 0）才显示「双源核对 X/Y」"

@@ -422,7 +422,7 @@ def ingest(data_dir, files: list[dict], work_root: str | Path | None = None,
                 f"在项目卡片点「改名」即可，账本不受影响。" if folder else ""),
             "files": [], "errors": [],
             "draft_count": 0, "identified_total_cents": 0,
-            "declared_total_cents": 0, "reconcile": None,
+            "declared_total_cents": 0, "reconcile": None, "reconcile_skipped": False,
         }
 
         # 同一批里不同类型分开处理（图片和 PDF 共用识别通道）
@@ -464,6 +464,9 @@ def ingest(data_dir, files: list[dict], work_root: str | Path | None = None,
                 if it.get("kind") == "sheet":
                     batch["declared_total_cents"] += it.get("declared_total_cents", 0)
                     batch["reconcile"] = it.get("reconcile")
+                    # 只要有一张表跳过了核对，这批的汇总就得说"未核对"
+                    batch["reconcile_skipped"] = bool(
+                        batch.get("reconcile_skipped") or it.get("reconcile_skipped"))
         if "csv" in buckets:
             r = _ingest_csv(data_dir, pid, buckets["csv"], work_dir)
             batch["files"] += r["items"]

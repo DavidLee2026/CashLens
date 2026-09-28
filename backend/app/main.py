@@ -757,10 +757,17 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
         if imgs:
             read += f"，含 {imgs} 张嵌入图"
         rec = got.get("reconcile") or {}
-        recognized = (f"嵌入图核对 {rec.get('matched', 0)}/{rec.get('checked', 0)} 张与表内金额一致"
-                      if rec.get("checked") else "表内数据（这张表里没有嵌入图）")
-        return {"read": read, "recognized": recognized, "processed": made,
-                "how": "以表内数字为准；嵌入图只用于核对，机器不覆盖你写的数"}
+        if got.get("reconcile_skipped"):
+            # ⚠️ 跳过 ≠ 表里没有图：这张表可能嵌了 10 张，只是这次没核。两种情形必须分开说，
+            # 否则用户会以为"这表里没有嵌入图"（2026-09-28 默认改成不核对之后尤其要紧）。
+            recognized = (f"表内 {imgs} 张嵌入发票本次未核对（开关关着）" if imgs
+                          else "表内数据（这张表里没有嵌入图）")
+            how = "以表内数字为准（本次未逐张核对嵌入发票）；机器不覆盖你写的数"
+        else:
+            recognized = (f"嵌入图核对 {rec.get('matched', 0)}/{rec.get('checked', 0)} 张与表内金额一致"
+                          if rec.get("checked") else "表内数据（这张表里没有嵌入图）")
+            how = "以表内数字为准；嵌入图只用于核对，机器不覆盖你写的数"
+        return {"read": read, "recognized": recognized, "processed": made, "how": how}
 
     if kind == "csv":
         src = str(got.get("source") or "")
@@ -818,6 +825,8 @@ def _merge_batches(batches: list[dict]) -> list[dict]:
                 "mismatched": list(mr.get("mismatched") or []) + list(br.get("mismatched") or []),
                 "unreadable": list(mr.get("unreadable") or []) + list(br.get("unreadable") or []),
             }
+        if b.get("reconcile_skipped"):
+            m["reconcile_skipped"] = True
         if not m.get("project_hint") and b.get("project_hint"):
             m["project_hint"] = b["project_hint"]
     return list(merged.values())
