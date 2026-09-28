@@ -990,8 +990,14 @@ def pending_accept(pid: str, body: PendingAcceptIn | None = None):
         # （账本只存稳定 id，显示名走映射表）。传名字就写，会存进一个不存在 id 的幽灵值。
         override = projects.resolve_incoming(DATA_DIR, override)[0] if override.strip() else ""
     # 分类同理可在确认那一刻改：草稿分类是「待确认」（机器没判出来）时就该由人补上。
-    # `pending.accept` 内部还会把占位符收成空串，账本里永远不出现「待确认」这个"分类"。
-    cat_override = body.category if body is not None else None
+    # `pending.accept` 内部还会把占位符收成「其他」，账本里永远不出现「待确认」这个"分类"。
+    # ⚠️ **空字符串 ＝ 用户没改分类，不是"把分类清空"**：草稿识别出来的分类必须留住。
+    # 2026-09-28 真机踩到：前端两处都无条件发 category: ""（没动过下拉也是空串），
+    # 于是「待确认」里每确认一笔，草稿分类就被冲成「其他」—— 18 笔全变「其他」。
+    # （project 那边不一样：空字符串有明确含义＝未归项目，所以那里不能这么收。）
+    cat_override = (body.category or "").strip() if body is not None else None
+    if not cat_override:
+        cat_override = None
     draft = pending.get(DATA_DIR, pid) or {}
     strict = draft.get("source") in _FILE_DRAFT_SOURCES
     append = functools.partial(_append_event, strict_dedupe=strict)

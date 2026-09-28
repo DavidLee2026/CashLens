@@ -102,6 +102,82 @@ def test_accept_tolerates_legacy_draft_without_project(tmp_path):
     assert captured["project"] == ""
 
 
+def _isolate_paths(tmp_path, monkeypatch):
+    """把 main 的**三条**路径都指到临时目录，返回值拿到 main 模块。
+
+    ⚠️ 只改 `DATA_DIR` 不够：`LEDGER_PATH` / `DB_PATH` 是**导入时**由 DATA_DIR 算出来的
+    模块常量，只改 DATA_DIR 的话「确认入账」照样会写进 `data/finance_events.jsonl`。
+    2026-09-28 我真的这么错过一次 —— 2 笔测试数据写进了真实账本（962.00 / 88.00），
+    幸而被用户自己的「清空未归项目」一并作废。**端点级测试必须连账本路径一起隔离。**
+    """
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    return main
+
+
+def test_accept_endpoint_keeps_draft_category_when_body_has_empty_category(tmp_path, monkeypatch):
+    """请求体里带 `category: ""` ＝ **用户没改分类**，必须留住草稿识别出来的分类。
+
+    起因（2026-09-28 真机）：前端两处确认入口都无条件发 `category: draftCategory[p.id] ?? ""`，
+    端点把空字符串当成"用户指定了空分类"的覆盖 → `_ledger_category("")` → 「其他」。
+    于是「待确认」里每确认一笔，**草稿识别出来的分类就被冲掉**：真机上 18 笔全变「其他」，
+    连票面写着「住宿费」的 962 元也变成「其他」。
+    这条钉在端点上：None / 空串 / 纯空格三种都不该动分类，只有真给了分类才覆盖。
+    """
+    from fastapi.testclient import TestClient
+
+    from app.services import pending
+
+    main = _isolate_paths(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+
+    for body in (None, {}, {"category": ""}, {"category": "   "}):
+        d = pending.create(tmp_path, direction="expense", amount_cents=96200,
+                           category="住宿", channel="receipt", note="数电票住宿费")
+        r = (client.post(f"/api/pending/{d['id']}/accept", json=body) if body is not None
+             else client.post(f"/api/pending/{d['id']}/accept"))
+        assert r.status_code == 200, r.text
+        got = [e for e in main.EventLedger(main.LEDGER_PATH).load()
+               if e.get("amount_cents") == 96200]
+        assert got, "确认后账本里应当有这笔"
+        assert got[-1]["category"] == "住宿", (
+            f"请求体 {body!r} 把草稿分类冲成了 {got[-1]['category']!r}"
+        )
+
+
+def test_accept_endpoint_still_honours_a_real_category_override(tmp_path, monkeypatch):
+    """用户在确认那一刻补了分类，就要按补的写（「待确认」这个池子存在的意义）。"""
+    from fastapi.testclient import TestClient
+
+    from app.services import pending
+
+    main = _isolate_paths(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+    d = pending.create(tmp_path, direction="expense", amount_cents=8800,
+                       category="待确认", channel="receipt", note="说不清的一笔")
+    r = client.post(f"/api/pending/{d['id']}/accept", json={"category": "餐饮"})
+    assert r.status_code == 200, r.text
+    got = [e for e in main.EventLedger(main.LEDGER_PATH).load()
+           if e.get("amount_cents") == 8800]
+    assert got[-1]["category"] == "餐饮"
+
+
+def test_confirm_never_ships_an_empty_category_from_the_ui():
+    """前端两处确认入口都不许再发 `category: ""`（发了就等于把草稿分类冲成「其他」）。"""
+    src = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(
+        encoding="utf-8")
+    # 只管**请求体**：`<select value={draftCategory[p.id] ?? ""}>` 那种表单绑定是对的，不在管辖内
+    assert "{ project: proj, category: cat }" not in src, "单笔不能再无条件带上分类"
+    assert 'category: draftCategory[p.id] ?? ""' not in src, "批量不能再无条件带上分类"
+    assert "...(cat ? { category: cat } : {})" in src, "单笔：选了分类才带这个字段"
+    assert "...(draftCategory[p.id] ? { category: draftCategory[p.id] } : {})" in src, (
+        "批量：同上"
+    )
+
+
 # ─── 端点层：草稿列表的项目名在读取时解析（2026-09-28 补）────────────
 
 def test_pending_endpoint_resolves_project_name(tmp_path, monkeypatch):
@@ -267,8 +343,10 @@ def test_panel_offers_a_category_picker_for_unconfirmed_rows_and_never_labels_it
     assert "cats.expense.filter((x) => x !== cats.unconfirmed)" in src, \
         "分类下拉必须排除占位符本身 —— 否则等于让用户把「待确认」当分类选"
     # 确认时要把分类一起提交（单笔与批量两条路）
-    assert "acceptIt ? { project: proj, category: cat }" in src, "单笔确认要带上分类"
-    assert "category: draftCategory[p.id] ?? \"\"" in src, "批量确认要带上每行选的分类"
+    assert "...(cat ? { category: cat } : {})" in src, \
+        "单笔确认要带上分类（但只在用户真选了时才带）"
+    assert "...(draftCategory[p.id] ? { category: draftCategory[p.id] } : {})" in src, \
+        "批量确认要带上每行选的分类（但只在用户真选了时才带）"
     # 空分类显示成「未分类」，不拿「其他」冒充
     assert 'ev.category || "未分类"' in src, "空分类应显示「未分类」"
 
