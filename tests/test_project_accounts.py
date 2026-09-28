@@ -224,8 +224,12 @@ def test_identity_question_is_answered_with_the_local_name_without_llm():
     r = main._rule_reply("你好，你知道我是谁吗？", "", "大维")
     assert r["ok"] is True
     assert "大维" in r["text"], "要把本机登录名如实说出来"
-    # 措辞纪律：不许说成"已确认身份"——它只是本地填的一个名字
-    assert "不是账号" in r["text"] or "没有联网验证" in r["text"]
+    # 措辞纪律（用户 2026-09-28 明确要求）：**回复里不要塞免责话术**。
+    # "它只是本地记录、不是账号、没联网验证过"—— 约束留在系统侧（别自称已核验身份），
+    # 但不要念给用户听：在对话里像免责声明，很出戏。
+    for banned in ("不是账号", "联网验证", "没有验证", "免责"):
+        assert banned not in r["text"], f"回复里不该出现「{banned}」这类说明"
+    assert len(r["text"]) < 40, "一句话就够，别写成一段说明"
 
     # 没填名字时如实说不知道，不许编一个
     r2 = main._rule_reply("我是谁？", "", "")
@@ -243,7 +247,9 @@ def test_user_context_frames_the_name_as_local_not_an_account():
     """
     ctx = main._user_context("大维")
     assert "大维" in ctx
-    assert "本机" in ctx and "不是账号" in ctx
+    assert "本机" in ctx
+    # 上下文也不写免责话术，免得模型照着念
+    assert "不是账号" not in ctx and "联网验证" not in ctx
     assert main._user_context("") == "" and main._user_context("   ") == ""
 
 
@@ -255,3 +261,4 @@ def test_operation_prompt_has_the_identity_rule_and_no_stale_login_claim():
     assert "本机登录名" in p
     assert "我是谁" in p, "要有身份问题的处理规则"
     assert "不要编一个名字" in p, "没有名字时必须说不知道，不许编"
+    assert "不要把这类说明念给用户听" in p, "免责话术只作内部约束，不许写进回复"
