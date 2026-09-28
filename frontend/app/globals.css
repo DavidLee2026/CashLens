@@ -118,8 +118,16 @@ button{font-family:inherit}
    其余消息（尤其助手回复）不加框。 */
 .b.import{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
   padding:12px 14px;align-self:stretch}
-.pb-head{font-size:12.5px;font-weight:700;color:var(--text-2);letter-spacing:.04em;
+.pb-head{display:flex;align-items:center;gap:8px;
+  font-size:12.5px;font-weight:700;color:var(--text-2);letter-spacing:.04em;
   margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.pb-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 「取消」只在导入还在跑的时候出现（拖错了不用等整批跑完）。
+   它停的是**后面的文件**，正在读的那个会跑完 —— 具体说法在页面那句取消文案里。 */
+.pb-cancel{flex:0 0 auto;border:1px solid var(--border);background:var(--white);
+  border-radius:999px;font-family:inherit;font-size:12px;font-weight:600;
+  color:var(--text-2);padding:1px 10px;cursor:pointer;line-height:1.7}
+.pb-cancel:hover{border-color:var(--brand);color:var(--brand)}
 /* 逐文件：**一行一个**。完成的只留「文件名 + 结果」，正在跑的那个展开四段明细；
    想细看已完成的点文件名展开（一次一个）。十几个文件各四段叠起来能刷满整屏。 */
 .pb-list{display:flex;flex-direction:column;gap:3px;margin-bottom:2px}

@@ -313,3 +313,35 @@ def test_import_file_rows_are_one_line_until_expanded():
     assert 'const open = !b.done || openFile === b.file;' in src, (
         "四段明细只在「正在跑」或「手动点开」时展开 —— 十几个文件各四段能刷满整屏"
     )
+
+
+def test_import_box_can_be_cancelled_and_says_what_cancelling_really_does():
+    """导入跑到一半能取消（用户 2026-09-28：「万一导入错了，还得等导入完成了才能结束」）。
+
+    三条一起钉：
+      ① 框头有「取消」，且**只在还在跑的时候**出现（跑完了还显示一个没用的按钮是噪音）；
+      ② 取消真的断流（AbortController.signal 挂到 fetch 上、点它 abort）——
+         后端那个事件流是拉驱动的，断连之后后面的文件一个都不会开始；
+      ③ 取消文案要**如实**：正在读的那个文件停不下来、可能还会跑完；已读出的草稿在
+         「待确认」里可以丢。只说一句「已取消」就是假汇报（这条是本项目的老毛病）。
+    """
+    src = _page_src()
+    assert "pb-cancel" in src and ">取消</button>" in src, "导入框头要有「取消」按钮"
+    assert "{m.cancellable && (" in src, "取消按钮只在导入还在跑的时候显示"
+    assert "cancellable: progress" in src, "「还在跑」这个状态要跟着 paint 走（跑完自动收掉）"
+    assert "signal: ac.signal" in src, "取消必须能断掉这条流（AbortController.signal 要挂上）"
+    assert "importAbortRef.current?.abort()" in src, "点取消要真的 abort，不能只改文案"
+    assert "importAbortRef.current = null" in src, "导入结束要清掉句柄，别让下一次导入误取消"
+    # 诚实性：不许把取消报成「导入失败」，也不许承诺"立刻全停"
+    assert "已取消导入（" in src and "后面的文件不再处理" in src
+    assert "正在读的那个会跑完（识别没法中途打断）" in src, "识别没法中途打断，这句必须写出来"
+    assert "已读出来的草稿留在「待确认」里，不需要的话在那里点「全部取消」" in src, (
+        "取消后要告诉用户已经读出来的草稿在哪、怎么丢掉"
+    )
+    assert "const inflight = blocks.some((b) => !b.done)" in src, (
+        "「有文件正在读」要看进度里有没有未完成的行 —— 请求还没轮到第一个文件时"
+        "说「正在读的那个会跑完」就是假话"
+    )
+    assert 'paint(`导入失败' in src, "真正的失败仍要说成失败（取消与失败是两件事）"
+    assert "pb-cancel" in _css(), "取消按钮要有样式（且用 token，不写死颜色）"
+    assert "var(--brand)" in _rule(".pb-cancel:hover{")
