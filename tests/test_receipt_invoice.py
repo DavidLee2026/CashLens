@@ -24,6 +24,9 @@ from receipt_mcp import (  # noqa: E402
     crosscheck_invoice_no,
     extract_pdf_text_layer,
     parse_from_text_layer,
+    recognize_receipt,
+    _item_names,
+    _merchant_candidates,
     validate_invoice_no,
 )
 
@@ -135,3 +138,70 @@ def test_real_pdf_bank_account_is_filtered():
     assert len(cands) >= 2, "真实样本应暴露 20 位数字串不唯一这个坑"
     plausible = _structurally_plausible(cands, "2026-08-26")
     assert len(plausible) == 1
+
+
+# ─── 文本层要能读出「票面项目名目」与「主体名称候选」（2026-09-28 修）───
+# 合成样本，不含任何真实票面数字与商户名。
+
+_SYNTH = """电子发票（增值税专用发票）
+发票号码：
+开票日期：
+名称：
+某某文化传播有限公司 某某酒店管理有限公司
+某某地址:某市某区某路1号;    电话:0000-0000000;
+销方开户银行:某某银行某某分行营业部;    银行账号:00000000000000000000;
+合 计
+价税合计（大写） （小写）
+玖佰陆拾贰圆整 ¥ 962.00
+26537000000118274568
+2026年09月20日
+*生产生活服务*住宿费 907.55 6% 54.45
+"""
+
+
+def test_item_names_are_read_from_the_text_layer():
+    """数电票项目名目写作「*大类*具体名目」，是**自包含 token**，不依赖版式分栏。
+
+    这张票的判分类本来就不需要知道"这行在版面的左边还是右边"，只需要这个名目本身。
+    此前把「分类」和「商户」一起当成"分栏不可靠"放弃，于是票面上明写着住宿费
+    却落了「待确认」。
+    """
+    assert _item_names(_SYNTH) == ["住宿费"]
+    assert _merchant_candidates(_SYNTH) == ["某某文化传播有限公司", "某某酒店管理有限公司"]
+
+
+def test_text_layer_returns_items_and_candidates_but_does_not_guess_the_seller():
+    """文本层把读到的原文交出去；**不认定谁是卖方**（顺序不等于分栏），交给后端判。"""
+    res = parse_from_text_layer(_SYNTH, "synthetic.pdf")
+    assert res["items"] == ["住宿费"]
+    assert res["merchant_candidates"], "候选名称要交给后端做交叉核对"
+    assert res["merchant"] == "", "引擎层不许按顺序猜卖方"
+    assert res["_cloud_uploaded"] is False
+    assert res["_local_text_layer"] is True
+    # 读到了票面项目，就不该再说「分类需人工确认」
+    assert "category" not in res["needs_human"]
+    assert "分类" not in res["note"]
+    assert "住宿费" in res["note"], "提示语要如实说读到了什么"
+
+
+def test_text_layer_says_what_is_actually_missing():
+    """读不到的才说要人工确认 —— 提示语按"实际读到了什么"写，不写死。"""
+    bare = "随便一段没有项目名目、也没有主体名称的文本 2026年09月20日"
+    res = parse_from_text_layer(bare, "synthetic.pdf")
+    assert res["items"] == [] and res["merchant_candidates"] == []
+    assert "分类" in res["note"] and "商户" in res["note"]
+
+
+def test_text_layer_pdf_never_calls_the_model():
+    """带文本层的 PDF 必须本机直读、**不调模型**。
+
+    起因（2026-09-28 真机）：代码先把 PDF 当 base64 image 发出去，被 API 以
+    `Invalid base64 image` 拒掉才回退本机 —— 白等一次失败调用、note 里留一句吓人的报错，
+    而且与合规文件写的「数电发票 PDF 全程本机解析」不符（字节其实已经上传过、只是被拒）。
+    这条按源码顺序断言：文本层的 early return 必须在构造模型请求**之前**。
+    """
+    import inspect
+    src = inspect.getsource(recognize_receipt)
+    early = src.index("if local_text:\n        return parse_from_text_layer")
+    model = src.index("base64.b64encode")
+    assert early < model, "文本层直读必须排在模型调用之前"

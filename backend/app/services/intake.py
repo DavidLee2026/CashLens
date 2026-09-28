@@ -111,6 +111,26 @@ def _draft(data_dir, pid: str, *, direction: str, amount_cents: int, category: s
     return d
 
 
+def _merchant_by_category(candidates: list[str], category: str) -> str:
+    """用分类反查商户：只在**唯一命中**时采纳，否则留空交人工。
+
+    为什么不能按顺序取名字：文本流里买方与卖方的名字可能挤在同一行，顺序**不等于**
+    视觉左右分栏（引擎层已写明这条纪律）。但卖方有一个独立可核的特征 ——
+    它的名字**应当与票面项目名目的分类一致**（住宿票的卖方是酒店，餐饮票的是餐厅）。
+    所以这里做的是**交叉核对**而不是猜：
+      · 候选来自引擎层读到的原文（公司 / 酒店 / 宾馆 / 民宿 / 客栈 / 店 …）
+      · 只保留"分类能对上"的；恰好一个才算数
+      · 命中 0 个或 ≥2 个 → 返回空串，交人工（与原来一样，不推断）
+
+    实弹（2026-09-28）：一张住宿数电票的候选是「上海简乐文化传播有限公司」（买方，
+    分类对不上）与「昆明和美酒店管理有限公司」（卖方，对上「住宿」）→ 唯一命中，采纳卖方。
+    """
+    if not category or category == categories.UNCONFIRMED_CATEGORY:
+        return ""
+    hits = [w for w in candidates if categories.match_category(w) == category]
+    return hits[0] if len(hits) == 1 else ""
+
+
 def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dict:
     """图片：逐张识别 → 草稿，并记录识别明细供人工核对。"""
     drafts, items, errors = [], [], []
@@ -123,19 +143,32 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
             items.append({"file": f["name"], "ok": False, "error": res["error"]})
             continue
         cents = int(round(float(res.get("amount") or 0) * 100))
-        # 分类只看「商户 + 模型给的分类」，**不传 note**。
+        # 分类看「商户 + 模型给的分类 + **票面项目名目**」，**不传 note**。
         # 踩过的坑（2026-09-24 实弹）：PDF 本机回退说明里含 "API HTTP 400"，
         # 把 "api" 当成了经营成本关键词，一张酒店发票被判成「经营」。
         # note 里可能是错误说明或解释文字，不适合参与分类。
-        cat = categories.match_category(res.get("merchant", ""), res.get("category", ""))
+        # （2026-09-28 补票面名目）数电票项目名目是「*大类*具体名目」这种**自包含 token**，
+        # 不依赖版式分栏，所以本机文本层也拿得到。此前只看 merchant+category，
+        # 而这两样在文本层路径上都是空的 → 一张写着「*生产生活服务*住宿费」的
+        # 住宿发票被判成「待确认」。**读票面是引擎层的事，判分类是这里的事。**
+        # ⚠️ 变量名别叫 items —— 本函数的 items 是"逐文件结果"累加器。
+        item_names = res.get("items") or []
+        cat = categories.match_category(res.get("merchant", ""), res.get("category", ""), *item_names)
+        # 商户：文本层路径下引擎只给候选（买卖方名字顺序不可靠，不能按顺序取），
+        # 这里用"分类能否对上"做交叉核对后再定；对不上就留空交人工。
+        merchant = res.get("merchant", "") or _merchant_by_category(
+            res.get("merchant_candidates") or [], cat)
+        note = res.get("note") or f["name"]
+        if not merchant and (res.get("merchant_candidates") or []):
+            note += "（票面主体名称不唯一，商户请人工核对）"
         d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                    amount_cents=cents, category=cat,
-                   note=res.get("note") or f["name"], counterparty=res.get("merchant", ""),
+                   note=note, counterparty=merchant,
                    date=res.get("date", ""), source="识别", image_name=f["name"])
         if d:
             drafts.append(d)
         items.append({"file": f["name"], "ok": True, "amount_cents": cents,
-                      "date": res.get("date", ""), "merchant": res.get("merchant", ""),
+                      "date": res.get("date", ""), "merchant": merchant,
                       "category": cat, "invoice_no": res.get("invoice_no", ""),
                       "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                       "confidence": res.get("confidence")})
