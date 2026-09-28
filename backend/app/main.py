@@ -139,6 +139,24 @@ class ChatIn(BaseModel):
     text: str
     session_id: str | None = None
     project: str = ""
+    user: str = ""
+
+
+def _user_context(name: str) -> str:
+    """把「本机登录名」拼成给模型/规则看的上下文。
+
+    ⚠️ 用词要准：这是用户**在本机填的一个名字**（存在浏览器本地，无账号体系、无密码、
+    不联网验证），不是身份认证。所以这里写「本机登录名」，并明确它不是账号 ——
+    免得模型把「我知道你叫大维」说成「已确认你的身份」。
+
+    起因（2026-09-28 真机）：用户填了登录名，问「你知道我是谁吗」，助手答「不知道，
+    我目前还没有你的身份相关信息」—— 名字就在前端 localStorage 里，从来没传给后端。
+    """
+    s = str(name or "").strip()
+    if not s:
+        return ""
+    return (f"当前用户在本机填的登录名：{s}"
+            "（本地记录，不是账号、没有联网验证过；只有涉及称呼时才用它）")
 
 
 class PendingAcceptIn(BaseModel):
@@ -236,11 +254,27 @@ def _project_line(d: dict) -> str:
     return str(d.get("project_hint") or f"归入项目「{_project_label(d.get('project', ''))}」。")
 
 
-def _rule_reply(text: str, current_project: str = "") -> dict:
-    """规则兜底（无 LLM 时）：记账走待确认 / 问现金流 / 接不上。
+# 「我是谁」这类问题的触发词（规则兜底用；有 LLM 时由提示词里的规则负责）
+_IDENTITY_HINTS = ("我是谁", "我叫什么", "我的名字", "你认识我", "你知道我是谁", "认得我", "知道我叫")
+
+
+def _rule_reply(text: str, current_project: str = "",
+                user: str = "") -> dict:
+    """规则兜底（无 LLM 时）：身份问题 / 记账走待确认 / 问现金流 / 接不上。
 
     `current_project` = 前端当前选中的项目，作为新账默认归属（留空＝未归项目）。
+    `user` = 本机登录名；没有 LLM 时也要能如实回答「我是谁」，否则用户填了名字却
+    在没配 Key 的档位下问不出来（同一个问题两种档位两种答案，很怪）。
     """
+    t = str(text or "")
+    if any(h in t for h in _IDENTITY_HINTS):
+        if user:
+            return {"ok": True,
+                    "text": f"你是「{user}」——这是你在这台机器上填的登录名（只记在本机，"
+                            f"不是账号、也没有联网验证过）。"}
+        return {"ok": True,
+                "text": "你还没填登录名，所以我确实不知道你是谁。点右上角「登录」填一个就行 —— "
+                        "我只把它记在你本机。"}
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
         return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}
@@ -899,9 +933,12 @@ def chat(body: ChatIn):
     session_mem.touch(sid)
     memory = session_mem.context_of(sid)
     prompt = f"[对话上下文]\n{memory}\n[用户现在说]\n{body.text}" if memory else body.text
+    # 本机登录名：三条路（LLM 解析 / LLM 润色 / 规则兜底）都要带上，
+    # 否则「我是谁」在有 Key 和没 Key 两种档位下会给出两个不同答案。
+    user_ctx = _user_context(body.user)
 
     if llm_skill.is_configured():
-        parsed = llm_skill.parse_accounting(prompt)
+        parsed = llm_skill.parse_accounting(prompt, user_ctx)
         if parsed is not None:
             run = _run_actions(parsed, body.text, body.project)
             if run["executed"]:
@@ -913,7 +950,7 @@ def chat(body: ChatIn):
                     results_json = json.dumps(run["results"], ensure_ascii=False, default=str)[:2200]
                     final = ""
                     try:
-                        final = llm_skill.compose_reply(body.text, results_json)
+                        final = llm_skill.compose_reply(body.text, results_json, context=user_ctx)
                     except Exception:
                         final = ""
                     if not final or len(final) < 8:
@@ -936,7 +973,7 @@ def chat(body: ChatIn):
                 out["decision"] = run["decision"]
             return out
 
-    r = _rule_reply(body.text, body.project)
+    r = _rule_reply(body.text, body.project, body.user)
     session_mem.add_turn(sid, body.text, r.get("text", ""))
     r["session_id"] = sid
     return r

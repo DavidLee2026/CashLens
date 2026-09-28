@@ -260,3 +260,19 @@ def test_workbench_intake_request_carries_current_project():
     assert "project: activeProject" in window, (
         "导入请求没有带当前选中项目 —— 用户选了项目也会被文件夹名另建一个项目盖掉"
     )
+
+
+def test_workbench_chat_request_carries_the_local_user_name():
+    """对话请求必须带上本机登录名 —— 否则助手答不出「我是谁」。
+
+    起因（2026-09-28 真机）：用户填了登录名，问「你知道我是谁吗」，助手答不知道；
+    根因是名字只存在 localStorage，`/api/chat` 的请求体里从来没有它。
+    这条钉在**调用点**上（与"导入必须带 project"同一类坑：能力实现了，但调用时没传）。
+    """
+    src = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(
+        encoding="utf-8")
+    # 调用点用的是 j<> 包装（不是裸 fetch），按实际写法取那段
+    i = src.index('"/api/chat"')
+    call = src[i:i + 420]
+    assert "user" in call, "对话请求体要带 user（本机登录名）"
+    assert "user }" in call or "user," in call or "user:" in call, "要真的把它放进请求体"

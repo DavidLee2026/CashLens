@@ -744,13 +744,19 @@ export default function Workbench() {
    *  账本是追加式的，所以「一起删」在后端是追加一条作废记录，不是重写历史。 */
   async function deleteProject(id: string, withData: boolean, name: string) {
     try {
-      await j<{ ok: boolean; voided_count: number; bill_count: number }>(
+      const res = await j<{ ok: boolean; voided_count: number; bill_count: number }>(
         `/api/projects/${encodeURIComponent(id)}?with_data=${withData ? "true" : "false"}`,
         { method: "DELETE" },
       );
+      // 提示语按**实际结果**写：用后端返回的 bill_count，别说"账单还在账本里"却发现它本来就没有账单。
+      // 「一起删」也说"作废"而不是"抹掉"—— 账本是追加式的，记录留痕、可追溯（措辞别夸大也别说谎）。
       setProjMsg(withData
-        ? `「${name}」与它名下的账单已一起删除。`
-        : `「${name}」已删除；它名下的账单还在账本里，回到「未归项目」。`);
+        ? (res.bill_count > 0
+            ? `「${name}」与它名下的 ${res.bill_count} 笔账单已一起作废（账本里留痕，可追溯）。`
+            : `「${name}」已删除（它名下本来就没有账单）。`)
+        : (res.bill_count > 0
+            ? `「${name}」已删除；它名下的 ${res.bill_count} 笔账单还在账本里，回到「未归项目」。`
+            : `「${name}」已删除（它名下本来就没有账单）。`));
       setDeletingId("");
       refresh();
     } catch {
@@ -1000,7 +1006,10 @@ export default function Workbench() {
       const r = await j<ChatReply>("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t, session_id: sessionId(), project: activeProject }),
+        /* user：本机登录名。它是用户在本机填的一个名字（localStorage，无账号体系、
+           无密码、不联网验证），带上去只是让助手能答「我是谁」以及偶尔称呼；
+           后端提示词里写明了它"不是账号、没有联网验证过"，不许说成已确认身份。 */
+        body: JSON.stringify({ text: t, session_id: sessionId(), project: activeProject, user }),
       });
       if (r.session_id && typeof window !== "undefined") {
         window.localStorage.setItem("cl_session_v2", r.session_id);
