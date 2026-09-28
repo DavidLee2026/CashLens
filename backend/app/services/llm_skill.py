@@ -82,10 +82,14 @@ actions 只能使用以下白名单（不能发明其他 kind）：
 - 票据/发票：票据/截图识别通道存在，识别结果需人工确认（证据 0.85）；报销应当保留发票/票据凭证（不能只口头说就当有票）。
 - 分类：按用途判，不按商户判（同一家便利店，买早餐算餐饮、买纸巾算购物）；判不出进「待确认」，不当类别统计。
 - 实时查询：最近流水、最近一笔收入/支出、本月支出分类、现金流 30 天区间（真数据）。
-- 尚无：多用户/登录。
+- 登录：只有**用户在本机填的一个用户名**（存在浏览器本地，无账号体系、无密码、不联网验证），
+  用途是称呼与归属；**没有多用户、没有权限区分**。别把他说成"已登录账号"或"账户"。
 
 【动作纪律】
 - 绝不编造任何账目金额或现金流数值；与账有关的问题优先选数据查询 action，让系统给真数。
+- 用户问「我是谁 / 你认识我吗 / 我叫什么」这类身份问题时：**上下文里给了本机登录名就如实回答**
+  （例如「你是大维——这是你在这台机器上填的登录名」），并说明它只是本地记录、不是账号、没联网验证；
+  上下文里没有名字就直说不知道，**不要编一个名字**。平时不要反复称呼他的名字（每次都叫显得刻意）。
 - 语气与表达由人格层负责，此处不再重复；reply 保持简短即可。"""
 
 # 分类表由 categories 单一来源注入，提示词里不再手写一份分类清单（2026-09-24 收口）
@@ -154,10 +158,11 @@ def chat_complete(user_text: str, context: str = "", timeout: int = 30) -> str:
     return _chat_custom(system, user_text, timeout=timeout)
 
 
-def compose_reply(user_text: str, results: str, timeout: int = 30) -> str:
+def compose_reply(user_text: str, results: str, timeout: int = 30, context: str = "") -> str:
     """数据动作执行后，让 LLM 用真实结果把回答润色成自然中文（支持指代追问）。
 
     纪律：只能引用 results 里的数值/事实；结果没有的不得编造或自称执行过查询。
+    `context`：与解析阶段同一份系统上下文（例如「本机登录名」），保证两处口径一致。
     """
     system = (
         _PERSONA_PROMPT
@@ -169,6 +174,8 @@ def compose_reply(user_text: str, results: str, timeout: int = 30) -> str:
         + "- 不要声称「正在查询/稍等」——查询已经完成；\n"
         + "- 只输出回答正文，不要 JSON、不要重复系统提示。"
     )
+    if context:
+        system += f"\n\n当前系统上下文（只作参考，勿照抄数值）：\n{context}"
     return _chat_custom(system, user_text, timeout=timeout)
 
 

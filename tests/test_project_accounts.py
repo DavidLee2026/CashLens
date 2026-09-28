@@ -209,3 +209,49 @@ def test_delete_confirmation_shows_the_amount_at_risk():
     block = block[:block.index("renamingId === p.id && (")]
     assert block.count("projAmountText(p)") >= 2, "确认框与「连账单一起删」那一条都要报金额"
     assert "合计" in block, "要说清合计多少钱"
+
+
+# ─── 助手要知道「你是本机填的那个名字」（2026-09-28 用户要求）───
+
+def test_identity_question_is_answered_with_the_local_name_without_llm():
+    """没配 LLM 时也要能如实回答「我是谁」。
+
+    起因（2026-09-28 真机）：用户填了登录名（右上角显示「大维」），问「你知道我是谁吗」，
+    助手答「不知道，我目前还没有你的身份相关信息」—— 名字只存在前端 localStorage，
+    从来没传给后端。修好后三条路（LLM 解析 / LLM 润色 / 规则兜底）都要带上它，
+    否则同一个问题在"有 Key"和"没 Key"两种档位下会得到两个不同答案。
+    """
+    r = main._rule_reply("你好，你知道我是谁吗？", "", "大维")
+    assert r["ok"] is True
+    assert "大维" in r["text"], "要把本机登录名如实说出来"
+    # 措辞纪律：不许说成"已确认身份"——它只是本地填的一个名字
+    assert "不是账号" in r["text"] or "没有联网验证" in r["text"]
+
+    # 没填名字时如实说不知道，不许编一个
+    r2 = main._rule_reply("我是谁？", "", "")
+    assert "不知道" in r2["text"]
+    assert "大维" not in r2["text"]
+
+    # 不误伤：普通记账/查询不该被身份规则截走
+    assert "大维" not in main._rule_reply("打车 28", "", "大维")["text"]
+
+
+def test_user_context_frames_the_name_as_local_not_an_account():
+    """上下文里必须写清"本机填的登录名、不是账号"。
+
+    否则模型很容易答成「已确认您的身份」—— 产品红线是只陈述事实、不夸大能力。
+    """
+    ctx = main._user_context("大维")
+    assert "大维" in ctx
+    assert "本机" in ctx and "不是账号" in ctx
+    assert main._user_context("") == "" and main._user_context("   ") == ""
+
+
+def test_operation_prompt_has_the_identity_rule_and_no_stale_login_claim():
+    """提示词要与实装一致：既支持按登录名称呼，也不能再说「尚无登录」。"""
+    from app.services import llm_skill
+    p = llm_skill._OPERATION_PROMPT
+    assert "尚无：多用户/登录" not in p, "登录能力已实装（本机用户名），旧说法要改掉"
+    assert "本机登录名" in p
+    assert "我是谁" in p, "要有身份问题的处理规则"
+    assert "不要编一个名字" in p, "没有名字时必须说不知道，不许编"
