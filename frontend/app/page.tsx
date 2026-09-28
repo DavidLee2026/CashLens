@@ -243,12 +243,14 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
       lines.push(`【${b.project_name}】生成 ${b.draft_count} 条待确认草稿，合计 ${yuan(b.identified_total_cents)}`);
     }
     if (b.text_amount_drafts) {
-      // 候选草稿是"把图里出现的金额都列出来"，合计会把合计行与重复行也算进去 ——
-      // 不提醒的话，用户会以为这一批真的要花这么多（2026-09-28 真机：12 条候选合计 ¥3,163.03）。
+      // 候选草稿是"从图里文字读出来的金额"，需要人挑 —— 不提醒的话，用户会以为这一批
+      // 都要记账（2026-09-28 真机：12 条候选合计 ¥3,163.03）。
+      // 图里自己算的合计（`A+B=C` 的 C、以及算式里被再引用一次的数）后端已经不列了，
+      // 所以这里只说"要挑"，不再说"含合计行"。
       // 整批都是候选时别说「其中」（读着像还有别的）—— 直接说清"这些都只是候选"
       lines.push(b.text_amount_drafts >= b.draft_count
-        ? `  这 ${b.text_amount_drafts} 条都是"图里出现的金额"候选（含合计行与重复行，请只挑该报的）`
-        : `  其中 ${b.text_amount_drafts} 条来自图内文字（含合计行与重复行，请只挑该报的）`);
+        ? `  这 ${b.text_amount_drafts} 条都是从图里文字读出来的候选（请核对该报哪几笔）`
+        : `  其中 ${b.text_amount_drafts} 条来自图内文字（请核对该报哪几笔）`);
     }
     if (b.declared_total_cents) {
       const diff = b.reconcile_diff_cents ?? 0;

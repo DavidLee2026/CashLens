@@ -230,7 +230,10 @@ _STRONG_AMOUNT = re.compile(
     r"|(\d[\d,]*)\.(\d{1,2})(?!\d)")              # 186.79
 # 弱金额：整数。只在**这一行已经有强金额**时才采信（否则「13 人」「0918」都会被当钱）
 _WEAK_AMOUNT = re.compile(r"(?<![\d.,])(\d{2,6})(?![\d.,])")
-_TEXT_AMOUNT_MAX = 12          # 单张图最多挑几个候选，防一张长截图刷出几十条草稿
+_TEXT_AMOUNT_MAX = 16          # 单张图最多挑几个候选，防一张长截图刷出几十条草稿
+# 「钱真的出去了」的记录长什么样（微信转账卡片：「向X转账 / ¥100.00 / 已被接收」；
+# 收款方那一侧是「…的¥100.00 / 已收款」——同一笔的对面视角，会被下面的包含合并掉）。
+_TRANSFER_WORDS = ("转账", "已收款", "已被接收")
 _TEXT_AMOUNT_CEIL_CENTS = 10_000_00   # 单笔上限 1 万，防卡号/长数字
 
 
@@ -241,14 +244,23 @@ def text_amount_candidates(lines: list[str] | None, limit: int = _TEXT_AMOUNT_MA
       - 先遮掉日期 / 时间 / 星期 / 容量单位这些数字（11:56、0918、83KB、5G 不是钱）；
       - 一行里**只要没有强金额**（带小数或带 ¥），这一行整行不采信；
       - 有强金额的行里，连"整数写法"（「闪送110」）一起挑，且跳过已经是强金额的那段；
-      - 出现在 `=` 左边的金额是加数、`=` 右边的是合计 —— 只是**标注**「is_total」，不删。
-    选哪笔、报不报，交给用户在待确认里决定。
+      - 每条金额都带上**条目名**（金额前面那截文字：「打车186.79+闪送110」里的「打车」「闪送」），
+        分类按条目名判 —— 同一行里两笔钱可以是两个不同的类别。
+      - 图里**自己算的账**不列（用户 2026-09-28 定的结构，见 `derived`）：`A+B=C` 里的 C 是合计，
+        而合计行里被再次引用的数字（`C+D=E` 里的 C、D）是同一笔钱的第二次出现。
+    选哪笔、报不报，交给用户在待确认里决定（`derived` 只是"图里已经加过一次了"，不是"不用报"）。
     """
     out: list[dict] = []
-    for raw in lines or []:
-        line = str(raw or "").strip()
+    rows = [str(x or "").strip() for x in (lines or [])]
+    for i, line in enumerate(rows):
         if not line:
             continue
+        # 语义要看**上下文**：微信转账卡片的金额常常单独一行，判断依据在它的**本行或下一行**
+        # （「向…转账 / ¥100.00 / 已被接收」；收款侧是「…的¥100.00 / 已收款」）。
+        # ⚠️ **只看下一行、不看上一行**：实弹里上一行恰好是转账卡片的尾行「转账」，
+        # 而它紧挨着的正是订单卡的第一行金额 —— 看上一行会把订单里的 23.55 误判成转账。
+        ctx = line + " " + (rows[i + 1] if i + 1 < len(rows) else "")
+        is_transfer = any(w in ctx for w in _TRANSFER_WORDS)
         masked = _MASK_NOISE.sub(" ", line)
         strong: list[tuple[str, int, int]] = []
         for m in _STRONG_AMOUNT.finditer(masked):
@@ -262,6 +274,22 @@ def text_amount_candidates(lines: list[str] | None, limit: int = _TEXT_AMOUNT_MA
             if any(a <= m.start() < b for a, b in spans):
                 continue                  # 已经作为强金额挑过了
             picks.append((m.group(1), m.start(), m.end()))
+        # 条目名要按位置取「这一笔前面那截文字」，所以先把所有金额按位置排好。
+        # 实弹（2026-09-28，「打车186.79+闪送110=296.79」）：一行里两笔钱分属两个类别，
+        # 拿整行去匹配分类会把 110 也判成交通 —— 条目名必须切到各自那一段。
+        pos_sorted = sorted((a, b) for _, a, b in picks)
+        eq_at = masked.find("=")
+
+        def _label_at(pos: int) -> str:
+            prev_end = 0
+            for a, b in pos_sorted:
+                if b <= pos:
+                    prev_end = b
+                else:
+                    break
+            seg = re.sub(r"[¥￥\d.,+\-=\s]", "", masked[prev_end:pos])
+            return seg.strip(" 　·、.。:：()（）")
+
         for tok, start, _end in picks:
             try:
                 cents = int(round(float(str(tok).replace(",", "")) * 100))
@@ -269,11 +297,35 @@ def text_amount_candidates(lines: list[str] | None, limit: int = _TEXT_AMOUNT_MA
                 continue
             if cents <= 0 or cents > _TEXT_AMOUNT_CEIL_CENTS:
                 continue
+            # bare ＝ 整行除了金额（含 ¥/元/千分位/正负号）什么都没有 —— 那是**别人提交的
+            # 付款卡片 / 行程单**里的一个数（「28.45元」「-92.00」），不是"文字里写的报销"。
+            bare = not re.sub(r"[¥￥\d.,\s元块+\-]", "", line)
             out.append({"line": line, "amount_cents": cents,
-                        "is_total": "=" in masked[:start]})
+                        "label": _label_at(start),
+                        "is_total": eq_at >= 0 and eq_at < start,
+                        "kind": "transfer" if is_transfer else ("bare" if bare else "text"),
+                        "_eq_side": ("right" if eq_at >= 0 and eq_at < start
+                                     else "left" if eq_at >= 0 else "none")})
             if len(out) >= limit:
                 break
     out = _drop_split_duplicates(out)
+    # 图里自己算的账（用户 2026-09-28 定的结构，实弹＝「打车186.79+闪送110=296.79 /
+    # 午饭晚饭水一共549.6 / 296.79+549.6=846.39」，该报的是 186.79 + 110 + 549.6 三条）：
+    #   ① `=` 右边那个数**是左边加出来的** → 不是一笔新的支出，不列（左边那几条已经代表了这笔钱）；
+    #      注意：只有左边真有金额才算"加出来的" —— 「总计=500」这种光杆合计仍要留，
+    #      否则会把图里唯一的金额扔掉。
+    #   ② 出现在算式行里、且这个数在别处（非算式行）也出现过的 → 它是同一笔钱的第二次出现
+    #      （上面 549.6 又在 296.79+549.6 里被加了一次），不重复列。
+    # 只对**算式行**做这件事：OCR 把一行拆成两行、或两笔真同额消费（两次 28 元）都不受影响。
+    eq_lines = {c["line"] for c in out if c["_eq_side"] != "none"}
+    left_lines = {c["line"] for c in out if c["_eq_side"] == "left"}
+    total_values = {c["amount_cents"] for c in out
+                    if c["_eq_side"] == "right" and c["line"] in left_lines}
+    plain_values = {c["amount_cents"] for c in out if c["_eq_side"] == "none"}
+    for c in out:
+        c["derived"] = (c["_eq_side"] == "right" and c["line"] in left_lines) or (
+            c["line"] in eq_lines and c["amount_cents"] in (total_values | plain_values))
+        c.pop("_eq_side", None)
     # 完全相同的原文出现多次：**不合并**（可能是两份，也可能是同一行被 OCR 抄了两遍），
     # 只打标记，让用户对着原图判 —— 合并了就等于替他决定，而且吞掉的那笔找不回来。
     from collections import Counter as _Counter
@@ -338,10 +390,35 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
             # 有就**每条金额建一条待确认草稿**（标「请人工核对」），让用户挑该报哪几笔；
             # 一条都没有才如实报「未生成草稿」——这与"读到了但没建"是两回事。
             cands = text_amount_candidates(res.get("text_lines"))
-            if cands:
+            # 挑哪几条（用户 2026-09-28 定的口径：「主要判断客户付出去了多少钱」）：
+            #   ① 图里只要有**转账记录** → 只列转账（那才是"钱真的出去了"）；同行里员工提交的
+            #      行程单/订单卡金额都不列（否则一笔报销会被记两遍）。
+            #   ② 没有转账记录 → 退回"文字里写的金额"（行里有中文或算式）；**纯金额行**
+            #      （付款卡片里孤零零的「28.45元」）不算 —— 那只是别人贴的截图。
+            #   ③ 两条路都跳过**图里自己算出来的合计**（「A+B=C」的 C、以及在算式里被再引用
+            #      一次的数字）：那笔钱已经由明细条目代表了，列出来就是重复记账。
+            #      （实弹：「打车186.79+闪送110=296.79 / 午饭晚饭水一共549.6 / 296.79+549.6=846.39」
+            #        → 只列 186.79 + 110 + 549.6 三条，正是用户说的结构。）
+            n_tot = sum(1 for c in cands if c.get("derived"))
+            live = [c for c in cands if not c.get("derived")]
+            transfers = [c for c in live if c["kind"] == "transfer"]
+            picked = transfers or [c for c in live if c["kind"] == "text"]
+            if picked:
                 made = []
-                for c in cands:
-                    cnote = f"图里文字中的金额（原文：{c['line']}）"
+                for c in picked:
+                    # 分类看**条目名**（金额前面那截文字），不看整行：一行里两笔钱可以是两类
+                    # （「打车186.79+闪送110」→ 交通 / 经营）。取不到条目名再退回整行原文。
+                    label = (c.get("label") or "").strip()
+                    cat = (categories.match_category(label) if label
+                           else categories.match_category(c["line"]))
+                    if cat == categories.UNCONFIRMED_CATEGORY and label:
+                        # 条目名判不出（「+」「的」这种残缺片段）→ 用整行原文兜一次，
+                        # 拿不准仍落「待确认」，不瞎猜。
+                        cat = categories.match_category(c["line"])
+                    shown = f"{label} {c['amount_cents'] / 100:.2f}" if label else c["line"]
+                    cnote = (("图内转账记录（原文：" + c["line"] + "）；这是钱实际出去的那一笔")
+                             if c["kind"] == "transfer"
+                             else f"图里文字中的金额（{shown}，原文：{c['line']}）")
                     if c["is_total"]:
                         cnote += "；这是等号右边的合计，别重复记"
                     if c.get("repeat"):
@@ -349,7 +426,7 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                     cnote += "；请人工核对这一笔该不该报"
                     d = _draft(data_dir, pid, direction="expense",
                                amount_cents=c["amount_cents"],
-                               category=categories.match_category(c["line"]),
+                               category=cat,
                                note=cnote, source="识别", image_name=f["name"])
                     if d:
                         made.append(d)
@@ -357,10 +434,26 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                     drafts += made
                     items.append({"file": f["name"], "ok": True, "amount_cents": 0,
                                   "text_amounts": len(cands), "draft_count": len(made),
+                                  "transfer_amounts": len(transfers),
+                                  "total_amounts": n_tot,
+                                  "skipped_amounts": len(cands) - len(picked),
                                   "date": "", "merchant": "", "category": "",
                                   "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
                                   "confidence": res.get("confidence")})
                     continue
+            # 读到了金额、但按上面的口径一条都不该列（全是提交的付款卡片/行程单）——
+            # 这不是"读不出来"，要说清是"读了但不算"。前端靠 text_amounts 说这句话。
+            # ⚠️ 这一段必须留在 `cents <= 0` 里面：真发票（cents > 0）根本不会调
+            # text_amount_candidates，跑到这里会是 UnboundLocalError（改的时候真炸过一次）。
+            if cands:
+                items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                              "text_amounts": len(cands), "draft_count": 0,
+                              "transfer_amounts": 0, "total_amounts": n_tot,
+                              "skipped_amounts": len(cands),
+                              "date": "", "merchant": "", "category": "",
+                              "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                              "confidence": res.get("confidence")})
+                continue
         d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                    amount_cents=cents, category=cat,
                    note=note, counterparty=merchant,
