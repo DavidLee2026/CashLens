@@ -142,9 +142,10 @@ class ChatIn(BaseModel):
 
 
 class PendingAcceptIn(BaseModel):
-    """确认草稿时的可选覆盖：用户在确认那一刻挑的项目（空字符串 ＝ 未归项目）。"""
+    """确认草稿时的可选覆盖：用户在确认那一刻挑的项目与分类（空字符串 ＝ 未归项目 / 未分类）。"""
 
     project: str | None = None
+    category: str | None = None
 
 
 class ModelSelectIn(BaseModel):
@@ -870,7 +871,11 @@ def pending_accept(pid: str, body: PendingAcceptIn | None = None):
         # ⚠️ 必须先把"名字"解析成 id 再写账本：`_append_event` 假定拿到的是已解析好的 id
         # （账本只存稳定 id，显示名走映射表）。传名字就写，会存进一个不存在 id 的幽灵值。
         override = projects.resolve_incoming(DATA_DIR, override)[0] if override.strip() else ""
-    out = pending.accept(DATA_DIR, pid, _append_event, project_override=override)
+    # 分类同理可在确认那一刻改：草稿分类是「待确认」（机器没判出来）时就该由人补上。
+    # `pending.accept` 内部还会把占位符收成空串，账本里永远不出现「待确认」这个"分类"。
+    cat_override = body.category if body is not None else None
+    out = pending.accept(DATA_DIR, pid, _append_event, project_override=override,
+                         category_override=cat_override)
     if out is None:
         raise HTTPException(status_code=404, detail="待确认草稿不存在")
     state = run_state(LEDGER_PATH, DB_PATH)["state"]

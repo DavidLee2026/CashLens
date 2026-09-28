@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.services import pending  # noqa: E402
+from app.services.categories import UNCONFIRMED_CATEGORY  # noqa: E402
 
 
 def test_create_list_decline(tmp_path):
@@ -33,6 +34,51 @@ def test_accept_invokes_append(tmp_path):
     assert captured["amount"] == 29900 and captured["direction"] == "income"
     assert captured["project"] == "project_a"  # 项目维度透传到写账本回调
     assert pending.list_all(tmp_path) == []  # 弹出后草稿消失
+
+
+def test_accept_never_writes_the_unconfirmed_placeholder_as_a_category(tmp_path):
+    """账本里永远不出现「待确认」这个"分类"。
+
+    起因（2026-09-28 真机）：用户把 17 笔全确认入账后，「最近事件」第一条显示
+    「¥78.00 待确认 · 票据」。查证是草稿的占位符分类被原样写进了账本 —— 而
+    `categories.py` 自己写着「判不出就进『待确认』，它是要人来确认的池子，
+    **不是一个类别**」「不当类别统计」。占位符一旦落库，就会进支出构成统计，
+    而且账本是追加式不可变的，错了只能再追加作废事件去补。
+
+    收口方式：占位符与空值都落**空串**（下游 `projects.summary()` 会把空串
+    如实归到「未分类」）。同时允许用户在确认那一刻补分类（category_override）。
+    """
+    captured = {}
+
+    def append_fn(direction, amount_cents, category, channel, note, counterparty, project):
+        captured.update(category=category)
+        return {"event_id": "x"}, True
+
+    # ① 占位符 → 落「其他」（流水线本来就用的"认不出"桶），不落「待确认」
+    d = pending.create(tmp_path, direction="expense", amount_cents=7800,
+                       category="待确认", channel="receipt", note="商户与分类需人工确认")
+    pending.accept(tmp_path, d["id"], append_fn)
+    assert captured["category"] == "其他", \
+        f"占位符不得写进账本，实际写了 {captured['category']!r}"
+    assert captured["category"] != UNCONFIRMED_CATEGORY
+
+    # ①b 收入侧的占位符 → 「其他收入」（收入没有「其他」这个分类）
+    d = pending.create(tmp_path, direction="income", amount_cents=29900,
+                       category="待确认", channel="alipay", note="说不清的一笔进账")
+    pending.accept(tmp_path, d["id"], append_fn)
+    assert captured["category"] == "其他收入"
+
+    # ② 用户在确认那一刻补了分类 → 按补的写
+    d = pending.create(tmp_path, direction="expense", amount_cents=96200,
+                       category="待确认", channel="receipt", note="数电票")
+    pending.accept(tmp_path, d["id"], append_fn, category_override="经营")
+    assert captured["category"] == "经营"
+
+    # ③ 本来就有真分类、且没覆盖 → 原样保留（别把正常路径改坏）
+    d = pending.create(tmp_path, direction="expense", amount_cents=4050,
+                       category="购物", channel="receipt", note="便利店")
+    pending.accept(tmp_path, d["id"], append_fn)
+    assert captured["category"] == "购物"
 
 
 def test_accept_tolerates_legacy_draft_without_project(tmp_path):
@@ -131,9 +177,14 @@ def test_batch_confirm_stays_behind_an_explicit_second_click():
     合规红线是「用户确认环节不得为体验而取消」。批量确认只是把 17 次点击并成 2 次，
     仍然是用户显式发起的；这条测试锁住：
       ① 存在批量入口「全部确认」，且它只是把确认条打开（setBatchAsk("accept")）；
-      ② 确认条里必须先摆出笔数与金额，再给「确认全部 N 笔」；
+      ② 确认条里必须先摆出笔数与金额，再给确认按钮；
       ③ 批量走的是同一个 accept 端点（不新增接口，端点数不变）；
       ④ 中途失败要如实报告已入账几笔，不许假装全成功。
+    另外锁一件**反直觉**的事：确认条里**不要**再夹带说教。
+    用户 2026-09-28 明确要求：「既然用户选择了全部确认，二次确认就可以了，
+    不要再提示什么（发票号存疑 / 分类待定）」—— 在二次确认里罗列哪几笔存疑、
+    再给「只确认一部分」的岔路，反而让人怀疑自己是不是点错了。
+    「需核对」徽章只留在**每一行**上（那才是用户逐笔判断的地方）。
     """
     src = _page_tsx()
 
@@ -141,8 +192,14 @@ def test_batch_confirm_stays_behind_an_explicit_second_click():
     assert 'setBatchAsk("accept")' in src, "批量入口只能打开确认条，不能直接入账"
     # 确认条里要摆数字再让用户点
     assert "batchExpense" in src and "batchIncome" in src, "确认条要先摆出支出/收入合计"
-    assert "确认全部 {pendingList.length} 笔" in src, "确认条里要有明确的「确认全部 N 笔」按钮"
-    assert "只确认无提示的" in src, "带「需核对」提示的笔应可单独排除"
+    assert "确认入账" in src, "确认条里要有明确的确认按钮"
+    # 二次确认不要夹带说教、也不要给岔路。
+    # ⚠️ 断言必须**只看确认条那段 JSX**：整份源码里还有注释提到这两个词
+    # （needsReview 的文档注释），按全文断言会误伤。
+    bar = src[src.index('{batchAsk === "accept" && ('):src.index('{batchAsk === "decline" && (')]
+    assert "只确认无提示的" not in bar, "批量确认条不应再给「只确认一部分」的岔路"
+    assert "发票号存疑" not in bar and "分类待定" not in bar, \
+        "批量确认条不应在二次确认里罗列存疑原因（用户 2026-09-28 明确要求）"
     # 走同一个端点
     assert "`/api/pending/${p.id}/accept`" in src, "批量确认应复用单笔 accept 端点"
     # 失败要如实
@@ -192,3 +249,25 @@ def test_batch_decline_asks_first_and_never_touches_the_ledger():
     assert "批量取消失败：已丢弃" in src, "中途失败必须报告已丢弃笔数"
     # 两个入口互斥：开了确认条就不再露出入口，避免"点了一下不知道会发生什么"
     assert 'batchAsk === "accept"' in src and 'batchAsk === "decline"' in src
+
+
+def test_panel_offers_a_category_picker_for_unconfirmed_rows_and_never_labels_it_as_a_category():
+    """「待确认」的行：给分类下拉，且不把占位符当分类显示。
+
+    这补的是上面那条后端护栏的界面一侧：后端保证「账本里不出现待确认」，
+    但用户如果没机会补分类，那两笔就只能永远挂在「未分类」上。
+    所以界面上要给出补的入口，并且**只在真正需要补的那几行**上出现
+    （不选也不会写占位符，后端会落空串 → 详情里如实显示「未分类」）。
+    """
+    src = _page_tsx()
+
+    assert "isUnconfirmed" in src, "需要一个判断占位符分类的函数"
+    assert 'draftCategory' in src, "需要记录用户在确认那一刻选的分类"
+    assert "选择分类…" in src, "「待确认」的行要有分类下拉"
+    assert "cats.expense.filter((x) => x !== cats.unconfirmed)" in src, \
+        "分类下拉必须排除占位符本身 —— 否则等于让用户把「待确认」当分类选"
+    # 确认时要把分类一起提交（单笔与批量两条路）
+    assert "acceptIt ? { project: proj, category: cat }" in src, "单笔确认要带上分类"
+    assert "category: draftCategory[p.id] ?? \"\"" in src, "批量确认要带上每行选的分类"
+    # 空分类显示成「未分类」，不拿「其他」冒充
+    assert 'ev.category || "未分类"' in src, "空分类应显示「未分类」"

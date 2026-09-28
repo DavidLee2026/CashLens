@@ -195,6 +195,15 @@ type ModelsView = {
   privacy_note: string;
 };
 
+/** 分类唯一权威表（`services/categories.py`）。`unconfirmed` 是「等人确认」的占位符，
+ *  **不是一个分类** —— 所以下拉里要把它排除掉。 */
+type CategoriesView = {
+  expense: string[];
+  income: string[];
+  unconfirmed: string;
+  neutral: string;
+};
+
 const yuan = (c: number) =>
   `¥${(c / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -234,6 +243,10 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
 }
 
 const CHANNEL_CN: Record<string, string> = { wechat: "微信", alipay: "支付宝", cash: "现金", bank: "银行卡", manual: "手动", voice: "语音", receipt: "票据" };
+/** 「最近事件」一次露几条（其余用滚轮在该区域里看）。数值与 globals.css 的
+ *  `.ev-list{max-height:calc(5 * 45.5px)}` 是配对的：改这里必须同步改那里，否则
+ *  会出现"说 5 条实际露 4 条半"的错位。 */
+const EV_WINDOW = 5;
 const LABEL_CN: Record<string, string> = {
   unknown: "现金流不明",
   learning: "数据积累中", // 原为「学习中」：放顶栏时看不明白，语义是引擎还在积累你的经营节奏
@@ -342,6 +355,11 @@ export default function Workbench() {
   /* 确认草稿时逐笔挑的项目（草稿 id → 项目 id/名字）。归属是逐笔属性，不是会话属性：
      这次说本月报销、下一句说三个月后回款，必须在确认那一刻能分开。 */
   const [draftProject, setDraftProject] = useState<Record<string, string>>({});
+  /* 分类在确认那一刻也可以改：草稿分类是「待确认」时（机器没判出来），
+     只有人能补 —— 这也是「待确认」这个池子存在的理由。
+     不选也不会把「待确认」写进账本，而是如实落「未分类」（见后端 _ledger_category）。 */
+  const [draftCategory, setDraftCategory] = useState<Record<string, string>>({});
+  const [cats, setCats] = useState<CategoriesView | null>(null);
   /* 项目行的「⋯」菜单开着哪一个；项目详情弹窗（改名 / 详情 两个分支，David 2026-09-26） */
   const [projMenuId, setProjMenuId] = useState("");
   const [detailId, setDetailId] = useState("");
@@ -399,6 +417,12 @@ export default function Workbench() {
       setPendingList((await j<{ pending: PendingDraft[] }>("/api/pending")).pending ?? []);
     } catch {
       /* 读不到就保留上一次的列表，不伪装成「没有待确认」——否则用户会以为账都清了 */
+    }
+    // 分类表（用于「待确认」那些行的人工补分类）；失败不影响其它面板
+    try {
+      setCats(await j<CategoriesView>("/api/categories"));
+    } catch {
+      /* 拿不到就不显示分类下拉：宁可少一个入口，也不显示错的候选 */
     }
   }
 
@@ -581,11 +605,13 @@ export default function Workbench() {
     setActingIds((prev) => new Set(prev).add(p.id));
     // 确认时把"这一笔归哪个项目"一起提交（下拉里选的；没动过就是草稿原来的项目）
     const proj = draftProject[p.id] ?? p.project ?? "";
+    // 分类同理：只对「待确认」的行提供下拉，选了就按选的写；没选就留空（后端落「未分类」）
+    const cat = draftCategory[p.id] ?? "";
     try {
       const res = await j<{ ok: boolean; project_name?: string }>(
         `/api/pending/${p.id}/${acceptIt ? "accept" : "decline"}`,
         { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project: proj }) }
+          body: JSON.stringify(acceptIt ? { project: proj, category: cat } : { project: proj }) }
       );
       // 成功即从气泡移除该草稿按钮（已入账/已忽略的不允许再点）
       setMsgs((m) =>
@@ -613,8 +639,15 @@ export default function Workbench() {
     }
   }
 
+  /** 这个分类是不是「等人确认」的占位符 —— 它不是一个分类（见 categories.py §1），
+   *  所以既不能当分类显示，更不能写进账本。（分类表没拿到时按字面值兜底。） */
+  function isUnconfirmed(cat: string | undefined) {
+    return !!cat && cat === (cats?.unconfirmed ?? "待确认");
+  }
+
   /** 这一笔是否带「需人工核对」提示（发票号存疑 / 分类待定等）。
-      批量确认时必须单独点出来：这些正是"机器认不准、要人看原件"的那些。 */
+      只在**每一行**上标出来，供用户逐笔判断；批量确认条里不再重复说教
+      （用户 2026-09-28 明确要求：点了全部确认，二次确认就够了）。 */
   function needsReview(p: PendingDraft) {
     return p.category === "待确认" || /存疑|人工核对|需确认|未识别|退款|待确认/.test(p.note ?? "");
   }
@@ -631,7 +664,7 @@ export default function Workbench() {
         const proj = draftProject[p.id] ?? p.project ?? "";
         await j(`/api/pending/${p.id}/accept`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project: proj }),
+          body: JSON.stringify({ project: proj, category: draftCategory[p.id] ?? "" }),
         });
         done += 1;
         if (p.direction === "income") incomeCents += p.amount_cents;
@@ -675,8 +708,6 @@ export default function Workbench() {
   }
 
   // 批量确认条要摆出来的数字：每次渲染现算，不缓存（草稿随时在变）
-  const reviewIds = pendingList.filter(needsReview).map((x) => x.id);
-  const reviewFree = pendingList.filter((x) => !needsReview(x));
   const batchExpense = pendingList.reduce((s, x) => s + (x.direction === "expense" ? x.amount_cents : 0), 0);
   const batchIncome = pendingList.reduce((s, x) => s + (x.direction === "income" ? x.amount_cents : 0), 0);
 
@@ -1585,20 +1616,11 @@ export default function Workbench() {
                     <p>
                       将 <b>{pendingList.length}</b> 笔入账：支出 <b>{yuan(batchExpense)}</b>
                       {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
-                      {reviewIds.length > 0 && (
-                        <> 其中 <b>{reviewIds.length}</b> 笔带「需核对」提示（发票号存疑 / 分类待定），建议先对原件。</>
-                      )}
                     </p>
                     <div className="pd-confirm-acts">
-                      {reviewFree.length > 0 && (
-                        <button className="btn-mini ok" disabled={batchBusy}
-                                onClick={() => actBatch(reviewFree.map((x) => x.id))}>
-                          只确认无提示的 {reviewFree.length} 笔
-                        </button>
-                      )}
-                      <button className="btn-mini" disabled={batchBusy}
+                      <button className="btn-mini ok" disabled={batchBusy}
                               onClick={() => actBatch(pendingList.map((x) => x.id))}>
-                        确认全部 {pendingList.length} 笔
+                        确认入账
                       </button>
                       <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
                         取消
@@ -1638,7 +1660,9 @@ export default function Workbench() {
                           p.note || "",
                         ].filter(Boolean).join(" · ")}
                       >
-                        {p.category}
+                        {/* 分类是「待确认」时不当分类显示 —— 它只是"机器没判出来"，
+                            要不要给它一个分类由用户在下面那行下拉里定。 */}
+                        {isUnconfirmed(p.category) ? "分类待定" : p.category}
                         {` · ${p.date || "日期待补"}`}
                         {/* 第四段必须标出它到底是什么：报销表那一列装的是归属（部门/模块），
                             不是商户。此前不标注，界面上会显示成「−¥17.88 餐饮 · 09-28 · 后端」，
@@ -1650,6 +1674,22 @@ export default function Workbench() {
                       </span>
                     </div>
                     <div className="pd-acts">
+                      {/* 「待确认」的行：给一个分类下拉。机器没判出来的分类只有人能补 ——
+                          选了就按选的入账；不选就如实落「未分类」，绝不把占位符当分类写进账本。 */}
+                      {isUnconfirmed(p.category) && cats && (
+                        <select
+                          className="proj-pick"
+                          value={draftCategory[p.id] ?? ""}
+                          onChange={(e) => setDraftCategory((s) => ({ ...s, [p.id]: e.target.value }))}
+                          aria-label={`给「${yuan(p.amount_cents)}」这笔选一个分类`}
+                          disabled={actingIds.has(p.id)}
+                        >
+                          <option value="">选择分类…</option>
+                          {cats.expense.filter((x) => x !== cats.unconfirmed).map((x) => (
+                            <option key={x} value={x}>{x}</option>
+                          ))}
+                        </select>
+                      )}
                       <select
                         className="proj-pick"
                         value={draftProject[p.id] ?? p.project ?? ""}
@@ -1771,20 +1811,28 @@ export default function Workbench() {
             <section className="sect">
               <div className="sect-head">
                 <h3>最近事件</h3>
+                {events.length > EV_WINDOW && <span className="sect-note">滚轮可看更多</span>}
               </div>
               {events.length === 0 ? (
                 <div className="empty">账本为空——说一句记账试试</div>
               ) : (
-                events.slice(0, 12).map((ev) => (
-                  <div className="ev" key={ev.event_id}>
-                    <div>
-                      <b className={ev.type === "expense" ? "amt-out" : "amt-in"}>{yuan(ev.amount_cents)}</b>
-                      <span className="m">
-                        {ev.category || "其他"} · {CHANNEL_CN[ev.channel] ?? ev.channel} · {ev.ts.slice(0, 10)}
-                      </span>
+                /* 只露 5 条（EV_WINDOW），更多用滚轮在这个区域里看 —— 否则账本一有数据，
+                   左栏就会被这 12 条撑长，整页跟着变长（用户 2026-09-28 要求）。 */
+                <div className="ev-list">
+                  {events.slice(0, 12).map((ev) => (
+                    <div className="ev" key={ev.event_id}>
+                      <div>
+                        <b className={ev.type === "expense" ? "amt-out" : "amt-in"}>{yuan(ev.amount_cents)}</b>
+                        <span className="m">
+                          {/* 空分类如实说「未分类」，别拿「其他」冒充 —— 「其他」是个
+                              真分类，和"根本没分类"不是一回事。后端 projects.summary()
+                              也是这么归的，两处口径一致。 */}
+                          {ev.category || "未分类"} · {CHANNEL_CN[ev.channel] ?? ev.channel} · {ev.ts.slice(0, 10)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </section>
           </aside>
