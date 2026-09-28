@@ -12,7 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 _ROOT = Path(__file__).resolve().parents[1]
-from app.main import _file_stages, _merge_batches, _tick_note  # noqa: E402
+from app.main import (_file_stages, _intake_stream_events, _merge_batches,  # noqa: E402
+                      _tick_note)
 
 
 def _batch(pid, name, **kw):
@@ -276,6 +277,39 @@ def test_stream_survives_every_file_failing(monkeypatch):
     assert [e["index"] for e in failed] == [1, 2]
     assert "模型服务超时" in failed[0]["error"]
     assert events[-1]["stage"] == "all_done"          # 两个都失败，收尾照样发出来
+
+
+def test_stream_stops_remaining_files_when_the_client_disconnects(tmp_path, monkeypatch):
+    """**取消导入 = 客户端断开连接**：后面的文件一个都不许再开始（生成器是拉驱动的）。
+
+    用户 2026-09-28 的要求：「正在导入信息要增加一个取消按钮，万一导入错了，还得等
+    导入完成了才能结束」。界面上是 AbortController.abort()，服务端靠的正是这条性质 ——
+    只有消费方再要下一行，循环才往前走。这条测试就是那个承诺的钉子。
+    """
+    import app.main as main
+
+    calls: list[str] = []
+
+    def fake_ingest(data_dir, files, project_ref=None, reconcile=True, progress=None):
+        calls.append(files[0]["name"])
+        return {"batches": [{"project_name": "p", "draft_count": 0,
+                             "identified_total_cents": 0, "errors": [],
+                             "files": [{"file": files[0]["name"], "ok": True,
+                                        "amount_cents": 0}]}]}
+
+    monkeypatch.setattr(main.intake, "ingest", fake_ingest)
+    files = [{"name": f"{i}.jpg", "rel_path": f"x/{i}.jpg", "content": b"x"} for i in (1, 2, 3)]
+    gen = _intake_stream_events(files, None, False, tmp_path)
+
+    first = json.loads(next(gen))
+    assert first["stage"] == "start" and first["total"] == 3
+    assert calls == [], "还没人要下一行，就不该开始处理"
+
+    json.loads(next(gen))                 # 这一拉才真的开始处理第 1 个文件
+    assert calls == ["1.jpg"]
+
+    gen.close()                           # ≈ 浏览器 abort：不再向它要下一行
+    assert calls == ["1.jpg"], "断开之后不许再碰后面的文件（否则取消就是假的）"
 
 
 def test_tick_note_says_what_is_really_happening():

@@ -69,6 +69,10 @@ type Msg = {
   /* 这次导入的身份：进度靠它原地更新（不能靠「是不是最后一条」—— 用户在导入途中
      说话/助手回话都会让导入框不再是最后一条，旧写法会因此反复新建导入框）。 */
   importId?: string;
+  /* 这次导入还在跑（后端还在逐个文件处理）→ 框头显示「取消」。
+     取消 = 断开这条流：后面的文件不再处理；**正在读的那个会跑完**（识别在工作线程里，
+     没有中断点），所以文案必须如实说这一句，见 cancelImport。 */
+  cancellable?: boolean;
 };
 type StateT = {
   label: string;
@@ -422,6 +426,8 @@ export default function Workbench() {
   const fileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /* 正在跑的这次导入的取消句柄（一次只允许一次导入，intakeBusy 挡着） */
+  const importAbortRef = useRef<AbortController | null>(null);
 
   async function refresh() {
     try {
@@ -963,13 +969,18 @@ export default function Workbench() {
        于是每刷一次进度就**新建一个导入框**，他看到的是一模一样的导入框反复出现、
        而且把对话挤得乱七八糟。改成按 id 找到自己那一条、原地替换，位置永远不动。 */
     const importId = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    /* 取消句柄：点「取消」= abort 这条流。后端那个事件流是**拉驱动**的，断连之后
+       后面的文件一个都不会开始（后端有测试钉住这条）；正在读的那个会跑完。 */
+    const ac = new AbortController();
+    importAbortRef.current = ac;
     const blank = (): IntakeStages => ({ read: "读取中…", recognized: "—", processed: "—", how: "—" });
 
     /** 原地重画**自己这个**导入框（按 importId 找，不按位置）：文件块 + 一行当前状态。 */
     const paint = (live: string, progress = true) => {
       setMsgs((m) => {
         const msg: Msg = { role: "ai", text: live, blocks: [...blocks], progress,
-                           isImport: true, importTitle: title, importId };
+                           isImport: true, importTitle: title, importId,
+                           cancellable: progress };
         const i = m.findIndex((x) => x.importId === importId);
         if (i < 0) return [...m, msg];
         const next = [...m];
@@ -988,6 +999,7 @@ export default function Workbench() {
 
       const res = await fetch("/api/intake/stream", {
         method: "POST",
+        signal: ac.signal,
         headers: { "Content-Type": "application/json" },
         // **必须带当前选中项目**：后端归属优先级是「显式指定 > 文件夹名 > 未归」，
         // 漏传这一项时，选了项目也会被文件夹名新建一个项目盖掉（2026-09-28 真机踩到：
@@ -1055,10 +1067,30 @@ export default function Workbench() {
       paint(summary || "没有可导入的内容。", false);
       refresh();
     } catch (err) {
-      paint(`导入失败：${err instanceof Error ? err.message : String(err)}`, false);
+      if (ac.signal.aborted) {
+        /* 用户点了「取消」。三件事都要说清，别只说一句「已取消」：
+           ① 停在哪一步；② 正在读的那个**可能还会跑完**（识别在工作线程里，没有中断点，
+           承诺"立刻全停"就是骗人）；③ 已经读出来的草稿在哪、怎么丢掉。 */
+        const done = blocks.filter((b) => b.done).length;
+        // 「有文件正在读」要看**进度里有没有那个未完成的行**，不能拿 done 跟总数比 ——
+        // 请求还没轮到第一个文件时（blocks 为空）说「正在读的那个还会跑完」是句假话。
+        const inflight = blocks.some((b) => !b.done);
+        const parts = ["后面的文件不再处理"];
+        if (inflight) parts.push("正在读的那个会跑完（识别没法中途打断）");
+        if (done > 0) parts.push("已读出来的草稿留在「待确认」里，不需要的话在那里点「全部取消」");
+        paint(`已取消导入（${done}/${items.length} 个已处理完）。${parts.join("；")}。`, false);
+      } else {
+        paint(`导入失败：${err instanceof Error ? err.message : String(err)}`, false);
+      }
     } finally {
+      importAbortRef.current = null;
       setIntakeBusy(false);
     }
+  }
+
+  /** 取消导入：断开这条流 —— 后面的文件不再处理（正在读的那个会跑完，见上面的文案）。 */
+  function cancelImport() {
+    importAbortRef.current?.abort();
   }
 
   /** 输入框随内容长高：回车换行之后能看出是多行，最高约 5 行，再高就自己滚。 */
@@ -1190,7 +1222,17 @@ export default function Workbench() {
             <div className="log" ref={logRef}>
               {msgs.map((m, i) => (
                 <div key={i} className={`b ${m.role}${m.progress ? " progress" : ""}${m.isImport ? " import" : ""}`}>
-                  {m.importTitle && <div className="pb-head">{m.importTitle}</div>}
+                  {m.importTitle && (
+                    <div className="pb-head">
+                      <span className="pb-title">{m.importTitle}</span>
+                      {m.cancellable && (
+                        <button
+                          type="button" className="pb-cancel" onClick={cancelImport}
+                          title="停止导入：后面的文件不再处理；正在读的那个会跑完，已读出来的草稿留在「待确认」"
+                        >取消</button>
+                      )}
+                    </div>
+                  )}
                   {m.blocks && m.blocks.length > 0 && (
                     <div className="pb-list">
                       {m.blocks.map((b, j) => {

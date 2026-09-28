@@ -910,6 +910,76 @@ def _tick_note(name: str, prog: dict | None = None) -> str:
     return "正在识别这个文件"
 
 
+def _intake_stream_events(files: list[dict], project: str | None = None,
+                          reconcile: bool = False, data_dir: Path | None = None):
+    """逐文件推进度的事件流（NDJSON，一行一个 JSON）。**拉驱动**。
+
+    ⚠️ 抽成独立函数是为了能钉住「取消导入真的会停」这件事：
+    这个生成器只有**消费方再要下一行**时才会往前走。用户在界面上点「取消」=
+    浏览器 abort 掉这个请求 = Starlette 取消响应任务、不再向它要下一行，
+    于是**后面的文件一个都不会开始**（已实测：见 tests 里那条断开测试）。
+    但**正在读的那个文件停不下来** —— 它在工作线程里调识别，没有中断点。
+    所以界面上的取消文案必须如实写这一句，不许承诺「立刻全停」。
+    """
+    root = Path(data_dir if data_dir is not None else DATA_DIR)
+    total = len(files)
+    batches: list[dict] = []
+    for i, f in enumerate(files, 1):
+        yield json.dumps({"stage": "start", "index": i, "total": total,
+                          "file": f["name"], "rel_path": f["rel_path"]},
+                         ensure_ascii=False) + "\n"
+        t0 = time.monotonic()
+        try:
+            # 把耗时的 ingest 放进工作线程，主线程每几秒推一行心跳。
+            # 这样「进度」是真的（已等秒数），而不是预先算好的假百分比。
+            pool = ThreadPoolExecutor(max_workers=1)
+            # 子步骤进度：worker 里更新，这里的心跳循环读它（同一个 dict，无需加锁 ——
+            # CPython 下 dict.update 是原子的，最坏情况是心跳读到上一拍的数字）
+            prog: dict = {}
+            try:
+                fut = pool.submit(intake.ingest, root, [f],
+                                  project_ref=project or None,
+                                  reconcile=reconcile,
+                                  progress=lambda d, t, label: prog.update(
+                                      done=d, total=t, label=label))
+                while not fut.done():
+                    time.sleep(_INTAKE_TICK_SECONDS)
+                    if fut.done():
+                        break
+                    yield json.dumps({
+                        "stage": "tick", "index": i, "total": total,
+                        "file": f["name"],
+                        "elapsed": round(time.monotonic() - t0, 1),
+                        "note": _tick_note(f["name"], prog),
+                    }, ensure_ascii=False) + "\n"
+                out = fut.result()      # 异常在这里抛出，走下面的 file_failed，语义不变
+            finally:
+                # wait=False：用户中途关掉页面时，别让这条已经断了的请求把线程拖住
+                # （worker 会把当前这个文件跑完，不影响其他请求）
+                pool.shutdown(wait=False)
+            bs = out.get("batches") or []
+            batches += bs
+            first = bs[0] if bs else {}
+            yield json.dumps({
+                "stage": "file_done", "index": i, "total": total, "file": f["name"],
+                "project_name": first.get("project_name", ""),
+                "draft_count": first.get("draft_count", 0),
+                "identified_total_cents": first.get("identified_total_cents", 0),
+                "stages": _file_stages(f["name"], first.get("files") or [],
+                                         first.get("errors") or [],
+                                         first.get("draft_count", 0),
+                                         first.get("identified_total_cents", 0)),
+                "errors": [e.get("error", "") for e in (first.get("errors") or [])],
+            }, ensure_ascii=False) + "\n"
+        except Exception as e:  # noqa: BLE001 单个文件失败不能把整批带崩
+            yield json.dumps({"stage": "file_failed", "index": i, "total": total,
+                              "file": f["name"],
+                              "error": f"{type(e).__name__}: {str(e)[:200]}"},
+                             ensure_ascii=False) + "\n"
+    yield json.dumps({"stage": "all_done", "batches": _merge_batches(batches)},
+                     ensure_ascii=False) + "\n"
+
+
 @app.post("/api/intake/stream")
 def intake_stream(body: IntakeIn):
     """与 `/api/intake` 同一套逻辑，但**逐行推送真实进度**（NDJSON，一行一个 JSON）。
@@ -926,68 +996,11 @@ def intake_stream(body: IntakeIn):
 
     逐个文件跑而不是整批跑，是因为**报销表的双源对账是在单个表文件内部做的**，
     拆开不会破坏对账口径。进度全部来自真实处理结果，不做假进度条。
+    **取消导入**：前端 abort 这个请求即可（见 `_intake_stream_events` 的说明）。
     """
     files = _intake_decode(body)
-    total = len(files)
-
-    def gen():
-        batches: list[dict] = []
-        for i, f in enumerate(files, 1):
-            yield json.dumps({"stage": "start", "index": i, "total": total,
-                              "file": f["name"], "rel_path": f["rel_path"]},
-                             ensure_ascii=False) + "\n"
-            t0 = time.monotonic()
-            try:
-                # 把耗时的 ingest 放进工作线程，主线程每几秒推一行心跳。
-                # 这样「进度」是真的（已等秒数），而不是预先算好的假百分比。
-                pool = ThreadPoolExecutor(max_workers=1)
-                # 子步骤进度：worker 里更新，这里的心跳循环读它（同一个 dict，无需加锁 ——
-                # CPython 下 dict.update 是原子的，最坏情况是心跳读到上一拍的数字）
-                prog: dict = {}
-                try:
-                    fut = pool.submit(intake.ingest, DATA_DIR, [f],
-                                      project_ref=body.project or None,
-                                      reconcile=body.reconcile,
-                                      progress=lambda d, t, label: prog.update(
-                                          done=d, total=t, label=label))
-                    while not fut.done():
-                        time.sleep(_INTAKE_TICK_SECONDS)
-                        if fut.done():
-                            break
-                        yield json.dumps({
-                            "stage": "tick", "index": i, "total": total,
-                            "file": f["name"],
-                            "elapsed": round(time.monotonic() - t0, 1),
-                            "note": _tick_note(f["name"], prog),
-                        }, ensure_ascii=False) + "\n"
-                    out = fut.result()      # 异常在这里抛出，走下面的 file_failed，语义不变
-                finally:
-                    # wait=False：用户中途关掉页面时，别让这条已经断了的请求把线程拖住
-                    # （worker 会把当前这个文件跑完，不影响其他请求）
-                    pool.shutdown(wait=False)
-                bs = out.get("batches") or []
-                batches += bs
-                first = bs[0] if bs else {}
-                yield json.dumps({
-                    "stage": "file_done", "index": i, "total": total, "file": f["name"],
-                    "project_name": first.get("project_name", ""),
-                    "draft_count": first.get("draft_count", 0),
-                    "identified_total_cents": first.get("identified_total_cents", 0),
-                    "stages": _file_stages(f["name"], first.get("files") or [],
-                                             first.get("errors") or [],
-                                             first.get("draft_count", 0),
-                                             first.get("identified_total_cents", 0)),
-                    "errors": [e.get("error", "") for e in (first.get("errors") or [])],
-                }, ensure_ascii=False) + "\n"
-            except Exception as e:  # noqa: BLE001 单个文件失败不能把整批带崩
-                yield json.dumps({"stage": "file_failed", "index": i, "total": total,
-                                  "file": f["name"],
-                                  "error": f"{type(e).__name__}: {str(e)[:200]}"},
-                                 ensure_ascii=False) + "\n"
-        yield json.dumps({"stage": "all_done", "batches": _merge_batches(batches)},
-                         ensure_ascii=False) + "\n"
-
-    return StreamingResponse(gen(), media_type="application/x-ndjson")
+    return StreamingResponse(_intake_stream_events(files, body.project or None, body.reconcile),
+                             media_type="application/x-ndjson")
 
 
 @app.get("/api/pending")
