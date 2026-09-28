@@ -194,3 +194,18 @@ def test_creating_a_project_activates_the_new_project():
         "列表必须在设置 activeProject 之前就位，否则会被守护 effect 清掉"
     assert "refresh();" not in body, \
         "别在这里用 refresh() —— 它的列表更新晚一拍，会把刚设的项目 id 清掉"
+
+
+def test_delete_confirmation_shows_the_amount_at_risk():
+    """删除确认必须报出**将要作废多少钱**，不能只说几笔。
+
+    起因（2026-09-28 真机）：确认框只写「名下已有 17 笔账单」，用户点「连账单一起删」时
+    看不到自己正要作废掉 ¥1,643.12 —— 而这一下在界面上**没有任何撤销入口**
+    （账本是追加式、数据救得回来，但要用脚本，用户自己找不回来）。
+    """
+    src = _page_tsx()
+    assert "projAmountText" in src, "需要一个把项目金额说成人话的函数"
+    block = src[src.index('deletingId === p.id && ('):]
+    block = block[:block.index("renamingId === p.id && (")]
+    assert block.count("projAmountText(p)") >= 2, "确认框与「连账单一起删」那一条都要报金额"
+    assert "合计" in block, "要说清合计多少钱"
