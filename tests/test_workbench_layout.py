@@ -345,3 +345,25 @@ def test_import_box_can_be_cancelled_and_says_what_cancelling_really_does():
     assert 'paint(`导入失败' in src, "真正的失败仍要说成失败（取消与失败是两件事）"
     assert "pb-cancel" in _css(), "取消按钮要有样式（且用 token，不写死颜色）"
     assert "var(--brand)" in _rule(".pb-cancel:hover{")
+
+
+def test_dropped_drafts_offer_an_undo_and_the_summary_names_the_image():
+    """两件事：丢弃后面能「撤回」；汇总里说清「订单列表」是**哪张图**。
+
+    ① 用户 2026-09-28：「（已丢弃 2 笔待确认草稿，账本未变动…）这段小字是我删除记录时候的小字，
+       后面增加一个撤回按钮」—— 丢弃改成软删除（草稿进回收站），撤回只是放回来，账本不动。
+    ② 他还问：「这里订单列表指的是哪里？如果是图的话，说一下是哪个图，或者文件吧，有点莫名」
+       —— 汇总那两句必须带上**文件名**。
+    """
+    src = _page_src()
+    assert 'className="undo"' in src and "actUndo(i)" in src and "撤回" in src, (
+        "丢弃那句小字后面要有「撤回」按钮（点了调 actUndo）"
+    )
+    assert "?group=" in src and '"/api/pending/restore"' in src, "撤回要真的调到恢复端点"
+    assert "undo: done ? { group, count: done } : undefined" in src, "批量丢弃也要能撤回"
+    assert "已撤回：" in src, "撤回后要说清结果"
+    assert "账本没有动过" in src, "撤回不写账本，这句话要说出来"
+    # 汇总点名是哪张图
+    assert "（订单列表截图）里有" in src and "（订单列表截图）里还有" in src
+    assert "m.file" in src, "要带上文件名"
+    assert ".undo{" in _css() and "var(--brand)" in _rule(".undo:hover:not(:disabled){")
