@@ -236,3 +236,27 @@ def test_tick_note_says_what_is_really_happening():
     assert "图片" in _tick_note("微信图片_20260924123115.JPG")
     fallback = _tick_note("说明.unknown")
     assert "unknown" not in fallback and "正在识别" in fallback
+
+
+# ─── 前端调用链护栏（2026-09-28 真机 bug 后补）────────────────────
+
+def test_workbench_intake_request_carries_current_project():
+    """工作台调 /api/intake/stream 时必须带上当前选中项目。
+
+    这条护栏为什么存在：2026-09-28 David 在真机上选中「919 昆明项目」后拖文件夹，
+    系统却又按文件夹名新建了一个项目，草稿全落到了新项目上。根因**不在后端**——
+    `intake.ingest` 早就实现了「显式指定 > 文件夹名 > 未归」并且有单测
+    （见 test_intake.py::test_ingest_uses_explicit_project_over_folder），
+    是**前端请求体里从来没传 project 这个字段**，于是那条正确路径根本没被走到。
+    服务层测试全绿而用户路径是坏的 —— 所以这里对调用点本身下一道护栏。
+    """
+    page = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+    # 用 fetch 调用点定位：字符串 "/api/intake/stream" 在文件里出现多次（文件头的注释里也有）
+    idx = page.find('fetch("/api/intake/stream"')
+    assert idx != -1, "找不到导入端点的调用点"
+    # 取调用点后面一小段（请求体就在紧邻的几行里），确认带了 project
+    window = page[idx: idx + 700]
+    assert "JSON.stringify" in window, "导入请求体不是 JSON.stringify？"
+    assert "project: activeProject" in window, (
+        "导入请求没有带当前选中项目 —— 用户选了项目也会被文件夹名另建一个项目盖掉"
+    )

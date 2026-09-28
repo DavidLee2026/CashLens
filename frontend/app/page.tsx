@@ -758,7 +758,10 @@ export default function Workbench() {
       const res = await fetch("/api/intake/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files }),
+        // **必须带当前选中项目**：后端归属优先级是「显式指定 > 文件夹名 > 未归」，
+        // 漏传这一项时，选了项目也会被文件夹名新建一个项目盖掉（2026-09-28 真机踩到：
+        // 选了「919 昆明项目」，拖「919昆明项目发票」文件夹却又建出一个同名项目）。
+        body: JSON.stringify({ files, project: activeProject }),
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
