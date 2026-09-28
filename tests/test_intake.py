@@ -468,7 +468,9 @@ def test_list_order_without_a_voucher_becomes_a_candidate(tmp_path, monkeypatch)
                          {"at": "星期五 22:59", "amount": 0.0, "name": "东风广场金格店",
                           "status": "付款成功"}]}]
     m = _match_list_orders(items)[0]
-    assert m["matched"] == [] and len(m["unmatched"]) == 3, "这一批里没有对应的付款凭证"
+    assert m["matched"] == [] and len(m["unmatched"]) == 2, (
+        "这一批里没有对应的付款凭证；0 元那条（截图被裁）整个跳过"
+    )
 
     made = [d for d in (intake.draft_for_list_order(tmp_path, "project_a", o, "…123045.jpg")
                         for o in m["unmatched"]) if d]
