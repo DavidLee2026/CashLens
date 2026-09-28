@@ -124,28 +124,30 @@ def test_recognition_prompt_asks_for_verbatim_text_lines():
     assert "text_lines 填空数组" in src, "发票/小票那档要明确填空，避免多出一堆噪音行"
 
 
-def test_recognition_prompt_treats_payment_vouchers_as_receipts():
-    """**付款凭证要当票据看待**（2026-09-28 真机：919 昆明项目三张付款截图全被丢掉）。
+def test_recognition_prompt_classifies_page_type_and_reads_refunds():
+    """**先判「这张图是什么页面」**（2026-09-28 真机：919 昆明项目九张图暴露的三件事）。
 
-    起因：用户拖进三张「支付宝账单详情 / 打车支付成功 / 行程已结束」的截图 ——
-    图里明明有「交易成功、收单机构、收款方全称、商品说明、付款方式」，是**钱已经付出去了**的记录，
-    却被提示词当成「不是票据」→ amount 0 → 后端只能去抄文字 → 那条「纯金额行不算」的规则
-    又把主金额丢掉（图 1 一笔没列、图 2 只认 2 个数、图 3 认了 5 个数，优惠/里程/时长都算钱）。
-    现在提示词明确：这类**就是票据**，amount = **实付金额**。
+    ① 付款凭证（账单详情 / 支付成功 / 行程已结束）要当票据：amount = **实付**，
+       优惠 / 里程 / 时长不是钱（图 3 就是被认成 5 个金额）。
+    ② **没付款的不许当付款凭证**：待支付 / 预订单 / 行程预览 → amount 0（钱还没出去）。
+    ③ **订单列表不是付款凭证**：同一笔钱的另一个视角，两张都记就是记两遍
+       （实弹：「我的订单」里的 78 元 = 另一张账单详情里的 78 元）。
+    ④ **退款要单独读出来**，净额由后端减（用户口径：账单 -78.00 + 已退款 ¥6.00 → 入账 -72.00）——
+       不许让模型自己算净额，它只要把两个数读准。
+    ⑤ 商品说明之外，**页面上出现的商家名 / 小程序名也要抄进 items**
+       （否则「爱萝卜打印」这四个字进不了分类，一笔打印费会落进「待确认」）。
     """
     src = (Path(__file__).resolve().parents[1] / "engine" / "mcp" / "receipt_mcp.py").read_text(encoding="utf-8")
-    assert "付款凭证要当票据看待" in src
-    for word in ("交易成功", "支付成功", "行程已结束"):
-        assert word in src, f"要认得付款凭证的典型字样：{word}"
-    assert "实际支付的那个金额" in src, "取得是**实付**金额"
+    assert '"doc_kind"' in src and '"refund_amount"' in src, "两个字段都要在 JSON 结构里"
+    for kind in ("receipt", "payment", "unpaid", "list", "chat"):
+        assert f"`{kind}`" in src, f"doc_kind 要有这一档：{kind}"
+    assert "实际支付的那个金额" in src, "付款凭证取的是**实付**"
     assert "原价、优惠、节省、折扣、里程、时长、积分、余额、优惠券" in src, (
         "这些都不是金额（图 3 那 5 个「金额」就是优惠/里程/时长）"
     )
+    assert "退款金额" in src and "净额由后端减" in src, "退款只读出来，别让模型算净额"
+    assert "商家名 / 小程序名 / 服务名" in src, "商家/小程序名要抄进 items，分类才认得出来"
     assert "收款方全称" in src, "商户取收款方"
-    # 反向：**没付款**的东西不许当付款凭证（73_19 里的美团预订单 / 滴滴行程单就是这类）
-    assert "没付款的东西不许当成付款凭证" in src
-    assert "预订单" in src and "待支付" in src and "行程预览" in src
-    assert "amount 一律保持 0" in src
 
 
 def test_file_stages_explains_text_amount_candidates():
@@ -173,6 +175,34 @@ def test_file_stages_says_transfer_only_when_the_money_really_left():
                         [{"ok": True, "amount_cents": 0, "text_amounts": 2, "draft_count": 0,
                           "transfer_amounts": 0, "confidence": 0}], [], 0, 0)
     assert "客户付出去的钱" in none["processed"]
+
+
+def test_file_stages_explains_unpaid_list_and_refund():
+    """待支付 / 订单列表 / 全额退款 / 带退款 —— 四段里都要说得出来（不许只写「未生成草稿」）。"""
+    def st(item):
+        return _file_stages("x.jpg", [{"ok": True, "amount_cents": 0, "confidence": 0.5, **item}],
+                            [], 0, 0)
+
+    unpaid = st({"no_draft_reason": "unpaid"})
+    assert "还没付款" in unpaid["recognized"] and "钱还没出去" in unpaid["processed"]
+
+    listed = st({"no_draft_reason": "list"})
+    assert "订单列表" in listed["recognized"]
+    assert "重复" in listed["processed"], "要说清为什么不能记（会和付款详情重复）"
+    assert "付款详情" in listed["how"], "要告诉用户该用哪张"
+
+    full = st({"no_draft_reason": "fully_refunded", "gross_cents": 7800})
+    assert "全额退款" in full["recognized"] and "没有实际支出" in full["processed"]
+    assert "78.00" in full["recognized"], "实付金额要摆出来"
+
+
+def test_file_stages_shows_gross_refund_and_net_when_partially_refunded():
+    """部分退款：金额已按净额建草稿，四段里必须把 实付 / 退款 / 净额 三个数都摆出来。"""
+    st = _file_stages("x.jpg",
+                      [{"ok": True, "amount_cents": 7200, "gross_cents": 7800,
+                        "refund_cents": 600, "confidence": 0.9}], [], 1, 7200)
+    assert "78.00" in st["recognized"] and "6.00" in st["recognized"] and "72.00" in st["recognized"]
+    assert "净额" in st["processed"] and "退款" in st["how"]
 
 
 def test_file_stages_never_mentions_vendor_or_cloud_tier():

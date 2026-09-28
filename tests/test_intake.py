@@ -341,6 +341,63 @@ def test_payment_voucher_makes_exactly_one_draft(tmp_path, monkeypatch):
     assert b["text_amount_drafts"] == 0
 
 
+def test_payment_with_refund_books_the_net_amount(tmp_path, monkeypatch):
+    """账单「-78.00」+「已退款 ¥6.00」→ 入账 **-72.00**（用户 2026-09-28 口径）。
+
+    引擎层只读两个数（实付 / 退款），**减法在后端做** —— 不让模型自己算净额。
+    「爱萝卜打印」这四个字必须进 items，否则一笔打印费会落进「待确认」
+    （页面上它写在「商家小程序」那一行，不在商品说明里）。
+    """
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "doc_kind": "payment", "amount": 78.00, "refund_amount": 6.00,
+        "date": "2026-09-18", "merchant": "商户_杨甜子", "category": "其他",
+        "items": [{"name": "爱萝卜订单", "amount": 78.0}, {"name": "爱萝卜打印", "amount": 0}],
+        "note": "付款凭证", "text_lines": [], "confidence": 0.9,
+    })
+    out = intake.ingest(tmp_path, [
+        {"name": "微信图片_20260924123051.jpg", "rel_path": "919昆明项目/x.jpg", "content": b"x"},
+    ])
+    drafts = pending.list_all(tmp_path)
+    assert [d["amount_cents"] for d in drafts] == [7200], "净额 = 78.00 - 6.00"
+    assert drafts[0]["category"] == "经营", "「爱萝卜打印」→ 经营（打印）"
+    assert "78.00" in drafts[0]["note"] and "6.00" in drafts[0]["note"], (
+        "实付与退款都要留在备注里，用户才能对着账单核"
+    )
+    assert out["batches"][0]["files"][0]["refund_cents"] == 600
+
+
+def test_unpaid_list_and_full_refund_make_no_draft_but_say_which(tmp_path, monkeypatch):
+    """待支付 / 订单列表 / 全额退款 —— **都不建草稿**，但必须说清是哪一种。
+
+    实弹（2026-09-28，919 昆明项目）：
+      · 「待支付打车订单，未实际完成付款」的图，当时还从文字里挑了一条 57.70 进待确认；
+      · 「我的订单」列表里的 ¥78.0 与另一张账单详情里的 ¥78.00 是**同一笔**（爱萝卜这个平台），
+        两张都记就是记两遍。
+    不让它们建草稿**不等于**不说：`no_draft_reason` 是给界面的那句话的依据。
+    """
+    cases = [
+        ("unpaid", {"doc_kind": "unpaid", "amount": 0, "note": "待支付打车订单，未实际完成付款"},
+         "unpaid"),
+        ("list", {"doc_kind": "list", "amount": 0, "note": "不是票据，是订单列表截图"}, "list"),
+        ("fully_refunded", {"doc_kind": "payment", "amount": 78.0, "refund_amount": 78.0,
+                            "note": "当前状态 已退款"}, "fully_refunded"),
+    ]
+    for name, payload, want in cases:
+        d = tmp_path / name
+        d.mkdir()
+        monkeypatch.setattr(intake, "recognize_file", lambda p, _p=payload: {
+            "type": "expense", "date": "", "merchant": "", "category": "其他",
+            "items": [], "text_lines": [], "confidence": 0.5, **_p,
+        })
+        out = intake.ingest(d, [{"name": f"{name}.jpg", "rel_path": f"p/{name}.jpg",
+                                 "content": b"x"}])
+        assert pending.list_all(d) == [], f"{name}：不该建草稿"
+        assert out["batches"][0]["files"][0]["no_draft_reason"] == want, (
+            f"{name}：要如实标出是哪种，界面才说得清为什么没记"
+        )
+        assert out["batches"][0]["draft_count"] == 0
+
+
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
     """有票面金额的图照旧走原路：不许因为图里同时有别的数字就多建候选草稿。"""
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
