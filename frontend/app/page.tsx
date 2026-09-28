@@ -765,7 +765,15 @@ export default function Workbench() {
     setNameText("");
   }
 
-  /** 新建项目：只写后端映射表（账本只存稳定 id），建完刷新左侧面板。 */
+  /** 新建项目：只写后端映射表（账本只存稳定 id），建完刷新左侧面板，并**切到这个新项目**。
+   *
+   *  为什么要切（用户 2026-09-28）：建项目的下一步一定是往里面记东西；建完还停在
+   *  「总账户」等于白建 —— 用户得再手动点一下新项目才生效。
+   *
+   *  ⚠️ 顺序有坑：上面有一条「activeProject 不在项目列表里就清空」的守护 effect，
+   *  先 setActiveProject(新 id) 再去 refresh()，会被它判成"不存在的项目"立刻清掉。
+   *  所以必须**先把含新项目的列表取回来**，再与 activeProject 在同一次更新里提交。
+   */
   async function createProject() {
     const name = newProjName.trim();
     if (!name) {
@@ -773,15 +781,18 @@ export default function Workbench() {
       return;
     }
     try {
-      await j<{ ok: boolean }>("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      setProjMsg(`已新建「${name}」。记账时说一句就能归到它下面。`);
+      const res = await j<{ ok: boolean; project?: { id: string; name: string } }>(
+        "/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+      const view = await j<ProjectsView>("/api/projects");
+      setProjView(view);
+      setActiveProject(res.project?.id ?? "");
+      setProjMsg(`已新建「${name}」并切到它 —— 接下来的记账与导入都会先归到这里。`);
       setCreatingProj(false);
       setNewProjName("");
-      refresh();
     } catch {
       setProjMsg("新建失败：请确认后端在运行。");
     }
