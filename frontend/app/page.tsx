@@ -17,9 +17,43 @@ function accountTotals(v: ProjectsView | null) {
 type IntakeStages = { read: string; recognized: string; processed: string; how: string };
 /** 对话里的一块进度：一个文件 + 它的四个阶段。 */
 type ProgressBlock = { file: string; done: boolean; stages: IntakeStages };
+/** 决策闸门（四态沿用状态引擎规格） */
+type DecisionCheck = {
+  name: string;
+  status: "satisfied" | "uncertain" | "missing" | "misconception";
+  reason: string;
+  action: string;
+};
+/** 接单决策结果：**数值全部由后端确定性计算给出**，前端只负责展示，不做任何再计算。 */
+type DecisionView = {
+  decision: "接" | "不接" | "再考虑";
+  headline: string;
+  reasons: { text: string; evidence?: { kind?: string; event_ids?: string[] } }[];
+  min_price_cents: number | null;
+  quote: {
+    floor_cents: number | null; recommend_cents: number | null; ceiling_cents: number | null;
+    breakdown: {
+      formula: string; markup_note: string; historical_hourly_cents: number | null;
+      estimated_hours: number; tax_rate: number; platform_rate: number;
+    };
+  };
+  hourly: { historical_cents: number | null; this_order_cents: number | null;
+            basis: string; sample_orders: number };
+  checks: DecisionCheck[];
+  risk: string;
+  as_of: string;
+  disclaimer: string;
+};
+const CHECK_LABELS: Record<string, string> = {
+  cash_runway: "现金流垫底", receivable_cycle: "回款周期", after_tax: "税后到手",
+};
+const STATUS_LABELS: Record<string, string> = {
+  satisfied: "通过", uncertain: "不确定", missing: "不达标", misconception: "假设不符",
+};
 type Msg = {
   role: "user" | "ai"; text: string; pending?: PendingDraft[];
   progress?: boolean; blocks?: ProgressBlock[];
+  decision?: DecisionView;
 };
 type StateT = {
   label: string;
@@ -114,7 +148,11 @@ type IntakeResult = {
   errors: { file?: string; error: string }[];
   draft_total_cents: number;
 };
-type ChatReply = { ok: boolean; text: string; session_id?: string; pending?: PendingDraft[] };
+type ChatReply = {
+  ok: boolean; text: string; session_id?: string; pending?: PendingDraft[];
+  /** 走真决策时后端会带回结构化结果，前端渲染成决策卡（文案不再由模型复述） */
+  decision?: DecisionView;
+};
 type ModelTier = {
   id: "cloud" | "local" | "none";
   label: string;
@@ -822,7 +860,7 @@ export default function Workbench() {
       if (r.session_id && typeof window !== "undefined") {
         window.localStorage.setItem("cl_session_v2", r.session_id);
       }
-      setMsgs((m) => [...m, { role: "ai", text: r.text, pending: r.pending }]);
+      setMsgs((m) => [...m, { role: "ai", text: r.text, pending: r.pending, decision: r.decision }]);
     } catch {
       setMsgs((m) => [...m, { role: "ai", text: "连不上本地后端：请先运行 cd backend && python3 -m uvicorn app.main:app --port 8001。" }]);
       setApiOk(false);
@@ -935,7 +973,58 @@ export default function Workbench() {
                       ))}
                     </div>
                   )}
-                  {m.text}
+                  {/* 决策卡：数值全部来自后端确定性计算，前端只展示、不再算一遍 */}
+                  {m.decision ? (
+                    <div className={`dc ${m.decision.decision === "接" ? "ok" : m.decision.decision === "不接" ? "no" : "hold"}`}>
+                      <div className="dc-top">
+                        <span className="dc-verdict">{m.decision.decision}</span>
+                        <span className="dc-head">{m.decision.headline}</span>
+                      </div>
+                      <div className="dc-nums">
+                        <span className="dc-num">
+                          <b>{m.decision.hourly.this_order_cents === null ? "—" : yuan(m.decision.hourly.this_order_cents)}</b>
+                          <em>这单等效时薪</em>
+                        </span>
+                        <span className="dc-num">
+                          <b>{m.decision.hourly.historical_cents === null ? "算不出" : yuan(m.decision.hourly.historical_cents)}</b>
+                          <em>你的历史时薪</em>
+                        </span>
+                        <span className="dc-num">
+                          <b>{m.decision.quote.floor_cents === null ? "—" : yuan(m.decision.quote.floor_cents)}</b>
+                          <em>报价下限</em>
+                        </span>
+                        <span className="dc-num">
+                          <b>{m.decision.quote.recommend_cents === null ? "—" : yuan(m.decision.quote.recommend_cents)}</b>
+                          <em>建议报价</em>
+                        </span>
+                      </div>
+                      {m.decision.reasons.filter((r) => r.text !== m.decision?.headline).length > 0 && (
+                        <div className="dc-reasons">
+                          {m.decision.reasons
+                            .filter((r) => r.text !== m.decision?.headline)
+                            .slice(0, 3)
+                            .map((r, k) => <div className="dc-reason" key={k}>· {r.text}</div>)}
+                        </div>
+                      )}
+                      <div className="dc-checks">
+                        {m.decision.checks.map((c) => (
+                          <div className={`dc-chk s-${c.status}`} key={c.name}>
+                            <span className="dc-chk-name">{CHECK_LABELS[c.name] || c.name}</span>
+                            <span className="dc-chk-st">{STATUS_LABELS[c.status] || c.status}</span>
+                            <span className="dc-chk-reason">{c.reason}{c.action ? ` → ${c.action}` : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="dc-risk">主要风险：{m.decision.risk}</div>
+                      <div className="dc-basis">
+                        时薪口径：{m.decision.hourly.basis}。下限公式：{m.decision.quote.breakdown.formula}
+                        （{m.decision.quote.breakdown.markup_note}）
+                      </div>
+                      <div className="dc-foot">{m.decision.disclaimer}</div>
+                    </div>
+                  ) : (
+                    m.text
+                  )}
                   {m.pending && m.pending.length > 0 && (
                     <div className="acts">
                       {m.pending.map((p) => (

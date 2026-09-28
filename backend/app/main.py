@@ -24,7 +24,8 @@ from pydantic import BaseModel, Field
 from .services import (categories, intake, invoice_tax, llm_skill, model_config,
                        parser_rule, pending, projects, query_tools, session_mem,
                        timesheet)
-from .services.state_engine import EventLedger, Projection, calc, make_event, run_state
+from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
+                                    make_event, run_state)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.environ.get("CASH_DATA_DIR", str(REPO_ROOT / "data")))
@@ -59,6 +60,9 @@ class EventIn(BaseModel):
     confirmed: bool = False
     project: str = ""
     invoice_no: str = ""
+    hours: float | None = Field(default=None, gt=0)
+    """这笔投入了多少小时（可选）。**决策引擎靠它反推你的历史时薪**：不填就永远算不出时薪，
+    缺数据时决策会如实说 insufficient，而不是拿默认值凑（2026-09-28 加）。"""
 
 
 @app.get("/api/health")
@@ -75,13 +79,19 @@ def add_event(ev: EventIn):
     ts = datetime.fromisoformat(ev.ts) if ev.ts else datetime.now()
     pid, project_hint = projects.resolve_incoming(DATA_DIR, ev.project)
     invoice_no = str(ev.invoice_no or "").strip()
+    # hours 与 invoice_no 一样走 extra 透传（账本 schema 不动，向后兼容 v3 旧事件）
+    extra: dict = {}
+    if invoice_no:
+        extra["invoice_no"] = invoice_no
+    if ev.hours:
+        extra["hours"] = float(ev.hours)
     try:
         event = make_event(
             ts=ts, event_type=ev.event_type, amount_cents=ev.amount_cents,
             evidence_kind=ev.evidence_kind, channel=ev.channel, category=ev.category,
             counterparty=ev.counterparty, note=ev.note, confirmed=ev.confirmed,
             project=pid,
-            extra={"invoice_no": invoice_no} if invoice_no else None,
+            extra=extra or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -271,12 +281,34 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
         return {"text": query_tools.recent_events_text(evs, limit=limit),
                 "payload": {"recent": list(reversed(evs))[:limit]}}
 
+    def h_decision(evs, act):
+        """接单决策：数值与文案都由确定性引擎给出，**不让 LLM 复述或重算数字**。"""
+        order = {
+            "amount_cents": int(act.get("amount_cents") or 0),
+            "estimated_hours": float(act.get("estimated_hours") or 0),
+            "deliver_days": act.get("deliver_days"),
+            "counterparty": str(act.get("counterparty") or ""),
+            "tax_rate": act.get("tax_rate"),
+            "platform_rate": act.get("platform_rate"),
+        }
+        out = decision_engine.decide(evs, order)
+        lines = [f"{out['decision']}｜{out['headline']}"]
+        lines += [f"· {r['text']}" for r in out["reasons"][:3]]
+        if out["min_price_cents"]:
+            lines.append(f"· 报价下限 {_yuan(out['min_price_cents'])}；"
+                         f"推荐 {_yuan(out['quote']['recommend_cents'])}、"
+                         f"上限 {_yuan(out['quote']['ceiling_cents'])}")
+        lines.append(f"· 主要风险：{out['risk']}")
+        lines.append(out["disclaimer"])
+        return {"text": "\n".join(lines), "payload": {"decision": out}}
+
     handlers = {
         "ask_cashflow": h_cashflow,
         "ask_latest_income": h_latest_income,
         "ask_latest_expense": h_latest_expense,
         "ask_spending": h_spending,
         "ask_recent": h_recent,
+        "ask_decision": h_decision,
     }
     parts: list[str] = []
     results: list[dict] = []
@@ -309,7 +341,45 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
             out = handlers[kind](events, a)
             parts.append(out["text"])
             results.append({"action": kind, "data": out["payload"]})
-    return {"parts": parts, "executed": executed, "results": results, "drafts": drafts}
+    # 决策类结果单独拎出来给前端渲染决策卡（其余查询结果不额外透出）
+    decision_payload = next(
+        (r["data"]["decision"] for r in results
+         if r.get("action") == "ask_decision"
+         and isinstance(r.get("data"), dict) and "decision" in r["data"]),
+        None,
+    )
+    return {"parts": parts, "executed": executed, "results": results, "drafts": drafts,
+            "decision": decision_payload}
+
+
+class DecisionIn(BaseModel):
+    """一笔潜在订单（接单决策的输入）。
+
+    `estimated_hours` 是**必填**且不接受默认值：没有工时就算不出等效时薪，我们不猜
+    （设计与 golden case 见 `00-总览/决策引擎最小版-问题分析与golden-case-20260912.md`）。
+    """
+
+    amount_cents: int = Field(gt=0)
+    estimated_hours: float = Field(gt=0)
+    deliver_days: int | None = None
+    counterparty: str = ""
+    tax_rate: float | None = Field(default=None, ge=0, lt=1)
+    platform_rate: float | None = Field(default=None, ge=0, lt=1)
+    note: str = ""
+
+
+@app.post("/api/decision")
+def decision(body: DecisionIn):
+    """接单决策：这单接不接、报价下限是多少（确定性计算 + 可溯源理由）。
+
+    口径纪律：
+    - 数值全部来自本地账本与状态引擎，**LLM 不参与任何数值**；
+    - 历史时薪由账本反推（中位数 ÷ 总工时），**不需要用户填时薪**；
+    - 缺「带工时的收入记录」时如实返回 `hourly.basis=insufficient`，**不给**假装精确的报价下限；
+    - 引用预测必标注代理口径（账本里没有「当前余额」这个量）。
+    """
+    order = body.model_dump()
+    return decision_engine.decide(_events(), order)
 
 
 @app.get("/api/capabilities")
@@ -814,14 +884,19 @@ def chat(body: ChatIn):
         if parsed is not None:
             run = _run_actions(parsed, body.text, body.project)
             if run["executed"]:
-                results_json = json.dumps(run["results"], ensure_ascii=False, default=str)[:2200]
-                final = ""
-                try:
-                    final = llm_skill.compose_reply(body.text, results_json)
-                except Exception:
-                    final = ""
-                if not final or len(final) < 8:
+                if run.get("decision"):
+                    # 决策类：文案直接用确定性引擎产出的那句，**不经过 compose_reply**
+                    # —— 数字不许被 LLM 复述或重算（红线：宁可说不知道，绝不编造结论）。
                     final = "\n".join(run["parts"])
+                else:
+                    results_json = json.dumps(run["results"], ensure_ascii=False, default=str)[:2200]
+                    final = ""
+                    try:
+                        final = llm_skill.compose_reply(body.text, results_json)
+                    except Exception:
+                        final = ""
+                    if not final or len(final) < 8:
+                        final = "\n".join(run["parts"])
                 # 查询答复要如实标注口径范围（查询始终是全账本，不跟随选中项目）
                 if any(str(x.get("action", "")).startswith("ask_") for x in run["results"]):
                     note = _scope_note(body.project)
@@ -830,12 +905,15 @@ def chat(body: ChatIn):
             else:
                 final = str(parsed.get("reply", "")).strip() or "我还在学习这句怎么接——可以记一笔账，或问我最近流水 / 现金流。"
             session_mem.add_turn(sid, body.text, final, result_note=final[:120])
-            return {"ok": True, "text": final, "session_id": sid,
-                    "pending": [{"id": d["id"], "direction": d["direction"],
-                                 "amount_cents": d["amount_cents"], "category": d["category"],
-                                 "channel": d["channel"], "project": d.get("project", ""),
-                                 "project_name": _project_label(d.get("project", ""))}
-                                for d in run["drafts"]]}
+            out = {"ok": True, "text": final, "session_id": sid,
+                   "pending": [{"id": d["id"], "direction": d["direction"],
+                                "amount_cents": d["amount_cents"], "category": d["category"],
+                                "channel": d["channel"], "project": d.get("project", ""),
+                                "project_name": _project_label(d.get("project", ""))}
+                               for d in run["drafts"]]}
+            if run.get("decision"):
+                out["decision"] = run["decision"]
+            return out
 
     r = _rule_reply(body.text, body.project)
     session_mem.add_turn(sid, body.text, r.get("text", ""))
