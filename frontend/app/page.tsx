@@ -756,6 +756,21 @@ export default function Workbench() {
     }
   }
 
+  /** 清空「未归项目」名下的账。
+   *  它不是项目、删不掉（那些事件的 project 本来就是空），所以唯一有意义的动作是**作废**。
+   *  走的是同一个 DELETE 端点，用 unassigned 哨兵值（与详情端点同一套约定）。 */
+  async function voidUnassigned() {
+    try {
+      const res = await j<{ ok: boolean; voided_count: number; note?: string }>(
+        "/api/projects/unassigned?with_data=true", { method: "DELETE" });
+      setProjMsg(res.note || `已作废 ${res.voided_count} 笔。`);
+      setDeletingId("");
+      refresh();
+    } catch {
+      setProjMsg("清理失败：请确认后端在运行。");
+    }
+  }
+
   /** 删除项目：两种口径由用户自己选（只删项目 / 连同账单一起删）。
    *  账本是追加式的，所以「一起删」在后端是追加一条作废记录，不是重写历史。 */
   async function deleteProject(id: string, withData: boolean, name: string) {
@@ -1614,28 +1629,70 @@ export default function Workbench() {
                     </div>
                   ))}
                   {projView.unassigned.count > 0 && (
-                    /* 「未归项目」不是一个项目文件，只是"没指定项目"的那个桶 ——
-                       所以没有 ⋯（改名）也没有 ×（删除）。但**可以点开看明细**：
-                       后端 `projects.detail` 本来就支持 unassigned 哨兵值。
-                       2026-09-28 用户反馈「未归项目无法点击修改或者删除」——
-                       这里补上能点什么、并用 title 说明为什么没有改名/删除。 */
-                    <div className="ev">
-                      <div
-                        className="ev-pick"
-                        role="button"
-                        tabIndex={0}
-                        title="未归项目是兜底账户：新账没指定项目就进这里。它不是一个项目，所以不能改名或删除；点一下看它名下的明细。"
-                        onClick={() => openDetail("unassigned")}
-                        onKeyDown={(e) => { if (e.key === "Enter") openDetail("unassigned"); }}
-                        aria-label="查看「未归项目」的明细"
-                      >
-                        <b>{projView.unassigned.name}</b>
-                        <span className="m">
-                          支出 {yuan(projView.unassigned.expense_cents)} · {projView.unassigned.count} 笔，还没归项目
-                          <span className="pick-hint"> · 点开明细</span>
-                        </span>
+                    /* 「未归项目」是**兜底账户**（project 为空），不是一个项目行：
+                       没有可删的行（删了它，那些事件下一秒还在它名下），所以这里给的是
+                       **清空它名下的账**。可以点开明细，也可以清空。
+                       2026-09-28 用户两次反馈后才补全这个入口。 */
+                    <>
+                      <div className="ev">
+                        <div
+                          className="ev-pick"
+                          role="button"
+                          tabIndex={0}
+                          title="未归项目是兜底账户：新账没指定项目就进这里。它不是一个项目，所以不能改名或删除；点一下看它名下的明细。"
+                          onClick={() => openDetail("unassigned")}
+                          onKeyDown={(e) => { if (e.key === "Enter") openDetail("unassigned"); }}
+                          aria-label="查看「未归项目」的明细"
+                        >
+                          <b>{projView.unassigned.name}</b>
+                          <span className="m">
+                            支出 {yuan(projView.unassigned.expense_cents)}
+                            {projView.unassigned.income_cents > 0 && ` · 收入 ${yuan(projView.unassigned.income_cents)}`}
+                            {` · ${projView.unassigned.count} 笔，还没归项目`}
+                            <span className="pick-hint"> · 点开明细</span>
+                          </span>
+                        </div>
+                        <div className="ev-acts">
+                          <button
+                            type="button"
+                            className="btn-x"
+                            title="清空「未归项目」名下的账（它不是项目，删不掉；这里作废它名下的账）"
+                            aria-label="清空「未归项目」名下的账"
+                            aria-expanded={deletingId === "unassigned"}
+                            onClick={() => {
+                              setDeletingId(deletingId === "unassigned" ? "" : "unassigned");
+                              setRenamingId("");
+                              setProjMenuId("");
+                              setProjMsg("");
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                      {deletingId === "unassigned" && (
+                        <div className="proj-pop row">
+                          <div className="proj-del">
+                            <div className="pd-title">
+                              清理「未归项目」名下的账？
+                              {`它名下现有 ${projView.unassigned.count} 笔，合计支出 ${yuan(projView.unassigned.expense_cents)}。`}
+                            </div>
+                            <div className="pd-opt">
+                              <button className="btn-mini danger" onClick={voidUnassigned}>
+                                把这 {projView.unassigned.count} 笔作废
+                              </button>
+                              <span>
+                                未归项目是兜底账户、删不掉（删了它，这些账下一秒还是回到它名下）；
+                                这里能做的是把这些账作废 —— 账本里留痕、可追溯。
+                              </span>
+                            </div>
+                            <div className="pd-opt">
+                              <button className="btn-mini" onClick={() => setDeletingId("")}>取消</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                   {projView.naming_hint && <div className="fc-note">{projView.naming_hint}</div>}
                 </>
