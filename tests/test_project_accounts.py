@@ -270,3 +270,49 @@ def test_operation_prompt_has_the_identity_rule_and_no_stale_login_claim():
     assert "我是谁" in p, "要有身份问题的处理规则"
     assert "不要编一个名字" in p, "没有名字时必须说不知道，不许编"
     assert "不要把这类说明念给用户听" in p, "免责话术只作内部约束，不许写进回复"
+
+
+# ─── 「未归项目」的清理入口（2026-09-28 用户两次反馈）───
+
+def test_unassigned_has_no_project_row_but_its_bills_can_be_voided(temp_data):
+    """「未归项目」不是项目：删不掉，但它名下的账可以作废。
+
+    起因：用户先问「未归项目无法点击修改或者删除」，补了「点开明细」之后又问「我无法删除」。
+    事实是它**没有可删的行**（那些事件的 project 本来就是空；硬删了它，下一秒它们还在它名下），
+    所以唯一有意义的动作是**把名下的账作废** —— 这正是用户想要的。
+    端点用 `unassigned` 哨兵值（与 `GET .../detail` 同一套约定）。
+    """
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    client = TestClient(main.app)
+
+    # 两笔未归（project=""）+ 一笔属于某个项目
+    pid = projects.create(temp_data, "某项目")["id"]
+    for amt, proj in ((2800, ""), (3500, ""), (9900, pid)):
+        d = pending.create(temp_data, direction="expense", amount_cents=amt,
+                           category="交通", channel="manual", note="x", project=proj)
+        client.post(f"/api/pending/{d['id']}/accept", json={})
+
+    # ① 「只删项目」对未归项目没有意义 → 说清楚为什么，而不是假装删成功
+    r = client.delete("/api/projects/unassigned?with_data=false")
+    assert r.status_code == 400
+    assert "兜底账户" in r.json()["detail"] and "不是一个项目" in r.json()["detail"]
+
+    # ② 清理它名下的账 → 只动作废 project="" 的那两笔，别动别人
+    r = client.delete("/api/projects/unassigned?with_data=true")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["action"] == "voided_unassigned"
+    assert body["bill_count"] == 2 and body["voided_count"] == 2
+    assert "可追溯" in body["note"]
+
+    live = main.EventLedger(main.LEDGER_PATH).load()
+    live_exp = [e for e in live if e["type"] == "expense"]
+    assert len(live_exp) == 1, "只应剩下那个属于某项目的一笔"
+    assert live_exp[0]["project"] == pid and live_exp[0]["amount_cents"] == 9900
+
+    # ③ 未归项目自己还在（它是兜底账户，永远在）
+    view = client.get("/api/projects").json()
+    assert view["unassigned"]["count"] == 0

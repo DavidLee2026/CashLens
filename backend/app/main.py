@@ -570,6 +570,38 @@ def projects_delete(pid: str, with_data: bool = False):
 
     已删除的项目不再出现在清单里，也不再参与入账归属（避免新账记进已删项目）。
     """
+    # 「未归项目」是**兜底账户**（project 为空）而不是一个项目行 ——
+    # 它没有可"删除"的东西：`mark_deleted` 无从下手，而且就算硬把它从清单里去掉，
+    # 那些 project 为空的事件下一秒还是显示在「未归项目」下面。所以对它唯一有意义的
+    # 动作是**把它名下的账作废**。
+    # 起因（2026-09-28 用户两次反馈）：先问「未归项目无法点击修改或者删除」，
+    # 补了「点开明细」之后又问「我无法删除」—— 他要的是能把里面的账清掉。
+    if str(pid).strip() in ("unassigned", projects.UNASSIGNED_LABEL, "-"):
+        uids = projects.event_ids_of(_events(), "")
+        if not with_data:
+            raise HTTPException(status_code=400, detail=(
+                f"「{projects.UNASSIGNED_LABEL}」是兜底账户、不是一个项目，没有可删的项目行；"
+                f"它名下现有 {len(uids)} 笔。要清理它名下的账，请用 with_data=true"
+                f"（把这 {len(uids)} 笔作废）。"))
+        uvoided = 0
+        if uids:
+            uvoided = EventLedger(LEDGER_PATH).append_void(
+                uids, reason=f"清理「{projects.UNASSIGNED_LABEL}」名下的账（用户主动作废）",
+                project="")["voided"]
+            uproj = Projection(DB_PATH)
+            uproj.rebuild(EventLedger(LEDGER_PATH).load())
+            uproj.close()
+        return {
+            "ok": True,
+            "action": "voided_unassigned",
+            "project": None,
+            "bill_count": len(uids),
+            "voided_count": uvoided,
+            "note": (f"「{projects.UNASSIGNED_LABEL}」名下的 {uvoided} 笔已作废，界面与统计都不再计入"
+                     f"（账本里留痕，可追溯）。未归项目本身是兜底账户、删不掉 —— "
+                     f"以后没指定项目的新账还会进这里。"),
+        }
+
     target = projects.resolve(DATA_DIR, pid)
     if target is None:
         raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
