@@ -62,6 +62,30 @@ type ProjectsView = {
 
 /** 拖进来的文件（rel_path 保留文件夹层级，第一层目录名就是项目名） */
 type FileItem = { name: string; rel_path: string; file: File };
+/** 项目详情（GET /api/projects/{id}/detail）：弹窗用；数字口径与左栏总览一致（同一套去重）。 */
+type DetailCat = { category: string; amount_cents: number; count: number };
+type DetailRow = { event_id: string; date: string; type: string; amount_cents: number;
+                   category: string; counterparty: string; note: string; evidence: string };
+type DetailInvoice = { invoice_no: string; amount_cents: number; date: string };
+type ProjectDetail = {
+  ok: boolean;
+  project: { id: string; name: string; named: boolean; created: string };
+  totals: { income_cents: number; expense_cents: number; net_cents: number;
+            income_count: number; expense_count: number; count: number };
+  expense_by_category: DetailCat[];
+  income_by_category: DetailCat[];
+  reimbursement: {
+    expense_total_cents: number; expense_count: number; invoice_count: number;
+    invoices: DetailInvoice[];
+    duplicate_count: number;
+    duplicates: (DetailInvoice & { reason: string })[];
+    no_duplicate: boolean;
+  };
+  recent: DetailRow[];
+  range: { first_date: string; last_date: string };
+  dedupe_basis: string;
+  disclaimer: string;
+};
 /** 浏览器拖放时拿到的文件系统条目（webkitGetAsEntry 未进标准类型，故自定义） */
 type FsEntry = {
   isFile: boolean;
@@ -263,6 +287,13 @@ export default function Workbench() {
   /* 确认草稿时逐笔挑的项目（草稿 id → 项目 id/名字）。归属是逐笔属性，不是会话属性：
      这次说本月报销、下一句说三个月后回款，必须在确认那一刻能分开。 */
   const [draftProject, setDraftProject] = useState<Record<string, string>>({});
+  /* 项目行的「⋯」菜单开着哪一个；项目详情弹窗（改名 / 详情 两个分支，David 2026-09-26） */
+  const [projMenuId, setProjMenuId] = useState("");
+  const [detailId, setDetailId] = useState("");
+  const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  /* 详情读取失败也要说清楚：错误提示必须显示在弹窗内——写进左栏 projMsg 会被遮罩挡着，用户只看到空白卡片 */
+  const [detailErr, setDetailErr] = useState("");
   // 选中的项目被删掉之后，别让"当前项目"指向一个不存在的 id
   useEffect(() => {
     if (!activeProject || !projView) return;
@@ -467,6 +498,22 @@ export default function Workbench() {
   }, [msgs]);
 
   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
+
+  /** 打开项目详情弹窗：拉这个项目的明细（合计 / 构成 / 报销与发票 / 最近记录）。 */
+  async function openDetail(pid: string) {
+    setDetailId(pid);
+    setDetail(null);
+    setDetailErr("");
+    setDetailBusy(true);
+    setProjMenuId("");
+    try {
+      setDetail(await j<ProjectDetail>(`/api/projects/${encodeURIComponent(pid)}/detail`));
+    } catch {
+      setDetailErr("详情读取失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
+    } finally {
+      setDetailBusy(false);
+    }
+  }
 
   async function act(p: PendingDraft, acceptIt: boolean) {
     if (actingIds.has(p.id)) return; // 防连点：处理中不可重复提交
@@ -1191,8 +1238,9 @@ export default function Workbench() {
                           type="button"
                           className="ev-pick"
                           onClick={() => setActiveProject(p.id)}
+                          onDoubleClick={() => openDetail(p.id)}
                           aria-pressed={activeProject === p.id}
-                          title="选它＝新账默认记到这个项目"
+                          title="点一下＝设为当前项目；双击＝看这个项目的详情"
                         >
                           <b>{p.name}</b>
                           <span className="m">
@@ -1201,16 +1249,47 @@ export default function Workbench() {
                           {!p.named && <span className="m">默认名，建议改成这个项目的完整名称</span>}
                         </button>
                         <div className="ev-acts">
+                          {/* 三个点：改名 / 详情 两个分支（David 2026-09-26；原来的"改名"按钮撤掉） */}
                           <button
-                            className="btn-mini"
-                            onClick={() => {
-                              setRenamingId(p.id);
-                              setRenameText(p.name);
+                            type="button"
+                            className="btn-dots"
+                            title="改名 / 详情"
+                            aria-label={`「${p.name}」的操作：改名、详情`}
+                            aria-haspopup="menu"
+                            aria-expanded={projMenuId === p.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setProjMenuId(projMenuId === p.id ? "" : p.id);
+                              setRenamingId("");
+                              setDeletingId("");
                               setProjMsg("");
                             }}
                           >
-                            改名
+                            ⋯
                           </button>
+                          {projMenuId === p.id && (
+                            <div className="proj-menu" role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setProjMenuId("");
+                                  setRenamingId(p.id);
+                                  setRenameText(p.name);
+                                  setProjMsg("");
+                                }}
+                              >
+                                改名
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => { setProjMenuId(""); openDetail(p.id); }}
+                              >
+                                详情
+                              </button>
+                            </div>
+                          )}
                           <button
                             className="btn-x"
                             title="删除项目"
@@ -1219,6 +1298,7 @@ export default function Workbench() {
                             onClick={() => {
                               setDeletingId(deletingId === p.id ? "" : p.id);
                               setRenamingId("");
+                              setProjMenuId("");
                               setProjMsg("");
                             }}
                           >
@@ -1408,6 +1488,108 @@ export default function Workbench() {
         </p>
       </div>
 
+      {/* 项目详情弹窗：双击项目行，或 ⋯ → 详情（David 2026-09-26）。
+          数字口径与左栏总览一致（后端复用同一套按项目归集 + 发票去重）。 */}
+      {detailId && (
+        <div className="modal-mask" role="dialog" aria-modal="true" aria-label="项目详情"
+             onClick={() => setDetailId("")}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <b>{detail?.project.name ?? "项目详情"}</b>
+              <button className="btn-x" title="关闭" aria-label="关闭" onClick={() => setDetailId("")}>×</button>
+            </div>
+            {detailBusy && <div className="hint">读取中…</div>}
+            {detailErr && !detailBusy && <div className="hint err">{detailErr}</div>}
+            {detail && !detailBusy && (
+              <div className="dt">
+                <div className="dt-kpis">
+                  <div className="dt-kpi">
+                    <span className="v">{yuan(detail.totals.income_cents)}</span>
+                    <span className="k">收入 · {detail.totals.income_count} 笔</span>
+                  </div>
+                  <div className="dt-kpi">
+                    <span className="v">{yuan(detail.totals.expense_cents)}</span>
+                    <span className="k">成本 / 支出 · {detail.totals.expense_count} 笔</span>
+                  </div>
+                  <div className="dt-kpi">
+                    <span className="v">{yuan(detail.totals.net_cents)}</span>
+                    <span className="k">净额</span>
+                  </div>
+                </div>
+                <div className="dt-meta">
+                  创建于 {detail.project.created ? detail.project.created.slice(0, 10) : "—"}
+                  {detail.range.first_date
+                    ? ` · 记录区间 ${detail.range.first_date} ~ ${detail.range.last_date}`
+                    : " · 还没有账本记录"}
+                </div>
+
+                <h4 className="dt-h">支出构成（按分类）</h4>
+                {detail.expense_by_category.length === 0
+                  ? <div className="dt-empty">还没有支出记录</div>
+                  : detail.expense_by_category.map((c) => (
+                      <div className="dt-row" key={c.category}>
+                        <span className="dt-name">{c.category}</span>
+                        <span className="dt-track">
+                          <i style={{ width: `${Math.max(4, Math.round(c.amount_cents / detail.expense_by_category[0].amount_cents * 100))}%` }} />
+                        </span>
+                        <span className="dt-amt">{yuan(c.amount_cents)}<em>{c.count} 笔</em></span>
+                      </div>
+                    ))}
+
+                <h4 className="dt-h">收入构成（按分类）</h4>
+                {detail.income_by_category.length === 0
+                  ? <div className="dt-empty">还没有收入记录</div>
+                  : detail.income_by_category.map((c) => (
+                      <div className="dt-row" key={c.category}>
+                        <span className="dt-name">{c.category}</span>
+                        <span className="dt-track">
+                          <i style={{ width: `${Math.max(4, Math.round(c.amount_cents / detail.income_by_category[0].amount_cents * 100))}%` }} />
+                        </span>
+                        <span className="dt-amt">{yuan(c.amount_cents)}<em>{c.count} 笔</em></span>
+                      </div>
+                    ))}
+
+                <h4 className="dt-h">报销与发票</h4>
+                <div className="dt-note">
+                  支出合计 {yuan(detail.reimbursement.expense_total_cents)}、{detail.reimbursement.expense_count} 笔；
+                  其中 {detail.reimbursement.invoice_count} 张带发票号码。
+                  {detail.reimbursement.no_duplicate
+                    ? "未发现同号重复。"
+                    : `发现 ${detail.reimbursement.duplicate_count} 笔同号重复，已从合计中剔除（列在下方）。`}
+                </div>
+                {detail.reimbursement.invoices.map((v) => (
+                  <div className="dt-row slim" key={v.invoice_no}>
+                    <span className="dt-name mono">{v.invoice_no}</span>
+                    <span className="dt-amt">{yuan(v.amount_cents)}<em>{v.date}</em></span>
+                  </div>
+                ))}
+                {detail.reimbursement.duplicates.map((d) => (
+                  <div className="dt-row slim dup" key={`${d.invoice_no}-${d.date}-${d.amount_cents}`}>
+                    <span className="dt-name mono">{d.invoice_no}</span>
+                    <span className="dt-amt">{yuan(d.amount_cents)}<em>{d.reason}</em></span>
+                  </div>
+                ))}
+
+                <h4 className="dt-h">最近记录（最多 10 笔）</h4>
+                {detail.recent.length === 0
+                  ? <div className="dt-empty">还没有记录</div>
+                  : detail.recent.map((r) => (
+                      <div className="dt-row slim" key={r.event_id}>
+                        <span className="dt-name">
+                          {r.date} · {r.type === "income" ? "收入" : r.type === "refund" ? "退款" : "支出"} · {r.category}
+                        </span>
+                        <span className="dt-amt">
+                          {yuan(r.amount_cents)}<em>{r.counterparty || r.note || ""}</em>
+                        </span>
+                      </div>
+                    ))}
+
+                <div className="dt-foot">{detail.disclaimer}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {aboutOpen && (
         <div
           className="modal-mask"

@@ -482,6 +482,19 @@ def projects_summary(project: str | None = None):
     return out
 
 
+@app.get("/api/projects/{pid}/detail")
+def projects_detail(pid: str):
+    """单个项目的明细（详情弹窗用）：合计 / 分类构成 / 报销与发票 / 最近事件 / 时间范围。
+
+    口径复用 `/api/projects/summary`（支出侧按发票号去重），所以"总览"与"详情"的数字必然一致
+    —— 不另写一套算法，避免同一笔在两处显示不同金额。
+    """
+    out = projects.detail(DATA_DIR, _events(), pid)
+    if not out.get("ok"):
+        raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
+    return out
+
+
 @app.get("/api/categories")
 def categories_view():
     """分类体系（唯一权威表）：支出 / 收入一级分类 + 报销别名 + 口语别名。

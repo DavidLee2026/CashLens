@@ -134,6 +134,9 @@ button{font-family:inherit}
 .btn:hover{background:var(--indigo-600)}
 .btn:disabled{opacity:.6;cursor:default}
 .hint{font-size:11.5px;color:var(--text-3);padding:0 18px 10px}
+/* 弹窗内的提示：默认 .hint 的左右留白是给输入区用的，弹窗里要跟着卡片内边距走 */
+.modal-card .hint{padding:10px 22px}
+.hint.err{color:var(--risk)}
 /* 输入区底部：左侧口径说明 + 右下角模型档位选择 */
 .inputfoot{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:0 18px 10px}
 .inputfoot .hint{padding:0;flex:1;min-width:200px}
@@ -291,6 +294,36 @@ button{font-family:inherit}
   font-size:11.5px;color:var(--text-2)}
 .scope-bar b{color:var(--brand)}
 .scope-bar .sb-note{color:var(--text-3)}
+/* 项目行「⋯」菜单（改名 / 详情）—— 2026-09-26 David 要求把"改名"按钮收进三个点 */
+.btn-dots{width:22px;height:22px;padding:0;display:grid;place-items:center;border:1px solid transparent;
+  background:transparent;border-radius:6px;color:var(--text-2);font-size:15px;line-height:1;cursor:pointer}
+.btn-dots:hover{color:var(--brand);background:var(--brand-bg);border-color:var(--brand-bg)}
+.btn-dots:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.proj-menu{position:absolute;top:calc(100% - 2px);right:0;z-index:31;min-width:112px;padding:5px;
+  background:var(--white);border:1px solid var(--border);border-radius:9px;
+  box-shadow:0 10px 26px rgba(10,37,64,.16)}
+.proj-menu button{display:block;width:100%;text-align:left;border:none;background:none;border-radius:7px;
+  padding:6px 10px;font-size:12.5px;font-family:inherit;color:var(--text);cursor:pointer}
+.proj-menu button:hover{background:var(--gray-50);color:var(--brand)}
+/* 项目详情弹窗内容 */
+.dt-kpis{display:flex;gap:10px;margin:2px 0 10px}
+.dt-kpi{flex:1;background:var(--gray-50);border:1px solid var(--border);border-radius:10px;padding:9px 11px}
+.dt-kpi .v{display:block;font-size:17px;font-weight:700;font-family:var(--font-mono)}
+.dt-kpi .k{display:block;font-size:11px;color:var(--text-2);margin-top:2px}
+.dt-meta{font-size:11.5px;color:var(--text-3);margin-bottom:10px}
+.dt-h{font-size:12px;letter-spacing:.08em;color:var(--text-2);margin:14px 0 7px}
+.dt-row{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:12.5px}
+.dt-row.slim{gap:8px;font-size:12px}
+.dt-name{flex:0 0 42%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dt-name.mono{font-family:var(--font-mono);font-size:11.5px;flex:0 0 58%}
+.dt-track{flex:1;height:6px;background:var(--gray-100);border-radius:99px;overflow:hidden}
+.dt-track i{display:block;height:100%;background:var(--brand);border-radius:99px}
+.dt-amt{flex:0 0 auto;font-family:var(--font-mono);font-size:12px;text-align:right}
+.dt-amt em{display:block;font-style:normal;font-size:10.5px;color:var(--text-3);font-family:var(--font-sans)}
+.dt-row.dup .dt-amt{color:var(--risk)}
+.dt-empty{font-size:12px;color:var(--text-3);padding:2px 0 4px}
+.dt-note{font-size:11.5px;color:var(--text-2);line-height:1.5;margin-bottom:6px}
+.dt-foot{font-size:11px;color:var(--text-3);margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}
 .btn-mini.danger{background:var(--risk-bg);border-color:var(--risk);color:var(--risk)}
 .btn-mini.danger:hover{background:var(--risk);border-color:var(--risk);color:var(--white)}
 .footnote{font-size:11px;color:var(--text-3);text-align:center;padding:18px 0 8px}
