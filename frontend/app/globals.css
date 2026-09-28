@@ -85,6 +85,13 @@ button{font-family:inherit}
 .convo-head .t{font-weight:700;font-size:15px}
 .convo-head .muted{font-size:12px;color:var(--text-2)}
 .convo-head .head-right{display:flex;align-items:center;gap:10px}
+/* 右栏自己的头部（用户 2026-09-28：「右边顶部有分栏虚线，右上角是客户需要登录输入用户名」）：
+   高度与左栏 .side-head 对齐（都 min-height:52px），底边用**虚线** —— 与左栏那条实线区分开，
+   一眼能看出这是"对话区自己的头"，而不是又一个分栏框。 */
+.convo-head{flex:0 0 auto;display:flex;align-items:center;gap:10px;min-height:52px;
+  padding:0 22px;border-bottom:1px dashed var(--border)}
+.convo-title{font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--text-2)}
+.convo-head-right{margin-left:auto;display:flex;align-items:center;gap:8px}
 /* 拖入文件时的覆盖层：整块对话区可放，松手即导入 */
 .drop-overlay{position:absolute;inset:0;z-index:30;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:8px;padding:20px;text-align:center;
@@ -240,15 +247,12 @@ button{font-family:inherit}
 .side{display:flex;flex-direction:column;gap:0;padding:0;min-height:0;
   background:var(--gray-50);border-right:1px solid var(--border)}
 /* 顶部品牌 + 登录：固定不动，只有中间那段跟着滚（deepseek harness 的侧栏也是这个结构） */
-.side-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  padding:12px 14px;border-bottom:1px solid var(--border)}
-.side-head .brand{font-size:16px}
-.side-head-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.side-head{flex:0 0 auto;display:flex;align-items:center;min-height:52px;
+  padding:0 14px;border-bottom:1px solid var(--border)}
 /* 左栏的滚动区（左栏管左栏）：滚动条出现在这一段的右边缘，品牌与登录不跟着跑 */
 .side-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
-/* 窄屏才露出的品牌行（宽屏的品牌在左栏顶部） */
-.brandbar{display:none;align-items:center;gap:10px;font-weight:700;font-size:18px;
-  padding:12px 16px;border-bottom:1px solid var(--border)}
+/* 窄屏才露出的品牌（宽屏的品牌在左栏左上角） */
+.brandbar{display:none;font-size:17px}
 /* ⚠️ 这里**故意不写** ::-webkit-scrollbar 自定义样式：macOS 默认是"覆盖式"滚动条
    （不滚动就不显示、也不占宽度），一旦自己写 ::-webkit-scrollbar 就会变成常驻占位，
    正好是用户最烦的那种"到处是滚动条"。两块区域各滚各的，但滚动条只在滚的时候露个脸。 */
@@ -265,9 +269,12 @@ button{font-family:inherit}
 @media (max-width:980px){
   .side{min-height:0;background:transparent;border-right:none;
     border-top:1px solid var(--border)}
-  /* 窄屏左栏被排到对话下面：品牌行回到对话区顶部，左栏顶部那个品牌与它的内部滚动一并撤掉 */
-  .brandbar{display:flex}
+  /* 窄屏左栏被排到对话下面：品牌回到右栏头部（左上角那个品牌藏起来，免得页面中间又冒一个），
+     左栏内部的滚动也撤掉，改由整页滚。 */
+  .brandbar{display:inline-flex;align-items:center;gap:10px}
+  .convo-title{display:none}
   .side-head .brand{display:none}
+  .side-head{min-height:0;padding:10px 16px}
   .side-body{overflow:visible}
 }
 .side .sect:first-child{border-top:none}

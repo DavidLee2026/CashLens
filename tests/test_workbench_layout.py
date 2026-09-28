@@ -156,7 +156,7 @@ def test_narrow_screen_falls_back_to_single_column_page_scroll():
     assert "height:auto" in narrow, "窄屏要把 .main 的固定高度放开"
     assert ".side-body{overflow:visible}" in narrow, "窄屏左栏不要自己的滚动条"
     assert "border-right:none" in narrow, "窄屏没有左右两栏，分隔线也要去掉"
-    assert ".brandbar{display:flex}" in narrow and ".side-head.brand{display:none}" in narrow, (
+    assert ".brandbar{display:inline-flex" in narrow and ".side-head.brand{display:none}" in narrow, (
         "窄屏左栏被排到对话下面：品牌要挪到对话区顶部那行 .brandbar，别在页面中间又出现一次"
     )
 
@@ -170,7 +170,7 @@ def test_narrow_overrides_come_after_the_rules_they_override():
     """
     css = _css()
     pairs = [
-        (".brandbar{display:none", ".brandbar{display:flex"),
+        (".brandbar{display:none", ".brandbar{display:inline-flex"),
         (".side-body{flex:1;min-height:0;overflow-y:auto", ".side-body{overflow:visible"),
         (".side{display:flex;flex-direction:column;gap:0;padding:0;min-height:0;",
          ".side{min-height:0;background:transparent"),
@@ -182,6 +182,24 @@ def test_narrow_overrides_come_after_the_rules_they_override():
         assert css.index(base) < css.index(override), (
             f"「{override}」写在了「{base}」前面 —— 媒体查询不加优先级，这条覆盖会静默失效"
         )
+
+
+def test_right_column_header_has_dashed_rule_and_top_right_login():
+    """用户 2026-09-28：「右边顶部有分栏虚线，右上角是客户需要登录输入用户名」。
+
+    登录入口因此**不在左栏**了 —— 左栏左上角只留 logo（「左上角显示 logo」）。
+    """
+    head = _tight(_rules(".convo-head{"))
+    assert "border-bottom:1pxdashedvar(--border)" in head, "右栏顶部那条分隔要**虚线**（用户原话）"
+    assert "min-height:52px" in head, "与左栏 .side-head 同高，两条头线才能在一条水平线上"
+    src = _page_src()
+    i = src.index('className="convo-head"')
+    convo_head = src[i: src.index('className="log"', i)]
+    assert "登录" in convo_head and "nameText" in convo_head, "登录入口要在右栏顶部（右上角）"
+    side_head = src[src.index('className="side-head"'): src.index('className="side-body"')]
+    assert "nameText" not in side_head and "loginOpen" not in side_head, (
+        "登录已挪到右栏右上角，左栏左上角只留 logo"
+    )
 
 
 # ------------------------------------------------------- 左右有区分（左灰右白）
