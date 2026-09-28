@@ -61,13 +61,32 @@ _RECOG_CACHE_MAX = 500             # 只留最近这么多条，别让缓存无�
 _RECOG_PROMPT_VERSION = "2026-09-28-doc-kind-refund"
 
 
+def _prompt_fingerprint() -> str:
+    """**提示词正文的哈希**（不是人写的版本号）。
+
+    为什么这么改（2026-09-28 实锤）：版本号靠"记得改"，我当天就忘了两次 ——
+    改了提示词（发票号码只对发票提、待支付要读出金额）却没动 `_RECOG_PROMPT_VERSION`，
+    缓存于是继续吐**旧结构**的结果。而且它**看不出来**：字段都在，只是内容是旧的
+    （诊断线索是 note 里还留着上一版才有的那句话）。
+    直接把提示词正文的 sha256 前 12 位拼进指纹 —— 改一个字、改一个标点都会自动失效，
+    不需要任何人记得做这件事。`_RECOG_PROMPT_VERSION` 保留作兜底。
+    """
+    try:
+        text = getattr(_load_receipt_mcp(), "RECOGNIZE_PROMPT", "")
+        if text:
+            return hashlib.sha256(str(text).encode("utf-8")).hexdigest()[:12]
+    except Exception:  # noqa: BLE001 取不到就退回手写版本号
+        pass
+    return _RECOG_PROMPT_VERSION
+
+
 def _model_fingerprint() -> str:
-    """当前档位 + 型号 + 端点 + 提示词版本 —— 换模型或改输出结构都让缓存自动失效。"""
+    """当前档位 + 型号 + 端点 + **提示词指纹** —— 换模型或改提示词都让缓存自动失效。"""
     try:
         from . import model_config  # noqa: PLC0415 局部导入：只有走缓存时才需要
         cfg = model_config.active()
         return (f"{cfg.get('tier')}|{cfg.get('model')}|{cfg.get('base_url')}"
-                f"|{_RECOG_PROMPT_VERSION}")
+                f"|{_prompt_fingerprint()}")
     except Exception:  # noqa: BLE001 取不到指纹就不缓存（不因为缓存把导入搞挂）
         return ""
 
@@ -356,6 +375,23 @@ def _drop_split_duplicates(cands: list[dict]) -> list[dict]:
     return out
 
 
+_INVOICE_NOISE_PARTS = ("发票号码存疑", "未识别到20位", "未识别到 20 位",
+                        "无符合要求的20位", "无符合要求的 20 位")
+
+
+def _strip_invoice_noise(note: str) -> str:
+    """把「发票号码…」那句从备注里摘掉（**只对非发票档位**用）。
+
+    起因（2026-09-28）：打车支付页 / 账单详情本来就没有发票号，模型仍照规则 5 写了一句
+    「发票号码存疑（号码为空），请对照原件人工核对后再入账」—— 纯噪音，还让人以为出了错。
+    提示词里已经写了「这几档别提发票号码」，但**不能指望模型每次都听**，
+    所以这里再做一道确定性的清理（按分号切句，丢掉带这些字样的句子）。
+    """
+    parts = [x for x in str(note or "").split("；")
+             if not any(w in x for w in _INVOICE_NOISE_PARTS)]
+    return "；".join(x.strip() for x in parts if x.strip()).strip("；;，,")
+
+
 # 「订单列表」里**没配到付款凭证**的那几行：也要列成候选（用户 2026-09-28 口径 —
 # 「昨天员工先买单，是做数的，之后找客户报销，所以报销的时间是第二天了，客户也是认可的」）。
 # 它们**不是重复**（对应的付款凭证不在这一批里），不列就等于漏账；
@@ -397,9 +433,11 @@ def _unpaid_note(note: str) -> str:
     """
     status_words = ("未付", "去支付", "待支付", "未完成付款")
     tail = "请确认这笔是否已付"
-    if any(w in str(note or "") for w in status_words):
-        return f"{note}；{tail}"
-    return f"{note}；待支付页面：截图时还没付款（按钮是「去支付」），{tail}"
+    head = str(note or "").strip("；;，,")
+    if any(w in head for w in status_words):
+        return "；".join(x for x in (head, tail) if x)
+    return "；".join(x for x in (
+        head, f"待支付页面：截图时还没付款（按钮是「去支付」），{tail}") if x)
 
 
 def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dict:
@@ -442,6 +480,9 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
         note = res.get("note") or f["name"]
         if not merchant and (res.get("merchant_candidates") or []):
             note += "（票面主体名称不唯一，商户请人工核对）"
+        if doc_kind in ("payment", "unpaid", "list", "chat"):
+            # 非发票档位不该提发票号码（提示词说了它会忘，所以这里再清一遍）
+            note = _strip_invoice_noise(note)
         # ── 页面类型分流（2026-09-28 用户口径）────────────────────────────
         #   unpaid（待支付）与 list（订单列表）：**都不建草稿** ——
         #   一个钱还没出去，一个只是同一笔钱的另一个视角（实弹：一个「我的订单」列表里
@@ -473,7 +514,7 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                 continue
             d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                        amount_cents=cents, category=cat,
-                       note=_unpaid_note(note),
+                       note=_unpaid_note(note.strip("；;，,")),
                        counterparty=merchant, date=date, source="识别", image_name=f["name"])
             if d:
                 drafts.append(d)
@@ -500,9 +541,11 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
                 continue
             d = _draft(data_dir, pid, direction=res.get("type") or "expense",
                        amount_cents=net_cents, category=cat,
-                       note=(note if refund_cents <= 0 else
-                             f"{note}；实付 {cents / 100:.2f} 元，已退款 {refund_cents / 100:.2f} 元，"
-                             f"净额 {net_cents / 100:.2f} 元"),
+                       note="；".join(x for x in (
+                           note,
+                           "" if refund_cents <= 0 else
+                           f"实付 {cents / 100:.2f} 元，已退款 {refund_cents / 100:.2f} 元，"
+                           f"净额 {net_cents / 100:.2f} 元") if x),
                        counterparty=merchant,
                        date=date, source="识别", image_name=f["name"])
             if d:

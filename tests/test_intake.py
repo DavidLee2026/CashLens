@@ -165,8 +165,20 @@ def test_cache_keeps_text_lines_and_fingerprint_carries_prompt_version():
     # 否则命中旧缓存时这些新字段会凭空消失（这坑踩过一次）
     for k in ("doc_kind", "refund_amount", "occurred_at", "orders"):
         assert k in intake._CACHE_FIELDS, f"{k} 也要进缓存字段表"
+    import re as _re
     fp = intake._model_fingerprint()
-    assert intake._RECOG_PROMPT_VERSION in fp, "提示词版本要进指纹，改结构才能让旧缓存失效"
+    assert _re.search(r"\|[0-9a-f]{12}$", fp), f"指纹末尾要是提示词正文的 12 位哈希：{fp}"
+    assert intake._RECOG_PROMPT_VERSION, "手写版本号保留作兜底（取不到提示词时才用它）"
+    # 2026-09-28 实锤：手写版本号靠"记得改"，我当天忘了两次 → 缓存继续吐旧结构的结果，
+    # 而且看不出来（字段都在、内容是旧的）。改成**提示词正文的哈希**进指纹：改一个字就失效。
+    import app.services.intake as m
+    before = intake._model_fingerprint()
+    m._load_receipt_mcp().RECOGNIZE_PROMPT += " "
+    try:
+        assert intake._model_fingerprint() != before, "提示词改一个字，指纹就该变"
+    finally:
+        m._load_receipt_mcp().RECOGNIZE_PROMPT = m._load_receipt_mcp().RECOGNIZE_PROMPT[:-1]
+    assert intake._model_fingerprint() == before, "还原之后指纹要回到原值"
 
 
 def test_text_amount_candidates_reads_amounts_from_chat_lines():
@@ -471,6 +483,38 @@ def test_list_order_without_a_voucher_becomes_a_candidate(tmp_path, monkeypatch)
                                                       "name": "A4文档"}, "l.jpg") is None
     assert intake.draft_for_list_order(tmp_path, "p", {"amount": 0.0, "status": "已完成",
                                                       "name": "A4文档"}, "l.jpg") is None
+
+
+def test_invoice_number_noise_is_stripped_from_non_receipt_notes(tmp_path, monkeypatch):
+    """非发票档位的备注里不许出现「发票号码」那句噪音。
+
+    2026-09-28 实弹：打车支付页与账单详情被写上了「发票号码存疑（号码为空），请对照原件
+    人工核对后再入账」—— 它们本来就没有发票号。提示词里写明了不许提，但模型仍会忘，
+    所以在后端再清一遍（**发票档位不清**，那句对真发票是有用的）。
+    """
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "doc_kind": "payment", "amount": 40.5, "refund_amount": 0,
+        "merchant": "某便利店", "category": "购物", "items": [],
+        "note": "发票号码存疑（号码为空），请对照原件人工核对后再入账；付款成功",
+        "text_lines": [], "confidence": 0.9,
+    })
+    intake.ingest(tmp_path, [{"name": "a.jpg", "rel_path": "p/a.jpg", "content": b"x"}])
+    note = pending.list_all(tmp_path)[0]["note"]
+    assert "发票号码" not in note, f"非发票档位不该提发票号码：{note}"
+    assert "付款成功" in note, "该留的内容别一起清掉"
+    assert intake._strip_invoice_noise("未识别到20位发票号码") == ""
+
+    # 真发票（receipt）不动：那句提示对发票是有用的
+    d2 = tmp_path / "receipt"
+    d2.mkdir()
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "doc_kind": "receipt", "amount": 962.0, "refund_amount": 0,
+        "merchant": "某酒店", "category": "住宿", "items": [],
+        "note": "发票号码存疑（号码为空），请对照原件人工核对后再入账",
+        "text_lines": [], "confidence": 0.9,
+    })
+    intake.ingest(d2, [{"name": "b.jpg", "rel_path": "p/b.jpg", "content": b"x"}])
+    assert "发票号码" in pending.list_all(d2)[0]["note"], "发票档位要保留这句"
 
 
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
