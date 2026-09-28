@@ -67,9 +67,15 @@ type TimesheetView = {
   row_count: number;
   /** 真正有数据的行数（不含表头/空行），后端算好给前端 */
   data_rows: number;
+  /** "sheet" = Excel 导入；"chat" = 聊天里说的一句（两条路汇到同一张卡） */
+  source?: "sheet" | "chat";
   employees: {
     name: string; hours: number; rate_cents: number | null; pay_cents: number;
     row_count: number; projects?: string[]; rate_conflict?: boolean;
+    /** 人员性质（这一版只做外包） */
+    kind?: "outsourced" | "contract";
+    /** 没有单价 → 应付算不出（后端不猜，前端如实显示） */
+    rate_missing?: boolean;
   }[];
   total_pay_cents: number;
   issues: string[];
@@ -211,6 +217,8 @@ type ChatReply = {
   ok: boolean; text: string; session_id?: string; pending?: PendingDraft[];
   /** 走真决策时后端会带回结构化结果，前端渲染成决策卡（文案不再由模型复述） */
   decision?: DecisionView;
+  /** 说了一句工时/工分（外包按小时）→ 后端记进工时表并回一张汇总（**不入账**） */
+  timesheet?: TimesheetView;
 };
 type ModelTier = {
   id: "cloud" | "local" | "none";
@@ -1266,7 +1274,8 @@ export default function Workbench() {
       if (r.session_id && typeof window !== "undefined") {
         window.localStorage.setItem("cl_session_v2", r.session_id);
       }
-      setMsgs((m) => [...m, { role: "ai", text: r.text, pending: r.pending, decision: r.decision }]);
+      setMsgs((m) => [...m, { role: "ai", text: r.text, pending: r.pending,
+                              decision: r.decision, timesheet: r.timesheet }]);
     } catch {
       setMsgs((m) => [...m, { role: "ai", text: "连不上本地后端：请先运行 cd backend && python3 -m uvicorn app.main:app --port 8001。" }]);
       setApiOk(false);
@@ -1465,6 +1474,7 @@ export default function Workbench() {
                       <div className="ts-top">
                         <span className="ts-unit">
                           {m.timesheet.unit === "points" ? "工分（点数）" : "工时（小时）"}
+                          <em className="ts-kind">外包</em>
                         </span>
                         <span className="ts-meta">
                           {m.timesheet.employees.length} 人 · 共 {m.timesheet.data_rows ?? m.timesheet.row_count} 行
@@ -1479,16 +1489,24 @@ export default function Workbench() {
                               {e.rate_conflict && <em className="ts-warn" title="这个人表内有多个单价">多单价</em>}
                             </span>
                             <span className="ts-rate">
-                              {e.rate_cents === null ? "单价未读到" : `${yuan(e.rate_cents)}/${m.timesheet?.unit === "points" ? "分" : "小时"}`}
+                              {e.rate_cents === null
+                                ? "单价待补"
+                                : `${yuan(e.rate_cents)}/${m.timesheet?.unit === "points" ? "分" : "小时"}`}
                             </span>
-                            <b className="ts-pay">{yuan(e.pay_cents)}</b>
+                            <b className="ts-pay">
+                              {e.rate_missing ? "—" : yuan(e.pay_cents)}
+                            </b>
                           </div>
                         ))}
                       </div>
                       {/* 口径与边界都要写出来：参考值按表内第一个单价计、不替用户猜；要入账得另行确认 */}
                       <div className="ts-foot">
                         合计 <b>{yuan(m.timesheet.total_pay_cents)}</b>
-                        <span className="ts-note">参考值按表内第一个单价计，不替你猜；这一步只出参考表，入账要你确认</span>
+                        <span className="ts-note">
+                          {m.timesheet.source === "chat"
+                            ? "外包按小时算，不涉及社保公积金；这一步只进工时表，入账要你确认"
+                            : "参考值按表内第一个单价计，不替你猜；这一步只出参考表，入账要你确认"}
+                        </span>
                       </div>
                       {!m.timesheet.mapping_confirmed && (m.timesheet.needs_confirm?.length ?? 0) > 0 && (
                         <div className="ts-warnline">

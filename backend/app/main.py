@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from .services import (categories, intake, invoice_tax, llm_skill, model_config,
                        parser_rule, pending, projects, query_tools, session_mem,
-                       timesheet)
+                       timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
                                     make_event, run_state)
 
@@ -298,6 +298,15 @@ def _rule_reply(text: str, current_project: str = "",
     if user and len(t) <= 12 and not any(c.isdigit() for c in t) \
             and any(g in t.lower() for g in _GREETING_HINTS):
         return {"ok": True, "text": _warm_open(user)}
+    # 工时/工分：**规则层先认**（不依赖 LLM）——
+    # 「阿明今天 8 小时，时薪 50」这类说法很规整，正则就能确定性地读出来；
+    # 认不出才交给记账规则（避免把「打车 28 元」之类的钱误当工时）。
+    ts = timesheet_records.parse_text(text)
+    if ts["entries"]:
+        parts, summary = _record_timesheet(ts["entries"], current_project, text)
+        return {"ok": True, "text": "\n".join(parts), "timesheet": summary}
+    if ts["contract"]:
+        return {"ok": True, "text": _CONTRACT_REFUSAL, "timesheet": None}
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
         return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}
@@ -314,6 +323,35 @@ def _rule_reply(text: str, current_project: str = "",
         "text": f"识别到{dir_cn} {_yuan(r['amount_cents'])}（{r['category']} · {r['channel']}）——请确认后入账。{_project_line(d)}",
         "pending": [d],
     }
+
+
+_CONTRACT_REFUSAL = (
+    "合同工这条我暂时接不了：合同工要算社保公积金（交金），规则和外包完全不同，"
+    "按外包那套算出来的数会误导你。这一版只做**外包（按小时）**——"
+    "你说「阿明 8 小时，时薪 50」我就能记；合同工的口径等我按真实规则做完再上。"
+)
+
+
+def _record_timesheet(entries: list[dict], current_project: str, text: str) -> tuple[list[str], dict]:
+    """把解析出来的工时/工分条目**追加进工时表**（外包按小时），并返回最新的汇总表。
+
+    ⚠️ 只写 `data/timesheet.jsonl`，**不写账本**：工时/工分不是钱，应付金额是参考值，
+    要入账必须用户另行确认（与「工时表」那条路同一口径）。
+    """
+    for e in entries:
+        timesheet_records.append(DATA_DIR, person=e.get("person") or "（没写名字）",
+                                 qty=e.get("qty") or 0, unit=e.get("unit") or "hours",
+                                 rate_cents=e.get("rate_cents"),
+                                 kind=e.get("kind") or "outsourced",
+                                 project=e.get("project") or current_project or "",
+                                 date=e.get("date") or "", source="chat", note=text)
+    summary = timesheet_records.summarize(timesheet_records.list_all(DATA_DIR))
+    unit_cn = "工分（点数）" if summary["unit"] == "points" else "工时（小时）"
+    names = "、".join(f"{e.get('person') or '（没写名字）'} {e.get('qty')}"
+                     f"{'分' if (e.get('unit') == 'points') else ' 小时'}" for e in entries)
+    parts = [f"记下这一笔（外包口径 · {unit_cn}）：{names}。这一步只进工时表，不入账；"
+             f"要按它付钱/入账，跟我说一声，我列成「待确认」给你点。"]
+    return parts, summary
 
 
 def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
@@ -367,8 +405,27 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
         lines.append(out["disclaimer"])
         return {"text": "\n".join(lines), "payload": {"decision": out}}
 
+    def h_record_timesheet(evs, act):
+        """记工时/工分（外包按小时）；合同工如实拒绝，不按外包口径硬算。"""
+        if str(act.get("person_kind") or "").lower() in ("contract", "合同工"):
+            return {"text": _CONTRACT_REFUSAL, "payload": {"refused": "contract"}}
+        entries = [{
+            "person": str(act.get("person") or "").strip(),
+            "qty": float(act.get("qty") or 0),
+            "unit": "points" if str(act.get("unit") or "hours") == "points" else "hours",
+            "rate_cents": int(act["rate_cents"]) if act.get("rate_cents") else None,
+            "project": str(act.get("project") or ""),
+            "date": str(act.get("date") or ""),
+        }]
+        if not entries[0]["person"] or entries[0]["qty"] <= 0:
+            return {"text": "这条我没读全：给我「谁 + 多少小时」就行，例如「阿明 8 小时，时薪 50」。",
+                    "payload": {}}
+        parts, summary = _record_timesheet(entries, current_project, text)
+        return {"text": "\n".join(parts), "payload": {"timesheet": summary}}
+
     handlers = {
         "ask_cashflow": h_cashflow,
+        "record_timesheet": h_record_timesheet,
         "ask_latest_income": h_latest_income,
         "ask_latest_expense": h_latest_expense,
         "ask_spending": h_spending,
@@ -413,8 +470,14 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
          and isinstance(r.get("data"), dict) and "decision" in r["data"]),
         None,
     )
+    timesheet_payload = next(
+        (r["data"]["timesheet"] for r in results
+         if r.get("action") == "record_timesheet"
+         and isinstance(r.get("data"), dict) and "timesheet" in r["data"]),
+        None,
+    )
     return {"parts": parts, "executed": executed, "results": results, "drafts": drafts,
-            "decision": decision_payload}
+            "decision": decision_payload, "timesheet": timesheet_payload}
 
 
 class DecisionIn(BaseModel):
@@ -1321,6 +1384,21 @@ def chat(body: ChatIn):
     # 否则「我是谁」在有 Key 和没 Key 两种档位下会给出两个不同答案。
     user_ctx = _user_context(body.user)
 
+    # ── 工时/工分**先过确定性解析**，排在模型前面（2026-09-28 实测踩到的坑）────────
+    # 起因：这个说法（「阿明今天 8 小时，时薪 50」）交给模型时，它对合同工那条自由发挥出
+    # 「先按你说的留底，回头升级正式入账」——**什么都没记**，却在话里承诺了一件没发生的事。
+    # 这类"我们做了什么 / 没做什么"的话不能由模型编，所以工时/工分走确定性路径：
+    # 解析得到条目就记进工时表；提到合同工/交金就如实拒绝。两句都不沾才交给模型。
+    ts = timesheet_records.parse_text(body.text)
+    if ts["entries"]:
+        parts, summary = _record_timesheet(ts["entries"], body.project or "", body.text)
+        final = "\n".join(parts)
+        session_mem.add_turn(sid, body.text, final, result_note=final[:120])
+        return {"ok": True, "text": final, "session_id": sid, "pending": [], "timesheet": summary}
+    if ts["contract"]:
+        session_mem.add_turn(sid, body.text, _CONTRACT_REFUSAL, result_note=_CONTRACT_REFUSAL[:120])
+        return {"ok": True, "text": _CONTRACT_REFUSAL, "session_id": sid, "pending": []}
+
     if llm_skill.is_configured():
         parsed = llm_skill.parse_accounting(prompt, user_ctx)
         if parsed is not None:
@@ -1355,6 +1433,8 @@ def chat(body: ChatIn):
                                for d in run["drafts"]]}
             if run.get("decision"):
                 out["decision"] = run["decision"]
+            if run.get("timesheet"):
+                out["timesheet"] = run["timesheet"]
             return out
 
     r = _rule_reply(body.text, body.project, body.user)

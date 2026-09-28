@@ -396,3 +396,19 @@ def test_timesheet_entry_posts_the_file_and_shows_an_honest_reference_table():
     fn = src[src.index("async function uploadTimesheet"):]
     fn = fn[: fn.index("/** 导入：上传")]
     assert "refresh()" not in fn, "工时表汇总只出参考表，不该刷新账本面板"
+
+
+def test_chat_timesheet_reply_renders_the_same_card_with_outsourcing_wording():
+    """聊天里说一句工时/工分 → 回一张和 Excel 一样的汇总卡（用户要拿它演示）。
+
+    口径必须准确：**外包按小时、不涉及社保公积金**；单价缺失的人显示「单价待补」、
+    应付显示「—」（后端不猜，前端也不许拿别人的单价顶上去）。
+    """
+    src = _page_src()
+    assert "timesheet?: TimesheetView" in src, "ChatReply 要能带汇总表"
+    assert "timesheet: r.timesheet" in src, "聊天回复里的汇总要落到消息上"
+    assert "外包" in src and "ts-kind" in src, "卡片上要有人员性质徽标"
+    assert "不涉及社保公积金" in src, "外包口径要写清（合同工涉及交金，这一版不做）"
+    assert "单价待补" in src and "rate_missing" in src, "没有单价的人不许被算成钱"
+    assert '"sheet" = Excel' in src or "source === \"chat\"" in src
+    assert ".ts-kind{" in _css()
