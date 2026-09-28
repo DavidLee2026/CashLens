@@ -289,6 +289,17 @@ def test_file_stages_names_which_image_the_order_list_duplicates():
     assert "微信图片_20260924123051.jpg" in st["how"], "「要记就用那张」也要点名"
     assert "没配到付款凭证的 1 笔" in st["how"], "没配到的照样列出来"
     assert "12:14:55" in st["how"]
+    assert "没有建草稿" in st["how"], "没配到的这条是 0 元 → 不该建草稿，也要说清"
+
+    # 没配到、但有金额又不是退款 → **要列成候选**（用户口径：员工先垫付、第二天报销是正常的）
+    got2 = dict(got, list_match={
+        "matched": [],
+        "unmatched": [{"at": "昨天 11:19", "amount_cents": 1120,
+                       "name": "闪送-同城最快27分钟送达", "status": "付款成功"}],
+        "drafted": [{"amount_cents": 1120, "category": "经营"}]})
+    st2 = _file_stages("…123045.jpg", [got2], [], 1, 1120)
+    assert "候选草稿" in st2["processed"] and "11.20" in st2["processed"]
+    assert "已列进「待确认」" in st2["how"] and "第二天报销是正常的" in st2["how"]
     assert "1 笔与另一张图是同一笔" in st["recognized"]
 
 

@@ -438,6 +438,41 @@ def test_unpaid_page_with_an_amount_makes_a_candidate_draft(tmp_path, monkeypatc
     assert it["doc_kind"] == "unpaid" and it.get("unpaid") is True
 
 
+def test_list_order_without_a_voucher_becomes_a_candidate(tmp_path, monkeypatch):
+    """订单列表里**没配到付款凭证**、又不是退款的那几行 → 也列成候选。
+
+    用户 2026-09-28 口径：「昨天员工先买单（11.19 的 11.20 元、11:16 的 77.00 元）是做数的，
+    之后找客户报销，所以报销的时间是第二天了，客户也是认可的」——
+    这种一天的时间差是正常的，**不列就是漏账**；但列表页只有总价与相对时间，
+    所以只进待确认、备注写清来龙去脉。
+    """
+    from app.main import _match_list_orders
+
+    # 真机那一行：闪送 11.20（付款成功）+ 转账 77.00（转账成功）+ 一条 0 元
+    items = [{"file": "…123045.jpg", "ok": True, "doc_kind": "list", "amount_cents": 0,
+              "orders": [{"at": "昨天 11:19", "amount": 11.2, "name": "闪送-同城最快27分钟送达",
+                          "status": "付款成功"},
+                         {"at": "昨天 11:16", "amount": 77.0, "name": "转账", "status": "转账成功"},
+                         {"at": "星期五 22:59", "amount": 0.0, "name": "东风广场金格店",
+                          "status": "付款成功"}]}]
+    m = _match_list_orders(items)[0]
+    assert m["matched"] == [] and len(m["unmatched"]) == 3, "这一批里没有对应的付款凭证"
+
+    made = [d for d in (intake.draft_for_list_order(tmp_path, "project_a", o, "…123045.jpg")
+                        for o in m["unmatched"]) if d]
+    assert sorted(d["amount_cents"] for d in made) == [1120, 7700], "这两笔要列，0 元那条不列"
+    assert next(d for d in made if d["amount_cents"] == 1120)["category"] == "经营", "闪送→经营"
+    note = next(d for d in made if d["amount_cents"] == 7700)["note"]
+    assert "没配到对应的付款凭证" in note and "第二天报销是正常的" in note
+    assert "相对时间" in note, "列表页写的是「昨天」，要提醒具体日期得核对"
+
+    # 退款的不列（钱回来了），金额 0 的也不列
+    assert intake.draft_for_list_order(tmp_path, "p", {"amount": 78.0, "status": "已退款",
+                                                      "name": "A4文档"}, "l.jpg") is None
+    assert intake.draft_for_list_order(tmp_path, "p", {"amount": 0.0, "status": "已完成",
+                                                      "name": "A4文档"}, "l.jpg") is None
+
+
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
     """有票面金额的图照旧走原路：不许因为图里同时有别的数字就多建候选草稿。"""
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
