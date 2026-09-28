@@ -154,6 +154,17 @@ def test_sheet_reconcile_stage_text_distinguishes_skipped_from_no_image():
 # 模型完全读得出来，但票据提示词只会答"一张票一个金额" → 金额 0 → 三张图全部「未生成草稿」。
 # 现在引擎层把文字逐行抄回来（text_lines），这里只做**形式化提取**、每条都进待确认让人挑。
 
+def test_cache_keeps_text_lines_and_fingerprint_carries_prompt_version():
+    """缓存必须带上 `text_lines`，且指纹里要有提示词版本 —— 否则新功能会静默失灵。
+
+    这条是 2026-09-28 加"聊天截图读金额"时差点踩到的坑：缓存只留 4 个旧字段，
+    命中缓存的那次没有原文可用；而旧缓存条目又会一直命中。指纹加版本号 = 旧条目自动失效。
+    """
+    assert "text_lines" in intake._CACHE_FIELDS
+    fp = intake._model_fingerprint()
+    assert intake._RECOG_PROMPT_VERSION in fp, "提示词版本要进指纹，改结构才能让旧缓存失效"
+
+
 def test_text_amount_candidates_reads_amounts_from_chat_lines():
     """只挑金额，不挑噪音：日期/时间/人数/文件大小不是钱。"""
     got = intake.text_amount_candidates([
