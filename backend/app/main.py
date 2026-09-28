@@ -252,11 +252,23 @@ def _project_line(d: dict) -> str:
 
 # 「我是谁」这类问题的触发词（规则兜底用；有 LLM 时由提示词里的规则负责）
 _IDENTITY_HINTS = ("我是谁", "我叫什么", "我的名字", "你认识我", "你知道我是谁", "认得我", "知道我叫")
+# 打招呼（只在**没配 LLM** 的兜底路上用，且必须很短、不含金额，免得把「你好，打车 28」截走）
+_GREETING_HINTS = ("你好", "您好", "hi", "hello", "在吗", "在么")
+
+
+def _warm_open(name: str) -> str:
+    """有情绪价值的开场（用户 2026-09-28 要求）：叫出名字 + 表示乐意服务 + 问一句需要什么。
+
+    ⚠️ 不夹带任何免责话术（「不是账号 / 没联网验证过」这类）—— 同一天他明确要求删掉：
+    在对话里像免责声明，很出戏。诚实约束留在系统侧，不念给用户听。
+    """
+    return (f"你是{name}呀，很高兴为你服务！想记一笔账、看看最近的现金流，"
+            f"还是算一下这单报价？有什么需要尽管说。")
 
 
 def _rule_reply(text: str, current_project: str = "",
                 user: str = "") -> dict:
-    """规则兜底（无 LLM 时）：身份问题 / 记账走待确认 / 问现金流 / 接不上。
+    """规则兜底（无 LLM 时）：打招呼 / 身份问题 / 记账走待确认 / 问现金流 / 接不上。
 
     `current_project` = 前端当前选中的项目，作为新账默认归属（留空＝未归项目）。
     `user` = 本机登录名；没有 LLM 时也要能如实回答「我是谁」，否则用户填了名字却
@@ -265,10 +277,14 @@ def _rule_reply(text: str, current_project: str = "",
     t = str(text or "")
     if any(h in t for h in _IDENTITY_HINTS):
         if user:
-            # 只说名字，不附带「不是账号 / 没联网验证」这类免责话术（用户 2026-09-28 明确要求）
-            return {"ok": True, "text": f"你是「{user}」——你在这台机器上填的登录名。"}
+            return {"ok": True, "text": _warm_open(user)}
         return {"ok": True,
-                "text": "你还没填登录名，所以我确实不知道你是谁。点右上角「登录」填一个就行。"}
+                "text": "你还没填登录名，我还不知道该怎么称呼你。点右上角「登录」填一个，"
+                        "下次我就能叫你了 —— 想记账或看现金流现在也可以直接说。"}
+    # 纯打招呼（很短、不带数字）也给一句有人情味的回应；带金额的照旧走记账，别截走
+    if user and len(t) <= 12 and not any(c.isdigit() for c in t) \
+            and any(g in t.lower() for g in _GREETING_HINTS):
+        return {"ok": True, "text": _warm_open(user)}
     r = parser_rule.analyze(text)
     if r["kind"] == "fallback":
         return {"ok": False, "text": "这句我先接不上：说一句带金额的记账（如「昨天微信收了 3000 尾款」），或问「最近一笔收入 / 这个月花了多少 / 现金流怎么样」。配置 LLM API Key 后可自由对话。"}

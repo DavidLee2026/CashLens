@@ -223,13 +223,21 @@ def test_identity_question_is_answered_with_the_local_name_without_llm():
     """
     r = main._rule_reply("你好，你知道我是谁吗？", "", "大维")
     assert r["ok"] is True
-    assert "大维" in r["text"], "要把本机登录名如实说出来"
-    # 措辞纪律（用户 2026-09-28 明确要求）：**回复里不要塞免责话术**。
-    # "它只是本地记录、不是账号、没联网验证过"—— 约束留在系统侧（别自称已核验身份），
-    # 但不要念给用户听：在对话里像免责声明，很出戏。
+    assert "大维" in r["text"], "要把本机登录名说出来"
+    # 情绪价值（用户 2026-09-28 要求）：叫名字 + 表示乐意服务 + 问一句需要什么
+    assert "高兴" in r["text"] or "乐意" in r["text"], "要有一句乐意服务的话"
+    assert "需要" in r["text"] or "想" in r["text"], "要问一句他今天想做什么"
+    # 措辞纪律（同一天他明确要求）：**回复里不要塞免责话术**。
+    # 诚实约束留在系统侧（别自称已核验身份），但不念给用户听：在对话里像免责声明，很出戏。
     for banned in ("不是账号", "联网验证", "没有验证", "免责"):
         assert banned not in r["text"], f"回复里不该出现「{banned}」这类说明"
-    assert len(r["text"]) < 40, "一句话就够，别写成一段说明"
+    assert len(r["text"]) < 90, "要有温度，但别写成一段说明"
+
+    # 纯打招呼也给一句有人情味的回应（这条只在没配 LLM 的兜底路上走）
+    g = main._rule_reply("你好", "", "大维")
+    assert "大维" in g["text"] and ("高兴" in g["text"] or "乐意" in g["text"])
+    # ⚠️ 但不能把「你好，打车 28」截走 —— 那是在记账
+    assert "大维" not in main._rule_reply("你好，打车 28", "", "大维")["text"]
 
     # 没填名字时如实说不知道，不许编一个
     r2 = main._rule_reply("我是谁？", "", "")
