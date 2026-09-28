@@ -135,6 +135,24 @@ button{font-family:inherit}
   color:var(--text-2);padding:0 10px;cursor:pointer;line-height:1.7}
 .undo:hover:not(:disabled){border-color:var(--brand);color:var(--brand)}
 .undo:disabled{opacity:.5;cursor:default}
+/* 工时/工分汇总卡：数值全部来自后端，前端只排版。一行一个人，右边是参考工资。 */
+.ts{margin-top:8px;border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;background:var(--card);align-self:stretch}
+.ts-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.ts-unit{font-size:12.5px;font-weight:700;color:var(--brand)}
+.ts-meta{font-size:12px;color:var(--text-2)}
+.ts-rows{display:flex;flex-direction:column;gap:2px}
+.ts-row{display:flex;align-items:baseline;gap:8px;font-size:13px}
+.ts-name{flex:0 0 auto;font-weight:600}
+.ts-qty{flex:1 1 auto;min-width:0;color:var(--text-2);font-variant-numeric:tabular-nums}
+.ts-rate{flex:0 0 auto;color:var(--text-2);font-size:12px;font-variant-numeric:tabular-nums}
+.ts-pay{flex:0 0 auto;color:var(--text);font-variant-numeric:tabular-nums}
+.ts-warn{margin-left:6px;font-style:normal;font-size:11px;color:var(--danger, #c0392b)}
+.ts-foot{margin-top:8px;padding-top:6px;border-top:1px solid var(--border);
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px}
+.ts-note{font-size:12px;color:var(--text-2)}
+.ts-warnline{margin-top:6px;font-size:12px;color:var(--text-2)}
 /* 逐文件：**一行一个**。完成的只留「文件名 + 结果」，正在跑的那个展开四段明细；
    想细看已完成的点文件名展开（一次一个）。十几个文件各四段叠起来能刷满整屏。 */
 .pb-list{display:flex;flex-direction:column;gap:3px;margin-bottom:2px}

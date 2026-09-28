@@ -181,3 +181,40 @@ def test_empty_sheet_returns_error(tmp_path):
     p = make_xlsx(tmp_path / "空.xlsx", [])
     out = timesheet.analyze(p)
     assert out["ok"] is False
+
+
+def test_timesheet_endpoint_accepts_raw_xlsx_and_reports_points(tmp_path):
+    """端点级（前端就是这么调的）：**xlsx 二进制直接作为 body**，不用 multipart。
+
+    演示路径要能真的走通：拖一张工分表 → 出按人汇总 + 口径标注 + 合计。
+    这条同时钉住"工分不是工时"这件事：同一张表把表头从「工分」换成「工时」，
+    数字一样但 `unit` 必须跟着变（页面要如实显示是哪种口径）。
+    """
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    client = TestClient(main.app)
+    points = make_xlsx(tmp_path / "工分.xlsx", [
+        ["姓名", "工分", "单价", "项目"],
+        ["阿明", "120", "5", "919昆明项目"],
+        ["小周", "80", "5", "919昆明项目"],
+    ])
+    res = client.post("/api/timesheet/summary", content=points.read_bytes(),
+                      headers={"Content-Type": "application/octet-stream"})
+    assert res.status_code == 200, res.text
+    out = res.json()
+    assert out["ok"] is True
+    assert out["unit"] == "points", "表头写「工分」就要如实标 points"
+    assert out["total_pay_cents"] == (120 + 80) * 5 * 100
+    names = {e["name"]: e for e in out["employees"]}
+    assert names["阿明"]["pay_cents"] == 120 * 5 * 100
+    assert names["阿明"]["projects"] == ["919昆明项目"]
+
+    hours = make_xlsx(tmp_path / "工时.xlsx", [["姓名", "工时", "单价"], ["阿明", "120", "5"]])
+    out2 = client.post("/api/timesheet/summary", content=hours.read_bytes()).json()
+    assert out2["unit"] == "hours"
+
+    # 空 body / 坏文件要如实报错，不假装成功
+    assert client.post("/api/timesheet/summary", content=b"").status_code == 400
+    assert client.post("/api/timesheet/summary", content=b"not a zip").status_code == 400
