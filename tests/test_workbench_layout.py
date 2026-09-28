@@ -367,3 +367,32 @@ def test_dropped_drafts_offer_an_undo_and_the_summary_names_the_image():
     assert "（订单列表截图）里有" in src and "（订单列表截图）里还有" in src
     assert "m.file" in src, "要带上文件名"
     assert ".undo{" in _css() and "var(--brand)" in _rule(".undo:hover:not(:disabled){")
+
+
+def test_timesheet_entry_posts_the_file_and_shows_an_honest_reference_table():
+    """工时 / 工分表在前端有入口（用户要拿它给朋友演示），且卡片要如实标注口径与边界。
+
+    后端早就有 `POST /api/timesheet/summary`，但界面上只有一个「＋」菜单里那句提示、
+    没有入口也没有展示 —— 演示时要能拖一张工分表就出「按人汇总」的参考表。
+    """
+    src = _page_src()
+    assert "工时 / 工分表" in src, "「＋」菜单里要有工时/工分表的入口"
+    assert "tsRef" in src and 'accept=".xlsx,.xls"' in src
+    assert '"/api/timesheet/summary"' in src, "要调后端那个端点"
+    assert "uploadTimesheet" in src and "timesheet: { ...data, file: f.name }" in src, (
+        "后端返回什么就展示什么，前端不再算一遍"
+    )
+    # 口径必须如实：工分 ≠ 工时
+    assert 'data.unit === "points" ? "工分" : "工时"' in src
+    assert 'm.timesheet.unit === "points" ? "工分（点数）" : "工时（小时）"' in src
+    # 边界要说出来：参考值按第一个单价计、这一步只出参考表
+    assert "参考值按表内第一个单价计" in src and "入账要你确认" in src
+    # 列名认不出时如实提示（不猜列）
+    assert "列名没认全" in src and "needs_confirm" in src
+    # 多单价要标出来
+    assert "rate_conflict" in src and "多单价" in src
+    assert ".ts{" in _css() and "var(--card)" in _rule(".ts{")
+    # 这一步不写账本 → 不该调 refresh
+    fn = src[src.index("async function uploadTimesheet"):]
+    fn = fn[: fn.index("/** 导入：上传")]
+    assert "refresh()" not in fn, "工时表汇总只出参考表，不该刷新账本面板"

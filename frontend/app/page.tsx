@@ -57,6 +57,24 @@ const CHECK_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   satisfied: "通过", uncertain: "不确定", missing: "不达标", misconception: "假设不符",
 };
+/** 工时 / 工分表汇总（后端 services/timesheet.py 的输出结构，原样展示、前端不算数）。 */
+type TimesheetView = {
+  file: string;
+  unit: "hours" | "points";
+  /** 列名是不是用户在表头明确写出来的（认不出时后端如实标 needs_confirm，不猜列） */
+  mapping_confirmed: boolean;
+  needs_confirm: string[];
+  row_count: number;
+  /** 真正有数据的行数（不含表头/空行），后端算好给前端 */
+  data_rows: number;
+  employees: {
+    name: string; hours: number; rate_cents: number | null; pay_cents: number;
+    row_count: number; projects?: string[]; rate_conflict?: boolean;
+  }[];
+  total_pay_cents: number;
+  issues: string[];
+};
+
 type Msg = {
   role: "user" | "ai"; text: string; pending?: PendingDraft[];
   progress?: boolean; blocks?: ProgressBlock[];
@@ -72,6 +90,8 @@ type Msg = {
   /* 丢弃草稿后跟着一个「撤回」（用户 2026-09-28 要求：那句小字后面加撤回按钮）。
      丢弃是**软删除**，撤回只是把草稿从回收站放回来，账本一动没动。 */
   undo?: { group: string; count: number };
+  /* 工时/工分表汇总卡：数值全部来自后端确定性计算，前端只展示、不再算一遍 */
+  timesheet?: TimesheetView;
   /* 这次导入还在跑（后端还在逐个文件处理）→ 框头显示「取消」。
      取消 = 断开这条流：后面的文件不再处理；**正在读的那个会跑完**（识别在工作线程里，
      没有中断点），所以文案必须如实说这一句，见 cancelImport。 */
@@ -469,6 +489,7 @@ export default function Workbench() {
   const imageRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const tsRef = useRef<HTMLInputElement>(null);   // 工时 / 工分表（.xlsx）
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /* 正在跑的这次导入的取消句柄（一次只允许一次导入，intakeBusy 挡着） */
@@ -1025,6 +1046,38 @@ export default function Workbench() {
     return window.btoa(bin);
   }
 
+  /** 工时 / 工分表：原样把 xlsx 二进制 POST 给后端，把返回的汇总表**展示出来**。
+   *  它**不写账本**（这一步只出参考表，入账要另行确认），所以不调 refresh()。
+   *  列名认不出时后端如实标 needs_confirm —— 前端照实显示，不猜列。 */
+  async function uploadTimesheet(f: File) {
+    if (intakeBusy) return;
+    setAttachOpen(false);
+    setIntakeBusy(true);
+    try {
+      const res = await fetch("/api/timesheet/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: f,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        const why = data?.detail || data?.issues?.join("；") || `HTTP ${res.status}`;
+        setMsgs((m) => [...m, { role: "ai", text: `「${f.name}」没读成：${why}` }]);
+        return;
+      }
+      setMsgs((m) => [...m, {
+        role: "ai",
+        text: `「${f.name}」的${data.unit === "points" ? "工分" : "工时"}汇总（参考表，不改账本）：`,
+        timesheet: { ...data, file: f.name },
+      }]);
+    } catch (err) {
+      setMsgs((m) => [...m, { role: "ai", text:
+        `工时/工分表没读成：${err instanceof Error ? err.message : String(err)}。请确认后端在运行后重试。` }]);
+    } finally {
+      setIntakeBusy(false);
+    }
+  }
+
   /** 导入：上传 → 把整次导入写进**同一个框** → 刷新面板。
    *  一次导入只占一条消息：标题（导入几个文件）+ 逐文件进度 + 最终汇总都在里面，
    *  不再另发「（导入 N 个文件）」用户气泡，也不再让进度和结果各占一个框。
@@ -1407,6 +1460,46 @@ export default function Workbench() {
                       )}
                     </>
                   )}
+                  {m.timesheet && (
+                    <div className="ts">
+                      <div className="ts-top">
+                        <span className="ts-unit">
+                          {m.timesheet.unit === "points" ? "工分（点数）" : "工时（小时）"}
+                        </span>
+                        <span className="ts-meta">
+                          {m.timesheet.employees.length} 人 · 共 {m.timesheet.data_rows ?? m.timesheet.row_count} 行
+                        </span>
+                      </div>
+                      <div className="ts-rows">
+                        {m.timesheet.employees.map((e) => (
+                          <div className="ts-row" key={e.name}>
+                            <span className="ts-name">{e.name}</span>
+                            <span className="ts-qty">
+                              {e.hours} {m.timesheet?.unit === "points" ? "分" : "小时"}
+                              {e.rate_conflict && <em className="ts-warn" title="这个人表内有多个单价">多单价</em>}
+                            </span>
+                            <span className="ts-rate">
+                              {e.rate_cents === null ? "单价未读到" : `${yuan(e.rate_cents)}/${m.timesheet?.unit === "points" ? "分" : "小时"}`}
+                            </span>
+                            <b className="ts-pay">{yuan(e.pay_cents)}</b>
+                          </div>
+                        ))}
+                      </div>
+                      {/* 口径与边界都要写出来：参考值按表内第一个单价计、不替用户猜；要入账得另行确认 */}
+                      <div className="ts-foot">
+                        合计 <b>{yuan(m.timesheet.total_pay_cents)}</b>
+                        <span className="ts-note">参考值按表内第一个单价计，不替你猜；这一步只出参考表，入账要你确认</span>
+                      </div>
+                      {!m.timesheet.mapping_confirmed && (m.timesheet.needs_confirm?.length ?? 0) > 0 && (
+                        <div className="ts-warnline">
+                          列名没认全（{m.timesheet.needs_confirm.join("、")}）——请在表头写「姓名 / 工时（或工分）/ 单价」
+                        </div>
+                      )}
+                      {(m.timesheet.issues?.length ?? 0) > 0 && (
+                        <div className="ts-warnline">{m.timesheet.issues.slice(0, 3).join("；")}</div>
+                      )}
+                    </div>
+                  )}
                   {m.pending && m.pending.length > 0 && (
                     <div className="acts">
                       {m.pending.map((p) => (
@@ -1484,6 +1577,11 @@ export default function Workbench() {
                     <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); fileRef.current?.click(); }}>
                       发票与表格文件
                       <span className="am-sub">数电发票 PDF、项目工时 Excel、账单 CSV</span>
+                    </button>
+                    <button type="button" role="menuitem"
+                      onClick={() => { setAttachOpen(false); tsRef.current?.click(); }}>
+                      工时 / 工分表
+                      <span className="am-sub">按人汇总成工资参考表；工分＝点数 × 单价</span>
                     </button>
                     <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); dirRef.current?.click(); }}>
                       整个文件夹
@@ -1649,6 +1747,12 @@ export default function Workbench() {
             </p>
             {/* 三个隐藏的文件选择器：图片 / 文件 / 整个文件夹，都由左侧「＋」触发 */}
             <input ref={imageRef} type="file" hidden multiple accept="image/*" onChange={onPickFiles} />
+            <input ref={tsRef} type="file" hidden accept=".xlsx,.xls"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";            // 同一个文件连选两次也要能触发
+                if (f) uploadTimesheet(f);
+              }} />
             <input
               ref={fileRef}
               type="file"
