@@ -124,6 +124,30 @@ def test_recognition_prompt_asks_for_verbatim_text_lines():
     assert "text_lines 填空数组" in src, "发票/小票那档要明确填空，避免多出一堆噪音行"
 
 
+def test_recognition_prompt_treats_payment_vouchers_as_receipts():
+    """**付款凭证要当票据看待**（2026-09-28 真机：919 昆明项目三张付款截图全被丢掉）。
+
+    起因：用户拖进三张「支付宝账单详情 / 打车支付成功 / 行程已结束」的截图 ——
+    图里明明有「交易成功、收单机构、收款方全称、商品说明、付款方式」，是**钱已经付出去了**的记录，
+    却被提示词当成「不是票据」→ amount 0 → 后端只能去抄文字 → 那条「纯金额行不算」的规则
+    又把主金额丢掉（图 1 一笔没列、图 2 只认 2 个数、图 3 认了 5 个数，优惠/里程/时长都算钱）。
+    现在提示词明确：这类**就是票据**，amount = **实付金额**。
+    """
+    src = (Path(__file__).resolve().parents[1] / "engine" / "mcp" / "receipt_mcp.py").read_text(encoding="utf-8")
+    assert "付款凭证要当票据看待" in src
+    for word in ("交易成功", "支付成功", "行程已结束"):
+        assert word in src, f"要认得付款凭证的典型字样：{word}"
+    assert "实际支付的那个金额" in src, "取得是**实付**金额"
+    assert "原价、优惠、节省、折扣、里程、时长、积分、余额、优惠券" in src, (
+        "这些都不是金额（图 3 那 5 个「金额」就是优惠/里程/时长）"
+    )
+    assert "收款方全称" in src, "商户取收款方"
+    # 反向：**没付款**的东西不许当付款凭证（73_19 里的美团预订单 / 滴滴行程单就是这类）
+    assert "没付款的东西不许当成付款凭证" in src
+    assert "预订单" in src and "待支付" in src and "行程预览" in src
+    assert "amount 一律保持 0" in src
+
+
 def test_file_stages_explains_text_amount_candidates():
     """聊天截图那一档的四段文案：说清"不是票面、读到了几个金额、记哪几笔由你决定"。"""
     st = _file_stages("微信图片_1.jpg",

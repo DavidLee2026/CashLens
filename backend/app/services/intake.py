@@ -58,7 +58,7 @@ _RECOG_CACHE_MAX = 500             # 只留最近这么多条，别让缓存无�
 # 提示词/输出结构的版本号：只要识别结果的字段有增删就把它改一下，
 # 让旧缓存**自动失效** —— 否则缓存里存的是旧结构的结果（缺新字段），
 # 命中缓存后新功能会静默失灵（2026-09-28 加 text_lines 时差点踩到）。
-_RECOG_PROMPT_VERSION = "2026-09-28-chat-text"
+_RECOG_PROMPT_VERSION = "2026-09-28-payment-voucher"
 
 
 def _model_fingerprint() -> str:

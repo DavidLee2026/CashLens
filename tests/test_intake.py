@@ -315,6 +315,32 @@ def test_chat_screenshot_creates_candidate_drafts(tmp_path, monkeypatch):
     assert b["text_amount_drafts"] == 3
 
 
+def test_payment_voucher_makes_exactly_one_draft(tmp_path, monkeypatch):
+    """付款凭证（账单详情 / 支付成功 / 行程已结束）→ **正好一条**草稿，金额是实付。
+
+    实弹来源（2026-09-28，919 昆明项目）：
+      支付宝账单详情「-40.50 交易成功 / 收款方全称 云南强林乐家… / 商品说明 …711…REDEMPTION」→ 40.50 购物
+      打车支付成功「46.17 元 / 优惠1.51元 / 全程 25.37 公里」→ 46.17 交通（1.51、25.37 都不是钱）
+      行程已结束「¥40.60 费用明细 / 全程27.63公里 41分钟」→ 40.60 交通
+    """
+    monkeypatch.setattr(intake, "recognize_file", lambda p: {
+        "type": "expense", "amount": 40.50, "date": "2026-09-18",
+        "merchant": "云南强林乐家连锁便利店有限公司",
+        "category": "购物",
+        "items": [{"name": "云南711支付宝东风广场金格店REDEMPTION", "amount": 40.50}],
+        "note": "付款凭证", "text_lines": [], "confidence": 0.9,
+    })
+    out = intake.ingest(tmp_path, [
+        {"name": "微信图片_20260924123103.jpg", "rel_path": "919昆明项目/x.jpg", "content": b"x"},
+    ])
+    drafts = pending.list_all(tmp_path)
+    assert [d["amount_cents"] for d in drafts] == [4050], "付款凭证只能是一条，金额是实付 40.50"
+    assert drafts[0]["category"] == "购物", "711 便利店的商品说明要能判成购物"
+    b = out["batches"][0]
+    assert b["files"][0].get("text_amounts") in (None, 0), "付款凭证不走「图里文字候选」那条路"
+    assert b["text_amount_drafts"] == 0
+
+
 def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatch):
     """有票面金额的图照旧走原路：不许因为图里同时有别的数字就多建候选草稿。"""
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
