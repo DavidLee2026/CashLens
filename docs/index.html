@@ -409,6 +409,25 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   html{scroll-behavior:auto}
   *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
 }
+
+/* 返回顶部：右下角固定，滚过约一屏才出现。
+   JS 只做两件事：按滚动位置显示/隐藏；点击时滚到页面最顶端（0，而不是 <main> 所在的位置，
+   因为 <main> 前面还有顶栏）。减弱动效偏好下改为瞬移。 */
+.to-top{position:fixed;right:var(--space-6);bottom:var(--space-6);z-index:60;
+  display:flex;align-items:center;justify-content:center;
+  width:44px;height:44px;padding:0;font:inherit;appearance:none;
+  border-radius:var(--radius-pill);
+  background:var(--color-bg-elevated);color:var(--color-brand);
+  border:1px solid var(--color-surface-border);box-shadow:var(--shadow-lifted);
+  cursor:pointer;
+  opacity:0;transform:translateY(var(--space-2));pointer-events:none;
+  transition:opacity var(--dur-base) var(--ease-out),transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),border-color var(--dur-base) var(--ease-out)}
+.to-top.is-on{opacity:1;transform:none;pointer-events:auto}
+.to-top:hover{border-color:var(--color-brand);box-shadow:var(--shadow-md),0 0 0 4px var(--color-brand-bg);transform:translateY(-2px)}
+.to-top:focus-visible{outline:3px solid var(--color-brand);outline-offset:2px}
+@media (max-width:600px){.to-top{right:var(--space-4);bottom:var(--space-4);width:40px;height:40px}}
+@media print{.to-top{display:none}}
 </style>
 </head>
 <body>
@@ -822,7 +841,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
         <tr><td>开票 / 报税归集</td><td>账本同源聚合：按客户、按季度两个维度</td><td class="ok">端到端通过</td></tr>
         <tr><td>本地模型档（本机推理）</td><td>本机视觉模型识别同一张真实发票</td><td class="ok">6 字段全对</td></tr>
         <tr><td>接单决策（报价该不该接）</td><td>确定性计算：历史时薪由账本反推（收入中位数 ÷ 总工时），三道闸门（现金流垫底 / 回款周期 / 税后到手），报价下限 = 时薪 × 工时 ×（1 + 税负 + 平台抽成）</td><td class="ok">实弹：历史时薪 ¥105.77/时 · 报价下限 ¥2,115.40 · 低于成本线判「不接」</td></tr>
-        <tr><td>工程规模</td><td>后端端点 25 个 · pytest 用例 195 个 · 页面行为回归 16 项</td><td class="ok">全部通过</td></tr>
+        <tr><td>工程规模</td><td>后端端点 25 个 · pytest 用例 215 个 · 页面行为回归 16 项</td><td class="ok">全部通过</td></tr>
       </table>
       <p class="proof-note">以上各项均已在真实材料上跑通。号码这条最关键：漏位是票据识别里的稳定缺陷，修复不靠反复重试模型，而是加两道确定性关卡。一是格式硬校验，20 位不匹配就不得自动入账；二是用数电发票 PDF 自带的版式文本层做双源交叉核对，只在两源恰好差一个 0 时采纳文本层值，候选不唯一一律转人工。真实票据复测已拿回完整 20 位号码，全程在本机完成。本地模型档用本机视觉模型识别同一张发票，金额、日期、商户、分类与 20 位号码全部正确（单张样本，不作强弱结论）。工时表与归集同理：认不出的列交用户确认，只出参考表与事实归集，不猜、不替用户下结论。</p>
       <p class="proof-note">四类输入通道这条同样是真材料实弹：客户的发票形式与统计形式各不相同，所以图片、PDF、报销表、账单四类都要能在基础功能里收。用一份真实项目材料（一张酒店数电发票 PDF，加一张 10 行的 Excel 报销表）走完整流程：把文件夹拖进来就自动建好项目，11 条草稿合计 ¥1,346.35，与表内总计差额 ¥0.00，双源核对 10/10 全对。报销表以表内数字为准，嵌入图的识别结果只用于核对，机器不覆盖人写的数。</p>
@@ -1527,6 +1546,31 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
 
   // 默认进入语音模式（按住说话）
   setMode("voice");})();
+</script>
+
+<button class="to-top" id="toTop" type="button" aria-label="返回顶部" title="返回顶部">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+</button>
+
+<script>
+(function(){
+  var el = document.getElementById("toTop");
+  if (!el) { return; }
+  var shown = false;
+  function sync(){
+    var should = (window.scrollY || window.pageYOffset || 0) > 600;
+    if (should === shown) { return; }
+    shown = should;
+    el.classList.toggle("is-on", should);
+  }
+  sync();
+  window.addEventListener("scroll", sync, { passive: true });
+  window.addEventListener("resize", sync, { passive: true });
+  el.addEventListener("click", function(){
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, left: 0, behavior: reduce ? "auto" : "smooth" });
+  });
+})();
 </script>
 </body>
 </html>
