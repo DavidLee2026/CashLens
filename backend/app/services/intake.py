@@ -55,12 +55,19 @@ _RECOG_CACHE_FILE = "_recog_cache.json"
 _RECOG_CACHE_MAX = 500             # 只留最近这么多条，别让缓存无限长大
 
 
+# 提示词/输出结构的版本号：只要识别结果的字段有增删就把它改一下，
+# 让旧缓存**自动失效** —— 否则缓存里存的是旧结构的结果（缺新字段），
+# 命中缓存后新功能会静默失灵（2026-09-28 加 text_lines 时差点踩到）。
+_RECOG_PROMPT_VERSION = "2026-09-28-chat-text"
+
+
 def _model_fingerprint() -> str:
-    """当前档位 + 型号 + 端点 —— 换模型就让缓存自动失效，不拿旧模型的结果糊弄。"""
+    """当前档位 + 型号 + 端点 + 提示词版本 —— 换模型或改输出结构都让缓存自动失效。"""
     try:
         from . import model_config  # noqa: PLC0415 局部导入：只有走缓存时才需要
         cfg = model_config.active()
-        return f"{cfg.get('tier')}|{cfg.get('model')}|{cfg.get('base_url')}"
+        return (f"{cfg.get('tier')}|{cfg.get('model')}|{cfg.get('base_url')}"
+                f"|{_RECOG_PROMPT_VERSION}")
     except Exception:  # noqa: BLE001 取不到指纹就不缓存（不因为缓存把导入搞挂）
         return ""
 
@@ -89,8 +96,10 @@ def _cache_save(data_dir, cache: dict) -> None:
         pass
 
 
-# 只缓存核对用得上的字段：识别结果里那些本机路径、渠道标记不进缓存
-_CACHE_FIELDS = ("amount", "date", "merchant", "invoice_no")
+# 只缓存核对用得上的字段：识别结果里那些本机路径、渠道标记不进缓存。
+# ⚠️ `text_lines`（聊天/文字截图的原文行）必须一起缓存 —— 少了它，命中缓存的那次
+# 就没有原文可用，"聊天截图的金额候选"会静默失灵。
+_CACHE_FIELDS = ("amount", "date", "merchant", "invoice_no", "text_lines")
 
 
 def _recognize_cached(img_path: Path, data_dir, cache: dict, fingerprint: str) -> dict:
