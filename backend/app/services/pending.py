@@ -11,6 +11,30 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from .categories import UNCONFIRMED_CATEGORY
+
+
+def _ledger_category(raw: str | None, direction: str = "expense") -> str:
+    """落账本的分类：**绝不写占位符**。
+
+    `categories.py` 自己写着「判不出就进『待确认』，它是要人来确认的池子，
+    **不是一个类别**」（见该模块 §1 与关键词表注释）。但草稿的 category 若是
+    「待确认」，确认入账时会被原样写进账本 —— 于是「待确认」变成了一个真分类，
+    还会进支出构成统计。2026-09-28 真机上就这样落了 2 条（¥962.00 与 ¥78.00）。
+
+    收口方式：占位符（以及空值）统一落**「其他」/「其他收入」** —— 也就是这条
+    流水线本来就用的"认不出"桶（`main._append_event` 的 `category or "其他"`、
+    `query_tools` 的空分类兜底都是它）。**不新造分类名**，也不留空串让下游各自猜
+    （`projects.summary()` 兜「未分类」、`query_tools` 兜「其他」，两处口径本来就不一致）。
+
+    用户在确认那一刻补了分类就按补的写 —— 这才是「待确认」这个池子存在的意义。
+    """
+    c = (raw or "").strip()
+    if c and c != UNCONFIRMED_CATEGORY:
+        return c
+    # 收入侧没有「其他」这个分类，对应的是「其他收入」（见 categories.INCOME_CATEGORIES）
+    return "其他收入" if direction == "income" else "其他"
+
 
 def _path(data_dir: str | Path) -> Path:
     p = Path(data_dir)
@@ -71,7 +95,8 @@ def update(data_dir: str | Path, pid: str, **fields) -> dict | None:
 
 
 def accept(data_dir: str | Path, pid: str, append_fn,
-           project_override: str | None = None) -> dict | None:
+           project_override: str | None = None,
+           category_override: str | None = None) -> dict | None:
     """确认入账：从草稿弹出并回调写账本。
 
     append_fn(direction, amount_cents, category, channel, note, counterparty, project) -> (event, appended)
@@ -81,12 +106,18 @@ def accept(data_dir: str | Path, pid: str, append_fn,
     可传 id 或完整名；空字符串表示"就是未归项目"。归属必须能在确认环节被纠正 —— 草稿上的
     项目是生成时定下的，而用户不可能每次都准确把账放进对应账户（David 原话）。
     传 None 表示不改（沿用草稿上的值）。
+
+    `category_override`（2026-09-28 新增）：**用户在确认那一刻挑的分类**。草稿分类是
+    「待确认」（机器没判出来）时，就该由人在这里补上；传 None 表示沿用草稿分类
+    （真分类照旧，占位符则被 `_ledger_category` 收成空串，见该函数）。
     """
     drafts = list_all(data_dir)
     for i, d in enumerate(drafts):
         if d["id"] == pid:
             proj = d.get("project", "") if project_override is None else project_override
-            ev, appended = append_fn(d["direction"], d["amount_cents"], d["category"],
+            cat = d["category"] if category_override is None else category_override
+            ev, appended = append_fn(d["direction"], d["amount_cents"],
+                                     _ledger_category(cat, d["direction"]),
                                      d["channel"], d["note"], d.get("counterparty", ""),
                                      proj)
             del drafts[i]

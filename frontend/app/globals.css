@@ -243,6 +243,13 @@ button{font-family:inherit}
 .ev{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed var(--gray-200);font-size:13px}
 .ev:last-child{border-bottom:none}
 .ev .m{color:var(--text-2);font-size:12px;display:block}
+/* 「最近事件」是左栏唯一允许内部滚动的地方（用户 2026-09-28 要求：只露 5 条，
+   更多用滚轮上下看，否则整页太长）。
+   ⚠️ 别"顺手"把这个 overflow 去掉：左栏整体不要滚动条是另一条要求（2026-09-25），
+   两者不冲突 —— 这里是有意为之的局部窗口。
+   5 行 = 227.5px：行高是**实测**的 45.5px（CDP 在真实 CSS 环境里插入同款节点量得），
+   不是估的。改 .ev 的内边距或字号后要重新量、并同步这个算式。 */
+.ev-list{max-height:calc(5 * 45.5px);overflow-y:auto;overscroll-behavior:contain}
 .amt-in{color:var(--income);font-weight:700}
 .amt-out{color:var(--risk);font-weight:700}
 .empty{color:var(--text-3);font-size:13px;text-align:center;padding:18px 0}
