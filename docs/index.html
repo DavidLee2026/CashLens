@@ -464,7 +464,7 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
       <p class="hero-sub">说一句、拍一张、导一份，发票图片、数电发票 PDF、项目工时 Excel 报销表、微信支付宝账单，散在各处的数据归拢进一本账。往下是两件事：下个月会不会缺钱，这单接不接、报多少。</p>
       <div class="tech-line"><span class="tech-tag">技术层</span><span>背后是财务状态引擎（证据强度分级、状态可升可降可重建）、CashPulse 现金流区间预测（90% 置信带）、接单报价决策引擎。四类输入通道（图片 / PDF / Excel 报销表 / CSV 账单）已打通统一采集入口，拖一个文件夹进来即可建项目；语音记账本地实弹已跑通，云端接入按产品分期推进。</span></div>
       <div class="hero-facts">
-        <div class="fact"><span class="num">1</span><span class="lbl">个 Agent（编排式智能体，不是多智能体）</span></div>
+        <div class="fact"><span class="num">1</span><span class="lbl">个 Agent（编排式智能体）</span></div>
         <div class="fact"><span class="num">3</span><span class="lbl">个 SKILL 当前在用（MVP 定稿 8 项功能）</span></div>
         <div class="fact"><span class="num">本地</span><span class="lbl">账本与决策数据留在磁盘</span></div>
       </div>
@@ -779,8 +779,8 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
   <div class="container">
     <div class="sec-eyebrow">ARCHITECTURE · 编排式智能体</div>
     <h2>1 个 Agent + 3 个 SKILL（当前）· MVP 定稿 8 项功能</h2>
-    <p class="plain-lead">说人话：不是养一群机器人各自拿主意——是 1 个 Agent，遇到什么事就翻开对应的一本“操作手册”。多智能体听着更唬人，但在这个场景里几个人格会互相带偏，我们选了更稳的那条。</p>
-    <div class="tech-line"><span class="tech-tag">技术层</span><span><b>先把结论说清：CashLens 不是多智能体，是编排式智能体——1 个 Agent 按需调用 SKILL。</b>多智能体（多个人格并行审议）一开始确实是候选方案，但这个产品做的是金额与报价决策，几个人格互相讨论容易跑偏；单 Agent + 多 SKILL 的编排式结构更稳、更可复现。产品运行时是一条确定性链路，大模型只做解析与措辞，金额、区间与报价全部由本地引擎计算，模型不参与任何数值。</span></div>
+    <p class="plain-lead">说人话：一个 Agent 当大脑，遇到什么事就翻开对应的一本“操作手册”。记账、预测、报价各是一本，谁该上场由它按需挑，你只管说人话。</p>
+    <div class="tech-line"><span class="tech-tag">技术层</span><span><b>技术层口径：编排式智能体——1 个 Agent 按需调用 SKILL（当前 3 个），MCP 协议统一接入工具。</b>金额、区间与报价全部由本地引擎计算，大模型只做解析与措辞，不参与任何数值：链路短、每一步都可复现，数字不会在多次转述里走样。</span></div>
     <p class="sec-intro">SKILL 是方法论文件（Markdown），不是常驻进程。三个数字别混：<b>当前实际在用 3 个 SKILL</b>（记账 / 接单决策 / 现金流预测）· <b>MVP 定稿 8 项功能</b> · <b>方法论侧规划 33 个 SKILL</b>，其余按 Phase 2/3 渐进补齐。</p>
     <div class="engine-core">编排式智能体 · 1 个 Agent（思考 → 选 SKILL → 调工具 → 观察 → 再思考）</div>
     <div class="skills" style="margin-bottom:var(--space-6)">
@@ -825,9 +825,9 @@ footer{border-top:1px solid var(--color-surface-border);padding:var(--space-10) 
           <tr><td>MCP 工具注册（查现金流状态）</td><td class="ok">通过</td></tr>
           <tr><td>中文财务指令路由</td><td class="ok">通过</td></tr>
           <tr><td>FastAPI 后端直连引擎</td><td class="ok">通过</td></tr>
-          <tr><td>开发期架构实验：子代理并行审议（记账/现金流/风控）</td><td class="warn">已实测 · 未用于产品</td></tr>
+          <tr><td>开发期编排实验：SKILL 注入 → MCP 取数 → 多视角审议</td><td class="warn">已留痕 · 未进产品链路</td></tr>
         </table>
-        <p class="proof-note">第 5 项要说清它是什么、不是什么：那是<b>开发期在引擎工作区做的架构实验</b>（2026-08-28 与 09-28 两次实测，主引擎并行实例化记账 / 现金流 / 风控三个子代理，后一次三段耗时重叠 2.0 倍，原始事件流留痕在 <code>08-实测/</code>）。实测能用，但<b>没有引入产品</b>——CashLens 是<b>编排式智能体</b>：1 个 Agent 按需调用 SKILL，不做多个人格并行审议。原因很直白：多人格互相讨论在金额与报价这类场景里容易跑偏，单 Agent + 多 SKILL 更稳、更可复现。产品运行时是一条确定性决策链路（见下条），数值由本地账本计算，LLM 不参与数值。</p>
+        <p class="proof-note">第 5 项是开发期在引擎工作区做的编排实验：主引擎加载 SKILL、真调 MCP 取数，再让记账 / 现金流 / 风控三个视角各自独立给意见、由主引擎汇总成一张联合评估表（2026-08-28 与 09-28 两次实测，后一次三段耗时重叠 2.0 倍，原始事件流留痕在 <code>08-实测/</code>）。产品运行时走的是更简单的一条确定性链路（见下条）：数值由本地账本计算，LLM 不参与数值。</p>
       </div>
     </div>
 
