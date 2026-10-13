@@ -92,11 +92,11 @@ def test_summarize_groups_by_person_and_flags_missing_rate(tmp_path):
 
 
 def test_store_is_append_only_and_filterable_by_project(tmp_path):
-    tr.append(tmp_path, person="阿明", qty=8, unit="hours", rate_cents=5000, project=示例项目)
-    tr.append(tmp_path, person="小周", qty=6, unit="hours", rate_cents=5000, project=示例项目)
+    tr.append(tmp_path, person="阿明", qty=8, unit="hours", rate_cents=5000, project="PJ-101")
+    tr.append(tmp_path, person="小周", qty=6, unit="hours", rate_cents=5000, project="PJ-102")
     lines = (tmp_path / "timesheet.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2 and all(json.loads(x)["id"] for x in lines), "只追加，每条带 id"
-    assert [r["person"] for r in tr.list_all(tmp_path, project=示例项目)] == ["阿明"]
+    assert [r["person"] for r in tr.list_all(tmp_path, project="PJ-101")] == ["阿明"]
 
 
 # ─── 端点：聊天里说一句就记下来（无 LLM 的规则兜底也要能走）──────

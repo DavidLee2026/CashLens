@@ -32,7 +32,7 @@ def _book(tmp_path):
 def test_create_default_names_then_rename(tmp_path):
     a = projects.create(tmp_path)
     assert a["name"] == "Project A" and a["named"] is False
-    assert 示例项目 in a["name_hint"] or "完整名称" in a["name_hint"]  # 会提醒补全项目名
+    assert "完整名称" in a["name_hint"]  # 会提醒补全项目名
 
     b = projects.create(tmp_path, "示例项目 A")
     assert b["name"] == "示例项目 A" and b["named"] is True

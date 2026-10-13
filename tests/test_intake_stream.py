@@ -100,7 +100,7 @@ def test_file_stages_sheet_csv_image():
         [{"ok": True, "amount_cents": 96200, "merchant": "某文化传播有限公司",
           "date": "2026-09-20", "invoice_no": "26537", "cloud_uploaded": True}], [], 1, 96200)
     assert img["read"] == "1 张图片"
-    assert "上海示例客户" in img["recognized"] and "962.00" in img["recognized"]
+    assert "某文化传播有限公司" in img["recognized"] and "962.00" in img["recognized"]
     # 2026-09-28 David 定：方式栏只说「这张票怎么处理、结果由谁点头」，
     # 不叙述用哪一档模型、也不叙述供应商（写了会让人以为经营信息被别人看到）。
     assert "待确认清单" in img["how"] and "确认后才入账" in img["how"]
