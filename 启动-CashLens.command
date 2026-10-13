@@ -10,8 +10,12 @@
 #    4. 把两个服务的日志写进 09-代码/.logs/ 目录
 #
 #  端口被占用时不是无脑复用，而是先校验：
-#    · 后端：必须确认是本仓库这一份（看账本路径）且版本够新（有 /api/categories），
-#            否则判定为「别的副本」，自动换一个空闲端口启动本仓库后端
+#    · 后端：① 必须是本仓库这一份（看账本路径 + /api/categories 通）；
+#            ② 还必须是**当前代码**（拿它自报的 source_mtime 与磁盘上的比）。
+#            若跑的是本仓库的旧版本 → **停掉它、用最新代码在同一端口重启**
+#            （2026-09-29 踩到：只校验①，于是重跑脚本静默复用了旧进程，
+#              新加的 /api/reset 一直 404，表现为「重置失败：Not Found」）；
+#            若是别的副本 → 判定为「别的副本」，自动换空闲端口启动本仓库后端
 #    · 前端：Next.js 同一目录只允许一个实例，所以只能复用；复用前校验它的
 #            代理指向的是不是本仓库后端，不一致会明确提示你关掉旧工作台
 #
@@ -56,7 +60,7 @@ port_busy() {
   lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
-# 端口上的后端能不能直接复用：必须是本仓库这一份，且带四类输入通道（新版本）
+# 端口上的后端是不是**本仓库这一份**（只看它是谁的数据目录 + 基本能力在不在）
 backend_reusable() {
   local port="$1" health code
   health="$(curl -s -m 3 "http://127.0.0.1:$port/api/health" 2>/dev/null)" || return 1
@@ -66,6 +70,35 @@ backend_reusable() {
   esac
   code="$(curl -s -o /dev/null -m 3 -w "%{http_code}" "http://127.0.0.1:$port/api/categories" 2>/dev/null)"
   [ "$code" = "200" ] || return 1
+  return 0
+}
+
+# 磁盘上 backend/app 下最新的 .py 修改时间（epoch 秒）
+newest_source_mtime() {
+  "$PY" - "$ROOT/backend/app" <<'PYEOF' 2>/dev/null
+import os, sys
+newest = 0.0
+for base, _dirs, files in os.walk(sys.argv[1]):
+    for f in files:
+        if f.endswith(".py"):
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(base, f)))
+            except OSError:
+                pass
+print(int(newest))
+PYEOF
+}
+
+# 端口上这一份跑的是不是**当前代码**：拿它自报的 source_mtime 与磁盘上的比。
+# 旧版本后端没有这个字段 → 直接判旧（这正是 2026-09-29 那次的情形）。
+backend_current() {
+  local port="$1" health reported local_m
+  health="$(curl -s -m 3 "http://127.0.0.1:$port/api/health" 2>/dev/null)" || return 1
+  reported="$(printf '%s' "$health" | sed -n 's/.*"source_mtime":[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  [ -n "$reported" ] || return 1
+  local_m="$(newest_source_mtime)"
+  [ -n "$local_m" ] || return 0          # 量不出来就别拦，宁可复用
+  [ "$local_m" -le "$reported" ] || return 1
   return 0
 }
 
@@ -148,8 +181,29 @@ START_BACK="yes"
 
 if port_busy "$BACK_PORT"; then
   if backend_reusable "$BACK_PORT"; then
-    BACK_REUSE="yes"
-    START_BACK="no"
+    if backend_current "$BACK_PORT"; then
+      BACK_REUSE="yes"
+      START_BACK="no"
+    else
+      # 本仓库的旧进程：它不是"别的副本"，而是**同一个仓库的旧代码**。
+      # 让路（换端口）会让前端继续连旧的；所以这里停掉它，用最新代码占回同一端口。
+      OLD_PID="$(lsof -nP -iTCP:"$BACK_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+      echo "[提示] 端口 $BACK_PORT 上跑的是**本仓库的旧版本后端**（磁盘上的代码比它新）。"
+      echo "       本次先停掉它（PID ${OLD_PID:-未知}），再用最新代码在同一端口重启。"
+      if [ -n "$OLD_PID" ]; then
+        kill "$OLD_PID" 2>/dev/null
+        for _ in $(seq 1 20); do
+          port_busy "$BACK_PORT" || break
+          sleep 0.5
+        done
+      fi
+      if port_busy "$BACK_PORT"; then
+        echo "[错误] 旧后端没有退出，端口 $BACK_PORT 仍被占用。"
+        echo "       请到启动它的那个终端窗口按 Control + C，再重新双击本脚本。"
+        pause_exit
+      fi
+      echo ""
+    fi
   else
     echo "[提示] 端口 $BACK_PORT 上跑的不是本仓库这一份后端（可能是另一个副本，"
     echo "       例如编辑器沙箱里的旧版本，它缺少四类输入通道等新能力）。"
@@ -176,7 +230,7 @@ if [ "$START_BACK" = "yes" ]; then
   ( cd "$ROOT/backend" && exec "$PY" -m uvicorn app.main:app --port "$BACK_PORT" ) >"$BACK_LOG" 2>&1 &
   BACK_PID=$!
 else
-  echo "[1/2] 端口 $BACK_PORT 上的后端就是本仓库这一份，直接复用（不再启动新的后端）"
+  echo "[1/2] 端口 $BACK_PORT 上的后端就是本仓库这一份、且跑的是最新代码，直接复用（不再启动新的后端）"
 fi
 
 # ---------- 7. 前端：Next.js 只允许一个实例，只能复用，但要校验代理指向 ----------

@@ -23,9 +23,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import (categories, intake, invoice_tax, llm_skill, model_config,
-                       parser_rule, pending, projects, query_tools, session_mem,
-                       timesheet, timesheet_records)
+from .services import (categories, data_reset, intake, invoice_tax, llm_skill,
+                       model_config, parser_rule, pending, projects, query_tools,
+                       session_mem, timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
                                     make_event, run_state)
 
@@ -33,6 +33,28 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.environ.get("CASH_DATA_DIR", str(REPO_ROOT / "data")))
 LEDGER_PATH = DATA_DIR / "finance_events.jsonl"
 DB_PATH = DATA_DIR / "proj.db"
+
+
+def _source_mtime() -> int:
+    """`backend/app/**/*.py` 里**最新**的修改时间（epoch 秒），导入时算一次。
+
+    给启动脚本用：它拿这个值（= 进程启动时代码的样子）与磁盘上的当前值比，
+    一旦磁盘更新就说明**这个进程在跑旧代码**，于是停掉它重起。
+    起因（2026-09-29 真机）：重跑 `启动-CashLens.command` 时，它只校验
+    `/api/health` 的账本路径与 `/api/categories` 返回 200 —— 旧进程两条都满足，
+    于是打印「直接复用（不再启动新的后端）」，**新加的 `/api/reset` 一直 404**，
+    表现为「重置失败：Not Found」，而且怎么重启都还是旧的。
+    """
+    newest = 0.0
+    for p in Path(__file__).resolve().parent.rglob("*.py"):
+        try:
+            newest = max(newest, p.stat().st_mtime)
+        except OSError:
+            continue
+    return int(newest)
+
+
+SOURCE_MTIME = _source_mtime()
 
 app = FastAPI(title="CashLens API", version="0.1")
 app.add_middleware(
@@ -69,7 +91,35 @@ class EventIn(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "api": "cashlens", "ledger": str(LEDGER_PATH)}
+    """健康检查 + **代码新鲜度**（source_mtime 供启动脚本判断"这个进程是不是旧代码"）。"""
+    return {"ok": True, "api": "cashlens", "ledger": str(LEDGER_PATH),
+            "source_mtime": SOURCE_MTIME}
+
+
+class ResetIn(BaseModel):
+    """重置本机演示数据。`seed_demo=True` 时顺带载入合成演示样本（录视频开局一致）。"""
+
+    seed_demo: bool = False
+
+
+@app.post("/api/reset")
+def reset_data(body: ResetIn = ResetIn()):
+    """把本机演示数据重置为空账（可选载入演示样本）。
+
+    ⚠️ **不是删文件**：当前整套状态先搬进 `data/_reset_backup_<ts>/`，再起一套空账，
+    守住「账本可追溯、误删可救」这条红线。模型档位配置（model_config.json）不动。
+    返回 before/after 两套计数与备份路径，界面据此如实回报（2026-09-29）。
+    """
+    session_mem.clear_all()  # 旧会话上下文不能渗进新对话
+    try:
+        return data_reset.reset(DATA_DIR, seed_demo=body.seed_demo)
+    except FileNotFoundError as e:
+        # 演示样本是**本机生成**的（`.gitignore` 的 `data/` 规则把 samples 下的 data 目录也挡住了，
+        # 所以它不在版本库里）。缺了就如实说清怎么办 —— 不能让前端笼统报成"后端没在运行"。
+        raise HTTPException(status_code=409, detail=(
+            f"{e}。演示样本是本机生成的、不入版本库；请先在 09-代码 目录运行 "
+            f"python3 scripts/make_synthetic_business_ledger.py 生成，"
+            f"或改用不载入样本的「重置本机数据」。"))
 
 
 @app.post("/api/events")

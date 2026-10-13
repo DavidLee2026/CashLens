@@ -54,3 +54,12 @@ def context_of(session_id: str) -> str:
 
 def clear(session_id: str) -> None:
     _sessions.pop(session_id, None)
+
+
+def clear_all() -> None:
+    """清空**全部**会话记忆。
+
+    重置本机演示数据时用（2026-09-29）：不清的话，旧会话的上下文还会渗进新对话 ——
+    界面看着是空的，助手却"记得"刚才那些已经不存在的账目。
+    """
+    _sessions.clear()

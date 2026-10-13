@@ -142,6 +142,18 @@ type ProjectsView = {
   disclaimer: string;
 };
 
+/** 重置本机演示数据的返回（POST /api/reset）。
+ *  带 before/after 两套计数与备份路径：破坏性动作要能说清"清掉了什么、备份在哪"。 */
+type ResetCounts = { events: number; projects: number; pending: number; timesheet: number };
+type ResetResult = {
+  ok: boolean;
+  action: "reset" | "reset_seeded";
+  backup_dir: string;
+  kept: string[];
+  before: ResetCounts;
+  after: ResetCounts;
+};
+
 /** 拖进来的文件（rel_path 保留文件夹层级，第一层目录名就是项目名） */
 type FileItem = { name: string; rel_path: string; file: File };
 /** 项目详情（GET /api/projects/{id}/detail）：弹窗用；数字口径与左栏总览一致（同一套去重）。 */
@@ -402,15 +414,17 @@ function sessionId(): string {
   return s;
 }
 
+/** 空会话占位 · 开场白 B+ 版（2026-09-06 定稿：B 极简上手型为基底，加长+增人情味 ·
+ *  与 backend _PERSONA_PROMPT 同源，规格见 02-脑暴/对话人格层规格-20260906.md 第四节）。
+ *  抽成常量（2026-09-29）：重置演示数据后要把对话恢复到这一句，各写一份迟早分叉。 */
+const WELCOME_MSG: Msg = {
+  role: "ai",
+  text: "你好，我是 CashLens 财务管家。不用懂会计，也不用记格式，把花钱和收钱的事用大白话讲给我就行。\n\n我能帮你做三件事：\n1. 记账：说一句「昨天微信收了 3000 尾款」或「打车花了 28」，我记下来，还能记到对应项目上；\n2. 收票据：点左下角的「＋」，发票照片、发票 PDF、项目工时表、微信支付宝账单都能传，我先认出来给你看，你确认了才入账；\n3. 看钱够不够：问我「这个月花了多少」「下个月会不会缺钱」，我用你自己的账本算，并把依据一起说清楚。\n\n先来一句试试？",
+};
+
 export default function Workbench() {
-  // 空会话占位 · 开场白 B+ 版（2026-09-06 定稿：B 极简上手型为基底，加长+增人情味 · 与 backend _PERSONA_PROMPT 同源，规格见 02-脑暴/对话人格层规格-20260906.md 第四节）
   // 首屏固定默认开场白（与服务端渲染一致，避免 hydration mismatch）；历史消息在挂载后从 localStorage 加载
-  const [msgs, setMsgs] = useState<Msg[]>(() => [
-    {
-      role: "ai",
-      text: "你好，我是 CashLens 财务管家。不用懂会计，也不用记格式，把花钱和收钱的事用大白话讲给我就行。\n\n我能帮你做三件事：\n1. 记账：说一句「昨天微信收了 3000 尾款」或「打车花了 28」，我记下来，还能记到对应项目上；\n2. 收票据：点左下角的「＋」，发票照片、发票 PDF、项目工时表、微信支付宝账单都能传，我先认出来给你看，你确认了才入账；\n3. 看钱够不够：问我「这个月花了多少」「下个月会不会缺钱」，我用你自己的账本算，并把依据一起说清楚。\n\n先来一句试试？",
-    },
-  ]);
+  const [msgs, setMsgs] = useState<Msg[]>(() => [WELCOME_MSG]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<StateT | null>(null);
@@ -446,6 +460,15 @@ export default function Workbench() {
   const [deletingId, setDeletingId] = useState("");
   // 关于弹窗：版本 / 产品 / 开发者 / 联系方式（底部灰色小按钮打开）
   const [aboutOpen, setAboutOpen] = useState(false);
+  /* 设置弹窗（2026-09-29）：重置本机演示数据。
+     放账户级位置（右上角）而不是「总账户」那一行 —— 重置是全局动作，不是项目级动作，
+     而且在选择列表里摆破坏性按钮容易误点、录视频时也出镜。
+     两级确认：resetStep 1 = 摆代价清单，2 = 最终确认；resetSeed 记录本次是否载入演示样本。 */
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resetStep, setResetStep] = useState(0);
+  const [resetSeed, setResetSeed] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetMsg, setResetMsg] = useState("");
   // 新建项目：内联表单，成功后刷新左侧项目面板
   const [creatingProj, setCreatingProj] = useState(false);
   const [newProjName, setNewProjName] = useState("");
@@ -963,6 +986,84 @@ export default function Workbench() {
     setNameText("");
   }
 
+  /** 打开设置弹窗（每次都从第 0 步开始，不记住上次停在哪一步）。 */
+  function openSettings() {
+    setResetStep(0);
+    setResetSeed(false);
+    setResetMsg("");
+    setSettingsOpen(true);
+  }
+
+  /** 重置本机演示数据（走两级确认后的**最后一步**）。
+   *
+   *  后端不是删文件，而是先把当前整套状态搬到 data/_reset_backup_<时间戳>/，再起空账
+   *  —— 守住「账本可追溯、误删可救」这条红线，所以这里可以如实告诉用户备份在哪。
+   *  `cl_msgs_v2` / `cl_session_v2` 必须一起清：只清后端账本的话，视频里还挂着旧对话；
+   *  会话 id 也一起作废，避免旧会话上下文渗进新对话（后端同时清了自己的会话记忆）。 */
+  async function doReset() {
+    if (resetBusy) return;
+    setResetBusy(true);
+    setResetMsg("");
+    try {
+      // 这里刻意**不用**共用的 `j()`：它只抛 `HTTP 409`，把后端写在 detail 里的具体原因丢了。
+      // 「演示样本不存在」和「后端没在运行」是两件事，不能都报成后者（那是假汇报）。
+      const resp = await fetch("/api/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seed_demo: resetSeed }),
+      });
+      if (resp.status === 404 || resp.status === 405) {
+        /* 接口不在 = 后端进程还是**旧版本**（改了代码但没重启）。
+           这与"连不上后端"是两件事：说成后者会让人去查网络，白折腾。
+           2026-09-29 真机踩到：启动脚本的复用判断只看 /api/health 与 /api/categories，
+           旧进程两条都满足 → 脚本说"直接复用" → /api/reset 一直 404。
+           所以这里必须点名"后端旧了、要重启"，而不是照抄 HTTP 错误。 */
+        setResetMsg(
+          "重置失败：后端还是旧版本（没有 /api/reset 这个接口）——改了代码但后端进程没重启。"
+          + "在启动 CashLens 的那个终端窗口按 Control + C，再重新双击「启动-CashLens.command」即可。",
+        );
+        return;
+      }
+      if (!resp.ok) {
+        let why = `HTTP ${resp.status}`;
+        try {
+          const errBody = await resp.json();
+          if (errBody?.detail) why = String(errBody.detail);
+        } catch {
+          /* 响应不是 JSON 就用状态码 */
+        }
+        setResetMsg(`重置失败：${why}`);
+        return;
+      }
+      const r = (await resp.json()) as ResetResult;
+      try {
+        window.localStorage.removeItem("cl_msgs_v2");
+        window.localStorage.removeItem("cl_session_v2");
+      } catch {
+        /* 忽略存储失败：账本已经重置了，别因为清缓存失败就报"重置失败" */
+      }
+      setMsgs([WELCOME_MSG]);
+      setActiveProject("");
+      setDetailId("");
+      setPendingOpen(false);
+      setResetStep(0);
+      const a = r.after;
+      setResetMsg(
+        `${r.action === "reset_seeded" ? "已重置并载入演示样本" : "已重置为空账"}：`
+        + `账本 ${a.events} 笔 · 项目 ${a.projects} 个 · 待确认 ${a.pending} 条 · 工时 ${a.timesheet} 条。`
+        + (r.backup_dir
+            ? ` 重置前的数据已备份到 ${r.backup_dir}/（需要时整份拷回即可恢复）。`
+            : " 重置前本来就没有数据，未生成备份。")
+        + (r.kept?.length ? `模型档位配置（${r.kept.join("、")}）保留未动。` : ""),
+      );
+      refresh();
+    } catch {
+      setResetMsg("重置失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
   /** 新建项目：只写后端映射表（账本只存稳定 id），建完刷新左侧面板，并**切到这个新项目**。
    *
    *  为什么要切（用户 2026-09-28）：建项目的下一步一定是往里面记东西；建完还停在
@@ -1255,6 +1356,16 @@ export default function Workbench() {
     return () => window.removeEventListener("keydown", onKey);
   }, [aboutOpen]);
 
+  /** 设置弹窗开着时按 Esc 关闭（正在重置时不给关：别让用户以为按了 Esc 就撤销了）。 */
+  useEffect(() => {
+    if (!settingsOpen || resetBusy) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSettingsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settingsOpen, resetBusy]);
+
   async function send() {
     const t = text.trim();
     if (!t || busy) return;
@@ -1287,6 +1398,15 @@ export default function Workbench() {
 
   const healthPct = state ? Math.round(state.financial_health * 100) : 0;
   const confPct = state ? Math.round(state.cashflow_confidence * 100) : 0;
+  // 30 天 90% 区间的宽度（元）。区间宽到这个量级时，它已经给不出可操作的信息 ——
+  // 此时**必须自己说出来**，不能只摆一个好看的「可信度 100%」（2026-09-28 立）。
+  // 阈值是**呈现层的可读性阈值，不是统计阈值**：小微经营者的一次决策量级在千元到万元，
+  // ±10 万以上等于「什么情况都可能」，写死在这里是为了让这条判断可被测试钉住。
+  const FC_WIDE_YUAN = 100000;
+  const fcBandWidthYuan = fc && fc.extrapolated !== false
+    ? Math.abs(fc.band90_high_cents - fc.band90_low_cents) / 100
+    : 0;
+  const fcTooWide = fcBandWidthYuan >= FC_WIDE_YUAN;
   const acct = accountTotals(projView);
   const activeProjectName = activeProject === ""
     ? "未归项目（总账户）"
@@ -1331,6 +1451,15 @@ export default function Workbench() {
                     后端未连接
                   </span>
                 )}
+                {/* 设置入口（2026-09-29）：账户级动作放右上角，跟登录名同一块。
+                    重置藏在设置弹窗里 —— 工作台上不常显破坏性按钮。 */}
+                <button
+                  className="btn-mini"
+                  onClick={openSettings}
+                  title="设置：重置本机演示数据（重置前会先把当前数据整套备份）"
+                >
+                  设置
+                </button>
                 {loginOpen ? (
                   <span className="login-edit">
                     <input
@@ -2226,6 +2355,10 @@ export default function Workbench() {
               <div className="bar">
                 <i style={{ width: `${confPct}%` }} />
               </div>
+              <div className="fc-note">
+                可信度只看「最近一笔收入距今多久、收入间隔稳不稳」，它衡量的是
+                <b>进账节奏的可信度</b>，不是「下面这个区间有多准」——区间有多宽要看下面三行。
+              </div>
             </section>
 
             <section className="sect">
@@ -2275,6 +2408,14 @@ export default function Workbench() {
                       <b className="num">{yuan(fc.band90_high_cents)}</b>
                     </div>
                     <div className="fc-note">{fc.reason} · 可信度低时如实标注「现金流不明」</div>
+                    {fcTooWide && (
+                      <div className="fc-note fc-warn">
+                        这个区间宽到 ¥{Math.round(fcBandWidthYuan).toLocaleString("zh-CN")}
+                        （下沿到上沿），<b>已经给不出可操作的信息</b>：本次外推只用到
+                        {" "}{fc.reason.match(/(\d+)\s*天有记录/)?.[1] ?? "很少"}{" "}
+                        天有记录，记账天数越多、区间会自动收窄。
+                      </div>
+                    )}
                   </>
                 )
               ) : (
@@ -2422,6 +2563,119 @@ export default function Workbench() {
                 <div className="dt-foot">{detail.disclaimer}</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {settingsOpen && (
+        <div
+          className="modal-mask"
+          role="dialog"
+          aria-modal="true"
+          aria-label="设置"
+          onClick={() => { if (!resetBusy) setSettingsOpen(false); }}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <b>设置</b>
+              <button
+                className="btn-x" title="关闭" aria-label="关闭"
+                onClick={() => { if (!resetBusy) setSettingsOpen(false); }}
+              >
+                ×
+              </button>
+            </div>
+
+            {resetStep === 0 && (
+              <>
+                <dl className="about-list">
+                  <div>
+                    <dt>重置</dt>
+                    <dd>
+                      把本机账本、待确认草稿、项目、工时表清空，从零开始 —— 演示前想清场、
+                      或者同一段流程想重录一遍时用。
+                      <b>重置前会把当前数据整套备份到 data/_reset_backup_&lt;时间戳&gt;/，需要时整份拷回即可恢复</b>；
+                      模型档位配置不受影响。
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>当前</dt>
+                    <dd>
+                      账本 {state?.events_count ?? 0} 笔 · 项目 {projView?.project_count ?? 0} 个 ·
+                      待确认 {pendingList.length} 条
+                    </dd>
+                  </div>
+                </dl>
+                <div className="reset-acts">
+                  <button
+                    className="btn-mini danger"
+                    onClick={() => { setResetSeed(false); setResetStep(1); setResetMsg(""); }}
+                  >
+                    重置本机数据
+                  </button>
+                  <button
+                    className="btn-mini"
+                    onClick={() => { setResetSeed(true); setResetStep(1); setResetMsg(""); }}
+                  >
+                    重置并载入演示样本
+                  </button>
+                </div>
+                <p className="reset-hint">
+                  「载入演示样本」＝ 重置后装一份合成经营账（多项目、有收入也有成本），
+                  每次重录的开局完全一致。
+                </p>
+              </>
+            )}
+
+            {resetStep === 1 && (
+              <>
+                <p className="reset-warn">第 1 / 2 步 · 确认范围</p>
+                <dl className="about-list">
+                  <div>
+                    <dt>会清空</dt>
+                    <dd>
+                      账本 {state?.events_count ?? 0} 笔 · 项目 {projView?.project_count ?? 0} 个 ·
+                      待确认 {pendingList.length} 条 · 工时表
+                    </dd>
+                  </div>
+                  {resetSeed && (
+                    <div>
+                      <dt>会载入</dt>
+                      <dd>合成演示样本（多项目经营账，有收入也有成本，可复现）</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>会保留</dt>
+                    <dd>模型档位配置；当前数据先备份到 data/_reset_backup_&lt;时间戳&gt;/（可整份拷回）</dd>
+                  </div>
+                  <div>
+                    <dt>另外</dt>
+                    <dd>右侧对话历史也会清空 —— 否则旧对话还留在界面上，会录进视频里</dd>
+                  </div>
+                </dl>
+                <div className="reset-acts">
+                  <button className="btn-mini danger" onClick={() => setResetStep(2)}>继续（第 2 步）</button>
+                  <button className="btn-mini" onClick={() => setResetStep(0)}>取消</button>
+                </div>
+              </>
+            )}
+
+            {resetStep === 2 && (
+              <>
+                <p className="reset-warn">第 2 / 2 步 · 最后确认</p>
+                <p className="reset-final">
+                  点下面这个按钮就真的重置了{resetSeed ? "，并载入演示样本" : "，账本回到 0 笔"}。
+                  这一步是防手滑，不是走过场。
+                </p>
+                <div className="reset-acts">
+                  <button className="btn-mini danger" disabled={resetBusy} onClick={doReset}>
+                    {resetBusy ? "正在重置…" : (resetSeed ? "确认重置并载入演示样本" : "确认重置")}
+                  </button>
+                  <button className="btn-mini" disabled={resetBusy} onClick={() => setResetStep(0)}>取消</button>
+                </div>
+              </>
+            )}
+
+            {resetMsg && <p className="reset-msg">{resetMsg}</p>}
           </div>
         </div>
       )}

@@ -323,30 +323,39 @@ def normalize_record(bill_category: str, counterparty: str, description: str,
       platform = 平台给了真分类（最可信）
       keyword  = 靠「商户名 + 商品说明」关键词判
       fallback = 落「待确认」，等用户一句话（不叫「其他」——那是池子，不是类别）
+
+    ⚠️ **判定逻辑必须走 `categories.normalize_category`，不在这里重写一遍**
+    （2026-09-28 修）。起因：本函数原来自行实现「查 _PLATFORM_MAP → 关键词 → 兜底」，
+    与 `categories.py` 的 `normalize_category` 是**两份逻辑**——虽然表是从唯一权威表
+    引用的（见本文件上方 `_PLATFORM_MAP = _cat.PLATFORM_MAP`），但**歧义平台值**
+    的处理只加在了 `categories` 那一份里，于是这条通道悄悄绕过了修复：
+    外部样例「生活服务 + U净洗烘（洗衣）」仍然被判成「居住」。
+    外层的表都引用了、逻辑却没引用，等于只统一了半张表 —— 这里一并接回。
+    本函数只补 `normalize_category` 不负责的两件事：**中性方向的兜底**与**判定来源**。
     """
     bc = (bill_category or "").strip()
     # 关键词检索文本 = 商品说明 + 商户名
     # 商户名很关键：微信的「商户消费」不含任何类别信息，只能靠商户名判
+    ctx = (description, counterparty)
     text = f"{description or ''} {counterparty or ''}"
 
-    # 一级：平台分类精确映射
-    category, norm_source = None, "fallback"
-    if bc in _PLATFORM_MAP:
-        category = _PLATFORM_MAP[bc]
-        if category:
-            norm_source = "platform"
+    category = _cat.normalize_category(bc, *ctx)
+    if bc and bc in _cat.PLATFORM_NEEDS_KEYWORD:
+        # 歧义平台值：只有关键词确认放行时才记「平台给的分类」，否则如实记 keyword
+        blob = " ".join(str(t or "").strip().lower() for t in ctx if t)
+        norm_source = ("platform"
+                       if any(w in blob for w in _cat.PLATFORM_NEEDS_KEYWORD[bc])
+                       else "keyword")
+    elif bc and category and _cat.match_platform(bc) == category:
+        norm_source = "platform"
+    elif category == _cat.UNCONFIRMED_CATEGORY:
+        norm_source = "fallback"
+    else:
+        norm_source = "keyword"
 
-    # 二级：关键词下沉
-    if not category:
-        low = text.lower()
-        for name, words in _CATEGORY_RULES:
-            if any(w.lower() in low for w in words):
-                category, norm_source = name, "keyword"
-                break
-
-    # 三级：兜底
-    if not category:
-        category = "不计收支" if direction == "neutral" else "待确认"
+    # 三级：兜底 —— 中性方向（transfer/repay，充值提现还款）不参与收支统计
+    if category == _cat.UNCONFIRMED_CATEGORY and direction == "neutral":
+        category = _cat.NEUTRAL_CATEGORY
 
     nature = "rigid" if any(w in text for w in _RIGID_WORDS) else "flexible"
     attribution = ("business" if any(w.lower() in text.lower() for w in _BUSINESS_WORDS)

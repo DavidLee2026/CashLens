@@ -340,6 +340,10 @@ button{font-family:inherit}
 .fc-row:last-child{border-bottom:none}
 .fc-row .k{color:var(--text-2)}
 .fc-note{font-size:11px;color:var(--text-3);margin-top:8px}
+/* 区间宽到不可操作时的如实提示（2026-09-28 立）：不是错误态，是"这句话必须自己说出来"。
+   用风险色而非中性灰 —— 一个给不出可操作信息的区间是预警，不该长得像脚注。 */
+.fc-note.fc-warn{color:var(--risk);background:var(--risk-bg);
+  border-left:2px solid var(--risk);border-radius:4px;padding:6px 8px}
 /* 指标旁的小问号：悬停或点击都出一句人话解释 */
 .hint-q{position:relative;display:inline-flex;align-items:center;margin-left:6px;vertical-align:middle}
 .hint-q .q{width:15px;height:15px;border-radius:50%;border:1px solid var(--border);background:var(--white);
@@ -524,4 +528,12 @@ button{font-family:inherit}
 .about-list dd{flex:1;min-width:0;color:var(--text)}
 .about-note{margin-top:12px;padding-top:10px;border-top:1px dashed var(--gray-200);
   font-size:11px;color:var(--text-3);line-height:1.6}
+/* 设置弹窗（2026-09-29）：重置本机演示数据。两级确认，所以有一句「第 N / 2 步」的提示；
+   最后确认那条用风险色，跟普通按钮拉开距离（防手滑，不是走过场的那种确认）。 */
+.reset-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.reset-hint{margin-top:10px;font-size:11px;color:var(--text-3);line-height:1.6}
+.reset-warn{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--risk)}
+.reset-final{margin:0;font-size:12.5px;line-height:1.7;color:var(--text)}
+.reset-msg{margin-top:12px;padding-top:10px;border-top:1px dashed var(--gray-200);
+  font-size:12px;line-height:1.7;color:var(--text-2)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
