@@ -425,7 +425,7 @@ def test_unpaid_page_with_an_amount_makes_a_candidate_draft(tmp_path, monkeypatc
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
         "type": "expense", "doc_kind": "unpaid", "amount": 57.7, "refund_amount": 0,
         "occurred_at": "2026-09-18 13:25:00", "date": "2026-09-18",
-        "merchant": "高德打车平台由北京易行出行旅游有限公司运营并提供服务",
+        "merchant": "高德打车平台由某出行平台运营方运营并提供服务",
         "category": "交通", "items": [{"name": "特惠快车行程", "amount": 0}],
         "note": "页面显示去支付，尚未完成付款", "text_lines": [], "confidence": 0.8,
     })
@@ -523,7 +523,7 @@ def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatc
     """有票面金额的图照旧走原路：不许因为图里同时有别的数字就多建候选草稿。"""
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
         "type": "expense", "amount": 962.00, "date": "2026-09-12", "merchant": "某公司",
-        "category": "住宿", "invoice_no": "26537000000118274568", "confidence": 0.95,
+        "category": "住宿", "invoice_no": "26310000000000000001", "confidence": 0.95,  # privacy-ok 合成发票号（非真实票号）
         "text_lines": ["住宿费 962 元", "打车 186.79"],
     })
     intake.ingest(tmp_path, [{"name": "票.jpg", "rel_path": "x/票.jpg", "content": b"x"}])
@@ -536,7 +536,7 @@ def test_real_invoice_never_goes_through_the_candidate_path(tmp_path, monkeypatc
 def test_image_ingest_creates_drafts(tmp_path, monkeypatch):
     monkeypatch.setattr(intake, "recognize_file", lambda p: {
         "amount": 47.13, "date": "2026-09-18", "merchant": "李师傅",
-        "category": "交通", "invoice_no": "26537000000118274568", "confidence": 0.95,
+        "category": "交通", "invoice_no": "26310000000000000001", "confidence": 0.95,  # privacy-ok 合成发票号（非真实票号）
         "_cloud_uploaded": False,
     })
     out = intake.ingest(tmp_path, [

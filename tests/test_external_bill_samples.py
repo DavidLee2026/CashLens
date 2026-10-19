@@ -67,7 +67,7 @@ def test_ambiguous_platform_value_needs_keyword():
 
 def test_exact_platform_value_still_trusted():
     """精确平台值不受影响（回归护栏）：交通出行/文化休闲/转账红包 直接采纳。"""
-    assert c.normalize_category("交通出行", "哈尔滨市城市通智能卡有限责任公司", "地铁") == "交通"
+    assert c.normalize_category("交通出行", "哈尔滨市城市通智能卡有限责任公司", "地铁") == "交通"  # privacy-ok 第三方公开样例里的公司名（见 samples/bill_format_external/SOURCE.md）
     assert c.normalize_category("文化休闲", "哔哩哔哩会员购", "bilibili票务") == "娱乐"
     assert c.normalize_category("转账红包", "lxt(***)", "转账") == "人情"
 
@@ -143,7 +143,7 @@ def test_external_samples_classification_end_to_end(parsed):
     # ② 洗衣 → 待确认（曾判居住）
     assert [r["category"] for r in by_cp["UjingDevice"]] == [c.UNCONFIRMED_CATEGORY], "洗衣不得判成居住"
     # 交通与娱乐这两条是"不该被改坏"的对照
-    assert all(r["category"] == "交通" for r in by_cp["哈尔滨市城市通智能卡有限责任公司"])
+    assert all(r["category"] == "交通" for r in by_cp["哈尔滨市城市通智能卡有限责任公司"])  # privacy-ok 第三方公开样例里的公司名（见 samples/bill_format_external/SOURCE.md）
     assert [r["category"] for r in by_cp["哔哩哔哩会员购"]] == ["娱乐"]
 
 

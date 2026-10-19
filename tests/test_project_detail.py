@@ -76,8 +76,8 @@ def test_detail_invoices_deduped_and_listed(tmp_path):
     p = projects.create(tmp_path, "示例项目 A")
     d = str(tmp_path)
     events = [
-        _ev("expense", 96200, "住宿", p["id"], "2026-09-20T10:00:00", invoice_no="26537000000118274568"),
-        _ev("expense", 96200, "住宿", p["id"], "2026-09-20T11:00:00", invoice_no="26537000000118274568"),
+        _ev("expense", 96200, "住宿", p["id"], "2026-09-20T10:00:00", invoice_no="26310000000000000001"),  # privacy-ok 合成发票号（非真实票号）
+        _ev("expense", 96200, "住宿", p["id"], "2026-09-20T11:00:00", invoice_no="26310000000000000001"),  # privacy-ok 合成发票号（非真实票号）
         _ev("expense", 3000, "交通", p["id"], "2026-09-21T10:00:00"),          # 无发票号：不参与去重
     ]
     tmp_path, events = _book(tmp_path, *events)
@@ -86,7 +86,7 @@ def test_detail_invoices_deduped_and_listed(tmp_path):
     assert re_["invoice_count"] == 1                     # 同一号码只算一张
     assert re_["duplicate_count"] == 1                   # 重复的那笔如实报出来
     assert re_["no_duplicate"] is False
-    assert re_["invoices"][0]["invoice_no"] == "26537000000118274568"
+    assert re_["invoices"][0]["invoice_no"] == "26310000000000000001"  # privacy-ok 合成发票号（非真实票号）
     assert re_["invoices"][0]["amount_cents"] == 96200
 
 

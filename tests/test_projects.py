@@ -147,7 +147,7 @@ def test_legacy_v2_event_without_project_still_readable(tmp_path):
 def test_reimbursement_dedup_by_invoice_no(tmp_path):
     a = projects.create(tmp_path, "示例项目 A")
     book = _book(tmp_path)
-    no = "26537000000118274568"
+    no = "26310000000000000001"  # privacy-ok 合成发票号（非真实票号）
     book.append(_ev(datetime(2026, 9, 20), "expense", 96200, project=a["id"],
                     category="住宿", channel="receipt", invoice_no=no), strict_dedupe=True)
     # 渠道不同 → 去重键不同 → 第二笔确实进了账本，靠发票号码在归集时剔除
