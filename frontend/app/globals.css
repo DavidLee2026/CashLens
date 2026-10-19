@@ -24,6 +24,11 @@
   --brand-bg:rgba(99,91,255,.10);
   --income:var(--green-500);
   --income-bg:rgba(26,135,104,.10);
+  /* 💰 「钱」的颜色（2026-10-19 David 定：**红=收入，绿=支出**，中式账本习惯）。
+     ⚠️ 刻意不复用 --income / --risk：那两个还管着「确认入账」按钮、状态标签「比较稳」、
+     决策卡的通过态——它们不是钱，跟着变红会让人以为按钮是要删东西。 */
+  --money-in:var(--red-500);
+  --money-out:var(--green-500);
   --risk:var(--red-500);
   --risk-bg:rgba(224,54,75,.10);
   --warn:var(--amber-500);
@@ -250,6 +255,8 @@ button{font-family:inherit}
   background:none;border-radius:7px;padding:5px 8px;font-size:12px;color:var(--text-2);cursor:pointer}
 .model-subitem:hover{background:var(--gray-50);color:var(--text)}
 .model-subitem.on{background:var(--brand-bg);color:var(--brand);font-weight:600}
+/* 本机 Ollama 里没有这个模型：名字压暗、后面挂「本机未安装」，仍可点（可能刚 pull 完、探测还在缓存里） */
+.model-subitem.off>span:first-child{opacity:.55}
 .model-form{display:flex;flex-direction:column;gap:8px;margin:6px 0 4px 14px;padding:9px 10px;
   border:1px solid var(--brand);border-radius:9px;background:var(--brand-bg)}
 .model-form label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-2)}
@@ -263,6 +270,12 @@ button{font-family:inherit}
 .model-msg{font-size:11px;color:var(--text-3);padding:6px 10px 4px;line-height:1.5}
 .acts{margin-top:8px;border-top:1px dashed var(--gray-200);padding-top:8px}
 .act-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12.5px;color:var(--text-2);margin:4px 0}
+/* 对话卡底部的批量入口（2026-10-19）：一次来五笔时不该点十下。
+   放在卡片自己的底部，跟左边的「全部记上」是同一套动作，两处都会同步。 */
+.acts-batch{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;
+  padding-top:8px;border-top:1px dashed var(--gray-200);justify-content:flex-end}
+.acts-confirm{justify-content:space-between}
+.acts-confirm .ab-text{font-size:12px;color:var(--text-2);flex:1 1 220px;line-height:1.5}
 .btn-mini{border:1px solid var(--border);background:var(--white);border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;color:var(--text)}
 .btn-mini:hover{border-color:var(--brand);color:var(--brand)}
 .btn-mini.ok{background:var(--income-bg);border-color:var(--income);color:var(--income)}
@@ -340,6 +353,33 @@ button{font-family:inherit}
 .fc-row:last-child{border-bottom:none}
 .fc-row .k{color:var(--text-2)}
 .fc-note{font-size:11px;color:var(--text-3);margin-top:8px}
+/* 一块里的分隔标签（2026-10-19）：把「现在的状态」和「30 天后」分开，
+   但不再分成两张卡片 —— 同一条链，别让用户以为换了个话题。 */
+.sect-div{display:flex;align-items:center;gap:8px;margin:12px 0 6px;
+  font-size:11px;color:var(--text-3)}
+.sect-div::before,.sect-div::after{content:"";height:1px;background:var(--gray-200);flex:1}
+/* 总账目（2026-10-19）：沿用 KPI 小卡的形式（白底、大数字、底下小标签），
+   只是里面装的是钱不是百分比。金额比百分比长，所以 .money 略小一号并禁止换行。 */
+.kpi .cell .v.money{font-size:20px;letter-spacing:-.02em;white-space:nowrap}
+.hero-net{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--text-2);
+  margin:-2px 0 2px}
+.hero-net b{font-size:14px}
+.hero-net .hn-meta{color:var(--text-3)}
+/* 「你的账现在什么样」的三行钱（2026-10-19 换掉两个百分比）：
+   进来多少 / 出去多少 / 净多少 —— 对账要看的就这三个数。 */
+.acct{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.acct-row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;
+  padding:5px 0;border-bottom:1px dashed var(--gray-200)}
+.acct-row .k{color:var(--text-2)}
+.acct-row.total{border-bottom:none;font-weight:600}
+.acct-row.total .k{color:var(--text)}
+/* 2026-10-19 · A 版预测块：**一个数字 + 一句范围**（David 拍板「减少认知负担」）。
+   依据：Xero 的短期现金预测只给一个数；UKHSA 规范要求「主数字 + 紧随的范围 + 级别」。
+   所以数字放大到能一眼看见，范围紧随其后、只出现一次，依据退到脚注。 */
+.fc-hero{display:flex;justify-content:flex-end;padding:4px 0 2px}
+.fc-hero .num{font-size:26px;font-weight:700;line-height:1.2;letter-spacing:-.01em}
+.fc-band{font-size:12px;color:var(--text-2);text-align:right;line-height:1.55}
+.fc-band-wide{color:var(--warn);font-weight:600}
 /* 区间宽到不可操作时的如实提示（2026-09-28 立）：不是错误态，是"这句话必须自己说出来"。
    用风险色而非中性灰 —— 一个给不出可操作信息的区间是预警，不该长得像脚注。 */
 .fc-note.fc-warn{color:var(--risk);background:var(--risk-bg);
@@ -361,8 +401,8 @@ button{font-family:inherit}
    ⚠️ 这里**不再做局部滚动**：取消卡片之后左栏已经没有自己的滚动条了，
    再在这一块里塞第二个滚动条就是 David 说的「三处滚动、看着头晕」。 */
 .ev-list{display:flex;flex-direction:column}
-.amt-in{color:var(--income);font-weight:700}
-.amt-out{color:var(--risk);font-weight:700}
+.amt-in{color:var(--money-in);font-weight:700}
+.amt-out{color:var(--money-out);font-weight:700}
 .empty{color:var(--text-3);font-size:13px;text-align:center;padding:18px 0}
 /* 项目改名内联输入：沿用既有 token，不引入新色值 */
 .proj-edit{display:flex;align-items:center;gap:6px;margin:0 0 8px}
@@ -416,7 +456,7 @@ button{font-family:inherit}
 .pd-row:first-of-type{border-top:none;padding-top:2px}
 .pd-main{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .pd-amt{font-size:14px;font-weight:700;color:var(--text)}
-.pd-amt.in{color:var(--income)}
+.pd-amt.in{color:var(--money-in)}
 .pd-meta{font-size:11px;color:var(--text-2);line-height:1.4;word-break:break-all}
 .pd-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .pd-acts .proj-pick{max-width:132px;flex:1 1 110px}

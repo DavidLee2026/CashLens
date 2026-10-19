@@ -335,7 +335,7 @@ def test_import_box_can_be_cancelled_and_says_what_cancelling_really_does():
     # 诚实性：不许把取消报成「导入失败」，也不许承诺"立刻全停"
     assert "已取消导入（" in src and "后面的文件不再处理" in src
     assert "正在读的那个会跑完（识别没法中途打断）" in src, "识别没法中途打断，这句必须写出来"
-    assert "已读出来的草稿留在「待确认」里，不需要的话在那里点「全部取消」" in src, (
+    assert "已读出来的草稿留在「待确认」里，不需要的话在那里点「全部不要」" in src, (
         "取消后要告诉用户已经读出来的草稿在哪、怎么丢掉"
     )
     assert "const inflight = blocks.some((b) => !b.done)" in src, (
@@ -412,3 +412,20 @@ def test_chat_timesheet_reply_renders_the_same_card_with_outsourcing_wording():
     assert "单价待补" in src and "rate_missing" in src, "没有单价的人不许被算成钱"
     assert '"sheet" = Excel' in src or "source === \"chat\"" in src
     assert ".ts-kind{" in _css()
+
+
+def test_money_colors_are_red_in_green_out():
+    """金额配色（2026-10-19 David 明确要求）：**红=收入，绿=支出**（中式记账/看盘习惯）。
+
+    刻意用独立的 --money-in / --money-out，不去改 --income / --risk ——
+    后两个还管着「确认入账」按钮、状态标签「比较稳」、决策卡通过态，
+    跟着变红会让人以为按钮是要删东西。
+    """
+    css = _CSS.read_text(encoding="utf-8")
+    assert "--money-in:var(--red-500)" in css
+    assert "--money-out:var(--green-500)" in css
+    assert ".amt-in{color:var(--money-in)" in css
+    assert ".amt-out{color:var(--money-out)" in css
+    # 语义色不许被顺手改掉（确认入账仍是绿、⚠️ 仍是红）
+    assert ".btn-mini.ok{background:var(--income-bg)" in css
+    assert ".t-fragile{color:var(--risk)" in css

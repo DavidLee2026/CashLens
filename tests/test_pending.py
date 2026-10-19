@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parents[1]
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.services import pending  # noqa: E402
 from app.services.categories import UNCONFIRMED_CATEGORY  # noqa: E402
@@ -126,9 +128,7 @@ def _isolate_paths(tmp_path, monkeypatch):
     """
     from app import main
 
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     return main
 
 
@@ -154,7 +154,7 @@ def test_accept_endpoint_keeps_draft_category_when_body_has_empty_category(tmp_p
         r = (client.post(f"/api/pending/{d['id']}/accept", json=body) if body is not None
              else client.post(f"/api/pending/{d['id']}/accept"))
         assert r.status_code == 200, r.text
-        got = [e for e in main.EventLedger(main.LEDGER_PATH).load()
+        got = [e for e in main.EventLedger(main.ledger_path()).load()
                if e.get("amount_cents") == 96200]
         assert got, "确认后账本里应当有这笔"
         assert got[-1]["category"] == "住宿", (
@@ -174,7 +174,7 @@ def test_accept_endpoint_still_honours_a_real_category_override(tmp_path, monkey
                        category="待确认", channel="receipt", note="说不清的一笔")
     r = client.post(f"/api/pending/{d['id']}/accept", json={"category": "餐饮"})
     assert r.status_code == 200, r.text
-    got = [e for e in main.EventLedger(main.LEDGER_PATH).load()
+    got = [e for e in main.EventLedger(main.ledger_path()).load()
            if e.get("amount_cents") == 8800]
     assert got[-1]["category"] == "餐饮"
 
@@ -206,7 +206,7 @@ def test_pending_endpoint_resolves_project_name(tmp_path, monkeypatch):
     from app import main
     from app.services import projects
 
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     pid = projects.create(tmp_path, "示例项目 A")["id"]
     pending.create(tmp_path, direction="expense", amount_cents=4050, category="购物",
                    channel="receipt", note="便利店", project=pid)
@@ -237,7 +237,7 @@ def test_pending_endpoint_keeps_panel_fields(tmp_path, monkeypatch):
 
     from app import main
 
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     (tmp_path / "pending.json").write_text(json.dumps([{
         "id": "abc123", "direction": "expense", "amount_cents": 4050, "category": "购物",
         "channel": "receipt", "note": "", "counterparty": "某连锁便利店有限公司",
@@ -278,7 +278,7 @@ def test_batch_confirm_stays_behind_an_explicit_second_click():
     """
     src = _page_tsx()
 
-    assert "全部确认" in src, "左栏待确认面板应有批量入口"
+    assert "全部记上" in src, "左栏待确认面板应有批量入口（2026-10-19 文案由「全部确认」改口）"
     assert 'setBatchAsk("accept")' in src, "批量入口只能打开确认条，不能直接入账"
     # 确认条里要摆数字再让用户点
     assert "batchExpense" in src and "batchIncome" in src, "确认条要先摆出支出/收入合计"
@@ -331,7 +331,7 @@ def test_batch_decline_asks_first_and_never_touches_the_ledger():
     """
     src = _page_tsx()
 
-    assert "全部取消" in src, "待确认面板应有批量丢弃入口"
+    assert "全部不要" in src, "待确认面板应有批量丢弃入口（2026-10-19 文案由「全部取消」改口）"
     assert 'setBatchAsk("decline")' in src, "批量丢弃入口只能打开确认条，不能直接丢"
     assert "确认全部不要" in src, "确认条里要有明确的「确认全部不要」按钮"
     assert "账本不受影响" in src, "要如实说明丢弃草稿不影响账本"
@@ -375,9 +375,7 @@ def test_panel_offers_a_category_picker_for_unconfirmed_rows_and_never_labels_it
 
 def _temp_data(tmp_path, monkeypatch):
     from app import main
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     return tmp_path
 
 
@@ -399,7 +397,7 @@ def test_same_manual_entry_confirmed_twice_records_twice(tmp_path, monkeypatch):
                            category="交通", channel="manual", note="打车")
         assert client.post(f"/api/pending/{d['id']}/accept", json={}).json()["appended"] is True
 
-    events = [e for e in main.EventLedger(main.LEDGER_PATH).load() if e["type"] == "expense"]
+    events = [e for e in main.EventLedger(main.ledger_path()).load() if e["type"] == "expense"]
     assert len(events) == 2, f"口述两笔应当记两笔，实际 {len(events)} 笔"
     assert sum(e["amount_cents"] for e in events) == 5600
     assert pending.list_all(tmp_path) == [], "两笔都写成功了，草稿应当都已弹掉"
@@ -429,7 +427,7 @@ def test_duplicate_file_draft_is_skipped_but_the_draft_is_kept(tmp_path, monkeyp
     assert second["appended"] is False, "同一份票据导入两次，第二笔应当被去重挡下"
     assert len(pending.list_all(tmp_path)) == 1, "被挡下的那笔草稿必须留着，不能静默删掉"
 
-    events = [e for e in main.EventLedger(main.LEDGER_PATH).load() if e["type"] == "expense"]
+    events = [e for e in main.EventLedger(main.ledger_path()).load() if e["type"] == "expense"]
     assert len(events) == 1, "去重生效：账本里只应有一笔"
 
 
@@ -459,7 +457,7 @@ def test_dropped_drafts_can_be_restored_by_the_undo_button(tmp_path, monkeypatch
 
     from app import main
 
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     (tmp_path / "pending.json").write_text(json.dumps([
         {"id": f"d{i}", "direction": "expense", "amount_cents": 1000 + i,
          "category": "交通", "channel": "receipt", "note": "", "counterparty": "",
@@ -479,3 +477,19 @@ def test_dropped_drafts_can_be_restored_by_the_undo_button(tmp_path, monkeypatch
     assert client.post("/api/pending/restore", json={}).json()["restored"] == 0
     # 撤回**不写账本**（丢弃本来就没入账）
     assert not (tmp_path / "finance_events.jsonl").exists()
+
+
+def test_chat_card_batch_entry_is_two_step_and_clears_after_batch():
+    """对话卡里的批量入口（2026-10-19 David：一次来五笔不该点十下）。
+
+    两件事必须同时成立：
+    ① **不能一键直入账** —— 点一下只能先"问"，再点确认才动账本（红线：用户确认环节不得取消）；
+    ② 批量做完后，对话卡里那排草稿要**跟着消失** —— 否则左边点完、右边还挂着按钮，
+       用户会以为没生效（2026-10-19 真机就是这样：左边「全部记上」点完，右边五排按钮还在）。
+    """
+    src = (_ROOT / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+    assert "全部记上（" in src, "对话卡里应有批量入账入口"
+    assert 'setChatAsk({ ids, kind: "accept" })' in src, "批量入账必须先问一次"
+    assert 'setChatAsk({ ids, kind: "decline" })' in src, "批量丢弃也必须先问一次"
+    assert "msg.pending.filter((x) => !gone.has(x.id))" in src, (
+        "批量后必须把草稿从对话卡里摘掉（否则左右不同步）")

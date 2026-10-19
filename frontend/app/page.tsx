@@ -109,6 +109,8 @@ type StateT = {
   cashflow_confidence: number;
   stability_days: number;
   events_count: number;
+  income_30d_cents?: number;
+  expense_30d_cents?: number;
 };
 type Fc = {
   median_balance_cents: number;
@@ -116,9 +118,13 @@ type Fc = {
   band90_high_cents: number;
   confidence: number;
   insufficient?: boolean;
-  /** false 表示数据不足、后端没有做外推（此时三档数值是「当前已知净额」，不是 30 天预测）。 */
+  /** false 表示数据不足、后端没有做外推（此时三档数值是「现在账上的净额」，不是 30 天预测）。 */
   extrapolated?: boolean;
   reason: string;
+  /** 还差多少才够外推（2026-10-19）：界面用它给出**可行动**的一句，而不是一个百分比 */
+  need_days?: number;
+  need_weeks?: number;
+  days_with_records?: number;
 };
 type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
 /** 项目维度：账本只存稳定 id，显示名来自后端映射表，改名不会动账本。 */
@@ -256,6 +262,8 @@ type LocalPreset = {
   model: string;
   vision: boolean | null;
   note?: string;
+  /** 本机 Ollama 是否真的装了这个模型（后端探测）：true/false 是结论，null 是探不到 */
+  installed?: boolean | null;
 };
 type ModelsView = {
   tier: "cloud" | "local" | "none";
@@ -361,12 +369,12 @@ const CHANNEL_CN: Record<string, string> = { wechat: "微信", alipay: "支付�
 /** 「最近事件」默认露几条（其余点「展开其余 N 笔」看，不在该区域里二次滚动）。 */
 const EV_WINDOW = 5;
 const LABEL_CN: Record<string, string> = {
-  unknown: "现金流不明",
-  learning: "数据积累中", // 原为「学习中」：放顶栏时看不明白，语义是引擎还在积累你的经营节奏
-  fragile: "现金流脆弱",
+  unknown: "还说不准",
+  learning: "还在攒数据", // 原为「学习中」：放顶栏时看不明白，语义是引擎还在积累你的经营节奏
+  fragile: "周转偏紧",
   review_due: "需复查",
-  stable: "稳健",
-  misconception: "财务误区",
+  stable: "比较稳",
+  misconception: "有个地方要提醒",
 };
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
@@ -376,7 +384,7 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 /** 指标旁的「?」：悬停或点击都显示一句人话解释。
- *  起因：连开发者自己都要回头查的指标（健康度、区间下沿），不该让客户去猜。 */
+ *  起因：连开发者自己都要回头查的指标（记账证据、最少可能），不该让客户去猜。 */
 function Hint({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -451,6 +459,8 @@ export default function Workbench() {
      ⚠️ 不做成一键直入账——合规红线是「用户确认环节不得为体验而取消」，
      所以这里仍然是用户显式点的，而且要先把「共几笔 / 多少钱 / 其中几笔带核对提示」摆出来。 */
   const [batchAsk, setBatchAsk] = useState<null | "accept" | "decline">(null);
+  /** 对话卡里的批量确认（2026-10-19 David：右边也要能一次全入账，不要一个个点） */
+  const [chatAsk, setChatAsk] = useState<null | { ids: string[]; kind: "accept" | "decline" }>(null);
   const [undoBusy, setUndoBusy] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const [renamingId, setRenamingId] = useState("");
@@ -817,6 +827,9 @@ export default function Workbench() {
     if (!targets.length || batchBusy) return;
     setBatchBusy(true);
     let done = 0, skipped = 0, incomeCents = 0, expenseCents = 0;
+    // 真写进账本的 id：入账后要从对话卡里也摘掉（2026-10-19 修：以前只刷新左栏，
+    // 对话里那排「确认入账」不会消失，用户以为没生效 —— 实际已经入账了）
+    const consumedIds: string[] = [];
     try {
       for (const p of targets) {
         const proj = draftProject[p.id] ?? p.project ?? "";
@@ -830,6 +843,7 @@ export default function Workbench() {
         // 于是一次批量报了「4 笔（支出 ¥112.00）」而账本只有 1 笔（2026-09-28 真机）。
         if (r.appended === false) { skipped += 1; continue; }
         done += 1;
+        consumedIds.push(p.id);
         if (p.direction === "income") incomeCents += p.amount_cents;
         else expenseCents += p.amount_cents;
       }
@@ -845,18 +859,25 @@ export default function Workbench() {
     } finally {
       setBatchBusy(false);
       setBatchAsk(null);
+      if (consumedIds.length) {
+        const gone = new Set(consumedIds);
+        setMsgs((m) => m.map((msg) => msg.pending
+          ? { ...msg, pending: msg.pending.filter((x) => !gone.has(x.id)) }
+          : msg));
+      }
       refresh();
     }
   }
 
   /** 批量取消（丢弃草稿）：拖错文件夹时用，省得一笔一笔点「不要」。
-      ⚠️ 它**不写账本** —— 这些草稿本来就还没入账，所以「全部取消」不产生任何账本记录；
+      ⚠️ 它**不写账本** —— 这些草稿本来就还没入账，所以「全部不要」不产生任何账本记录；
       丢弃是**软删除**（草稿进回收站），那句话后面跟着「撤回」按钮，点了就放回来。 */
   async function actBatchDecline(ids: string[]) {
     const targets = pendingList.filter((p) => ids.includes(p.id));
     if (!targets.length || batchBusy) return;
     setBatchBusy(true);
     let done = 0;
+    const decIds = targets.map((p) => p.id);
     const group = `undo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     try {
       for (const p of targets) {
@@ -873,6 +894,12 @@ export default function Workbench() {
     } finally {
       setBatchBusy(false);
       setBatchAsk(null);
+      if (decIds.length) {
+        const gone = new Set(decIds);
+        setMsgs((m) => m.map((msg) => msg.pending
+          ? { ...msg, pending: msg.pending.filter((x) => !gone.has(x.id)) }
+          : msg));
+      }
       refresh();
     }
   }
@@ -1324,7 +1351,7 @@ export default function Workbench() {
         const inflight = blocks.some((b) => !b.done);
         const parts = ["后面的文件不再处理"];
         if (inflight) parts.push("正在读的那个会跑完（识别没法中途打断）");
-        if (done > 0) parts.push("已读出来的草稿留在「待确认」里，不需要的话在那里点「全部取消」");
+        if (done > 0) parts.push("已读出来的草稿留在「待确认」里，不需要的话在那里点「全部不要」");
         paint(`已取消导入（${done}/${items.length} 个已处理完）。${parts.join("；")}。`, false);
       } else {
         paint(`导入失败：${err instanceof Error ? err.message : String(err)}`, false);
@@ -1396,13 +1423,22 @@ export default function Workbench() {
     }
   }
 
-  const healthPct = state ? Math.round(state.financial_health * 100) : 0;
-  const confPct = state ? Math.round(state.cashflow_confidence * 100) : 0;
+  /* 2026-10-19：原来这里算「记账证据 %」「推算靠不靠谱 %」两个分数，已按 David 的判断删掉 ——
+     它们不回答用户的问题（进来多少 / 出去多少 / 还差什么），其中 100% 那个还把「刚进账」说成「很靠谱」。 */
   // 30 天 90% 区间的宽度（元）。区间宽到这个量级时，它已经给不出可操作的信息 ——
   // 此时**必须自己说出来**，不能只摆一个好看的「可信度 100%」（2026-09-28 立）。
   // 阈值是**呈现层的可读性阈值，不是统计阈值**：小微经营者的一次决策量级在千元到万元，
   // ±10 万以上等于「什么情况都可能」，写死在这里是为了让这条判断可被测试钉住。
   const FC_WIDE_YUAN = 100000;
+  const net30Cents = (state?.income_30d_cents ?? 0) - (state?.expense_30d_cents ?? 0);
+  /* 「还差多少才能预测」——说成能行动的下一步，而不是一个百分比（2026-10-19） */
+  const gapText = !fc
+    ? ""
+    : (fc.need_days ?? 0) > 0
+      ? `再记 ${fc.need_days} 天（每天至少一笔），就能给出 30 天预测`
+      : (fc.need_weeks ?? 0) > 0
+        ? `还差 ${fc.need_weeks} 周有进出，就能给出 30 天预测`
+        : "再多记几笔，就能给出 30 天预测";
   const fcBandWidthYuan = fc && fc.extrapolated !== false
     ? Math.abs(fc.band90_high_cents - fc.band90_low_cents) / 100
     : 0;
@@ -1675,6 +1711,51 @@ export default function Workbench() {
                           </button>
                         </div>
                       ))}
+                      {/* 一次来五笔时不该点十下：批量入口放在这张卡自己的底部。
+                          ⚠️ 仍然要点两次（先问后做）——「不得取消用户确认」是红线。 */}
+                      {(m.pending?.length ?? 0) > 1 && (() => {
+                        const pend = m.pending ?? [];
+                        const ids = pend.map((x) => x.id);
+                        const asking = chatAsk && chatAsk.ids.join(",") === ids.join(",") ? chatAsk : null;
+                        const sum = (kind: "income" | "expense") =>
+                          pend.filter((x) => x.direction === kind)
+                            .reduce((a, x) => a + x.amount_cents, 0);
+                        if (!asking) {
+                          return (
+                            <div className="acts-batch">
+                              <button className="btn-mini ok" disabled={batchBusy}
+                                onClick={() => setChatAsk({ ids, kind: "accept" })}>
+                                全部记上（{pend.length} 笔）
+                              </button>
+                              <button className="btn-mini" disabled={batchBusy}
+                                onClick={() => setChatAsk({ ids, kind: "decline" })}>
+                                全部不要
+                              </button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="acts-batch acts-confirm">
+                            <span className="ab-text">
+                              {asking.kind === "accept"
+                                ? <>把这 {pend.length} 笔都记上？支出 <b>{yuan(sum("expense"))}</b>
+                                    {sum("income") > 0 && <> · 收入 <b>{yuan(sum("income"))}</b></>}</>
+                                : <>这 {pend.length} 笔都不要？<b>账本不受影响</b>，需要时重新说一遍即可。</>}
+                            </span>
+                            <button className="btn-mini ok" disabled={batchBusy}
+                              onClick={() => {
+                                const target = asking.kind === "accept" ? actBatch : actBatchDecline;
+                                setChatAsk(null);
+                                target(ids);
+                              }}>
+                              {batchBusy ? "处理中…" : asking.kind === "accept" ? "确认入账" : "确认丢弃"}
+                            </button>
+                            <button className="btn-mini" disabled={batchBusy} onClick={() => setChatAsk(null)}>
+                              取消
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1812,10 +1893,18 @@ export default function Workbench() {
                                   key={p.id}
                                   className={`model-subitem${
                                     t.active && t.preset_id === p.id && !customEditing ? " on" : ""
-                                  }`}
+                                  }${p.installed === false ? " off" : ""}`}
                                   onClick={() => pickLocalPreset(p.id)}
+                                  title={
+                                    p.installed === false
+                                      ? `本机 Ollama 里没有这个模型，先执行 ollama pull ${p.model}`
+                                      : undefined
+                                  }
                                 >
                                   <span>{p.label}</span>
+                                  {p.installed === false && (
+                                    <span className="mi-warn">本机未安装</span>
+                                  )}
                                   {p.vision === null && <span className="mi-warn">需确认</span>}
                                   {p.vision === false && <span className="mi-warn">无图像</span>}
                                 </button>
@@ -1934,10 +2023,36 @@ export default function Workbench() {
               </span>
             </div>
             <div className="side-body">
+            {/* 总账目（2026-10-19 David：「需要把总账目的收入和支出在左边显示出来，
+                用比较大的形式，让客户一目了然」）。放在最上面 = 打开工作台第一眼就是这两个数。
+                口径与「总账户」那一行、以及查询完全一致（accountTotals），不另算一套。 */}
+            <section className="sect acct-hero">
+              <div className="sect-head">
+                <h3>总账目</h3>
+              </div>
+              {/* 形式按 David 的要求回到「两张白卡片 + 大数字」（2026-10-19 二次调整）：
+                  之前那个百分比版的样子是对的，只是里面装的应该是钱、不是分数。 */}
+              <div className="kpi">
+                <div className="cell">
+                  <div className="v num money amt-in">{yuan(acct.income)}</div>
+                  <div className="k">收入</div>
+                </div>
+                <div className="cell">
+                  <div className="v num money amt-out">{yuan(acct.expense)}</div>
+                  <div className="k">支出</div>
+                </div>
+              </div>
+              <div className="hero-net">
+                净 <b className={`num ${acct.income - acct.expense < 0 ? "amt-out" : "amt-in"}`}>
+                  {acct.income - acct.expense < 0 ? "" : "+"}{yuan(acct.income - acct.expense)}
+                </b>
+                <span className="hn-meta">· 全部项目 · {acct.count} 笔</span>
+              </div>
+            </section>
             {/* 项目维度：账本按项目归集，这里是项目的唯一入口 */}
             <section className="sect">
               <div className="sect-head">
-                <h3>项目（按项目归集）</h3>
+                <h3>项目（分开算）</h3>
                 <button
                   className="btn-mini"
                   onClick={() => { setCreatingProj(true); setNewProjName(""); setProjMsg(""); }}
@@ -1980,7 +2095,7 @@ export default function Workbench() {
                   支出 {yuan(acct.expense)} · 收入 {yuan(acct.income)} · {acct.count} 笔
                 </span>
               </button>
-              <div className="proj-tip">点一个项目＝新账默认记到它；每笔在确认时还能单独改</div>
+              <div className="proj-tip">点一个项目，之后记的账默认算它的；每一笔都能改</div>
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
                 <div className="empty">还没有项目。点上面的「新建项目」，或记账时说一句「这笔记到 示例项目 A」，就建好了</div>
               ) : (
@@ -2192,7 +2307,7 @@ export default function Workbench() {
                 <div className="sect-head">
                   <h3>待确认（{pendingList.length}）</h3>
                   {batchAsk ? (
-                    <span className="sect-note">确认后才入账</span>
+                    <span className="sect-note">你点了才算记上</span>
                   ) : (
                     <span className="sect-acts">
                       <button
@@ -2201,7 +2316,7 @@ export default function Workbench() {
                         title="一次确认多笔：仍然由你点，机器不会自动入账；会先把总笔数、总额与带「需核对」提示的笔数摆出来"
                         onClick={() => setBatchAsk("accept")}
                       >
-                        {batchBusy ? "处理中…" : "全部确认"}
+                        {batchBusy ? "处理中…" : "全部记上"}
                       </button>
                       <button
                         className="btn-mini"
@@ -2209,7 +2324,7 @@ export default function Workbench() {
                         title="一次丢弃多笔（拖错文件夹时用）：只删待确认草稿，账本不受影响，需要时把文件重新拖进来即可"
                         onClick={() => setBatchAsk("decline")}
                       >
-                        全部取消
+                        全部不要
                       </button>
                     </span>
                   )}
@@ -2323,109 +2438,65 @@ export default function Workbench() {
             )}
 
             <section className="sect">
+              {/* 2026-10-19 合并：原来「你的账现在什么样」和「还推不出 30 天后」是两块，
+                  各说一遍「再记 4 天」—— 其实是一条链：**状态 → 能不能预测 → 预测结果**。
+                  现在一块里说完：上面是近 30 天，中间一条分隔，下面是 30 天后。 */}
               <div className="sect-head">
-                <h3>财务状态（状态引擎）</h3>
+                <h3>你的账现在什么样</h3>
                 <span
                   className={`tag ${state ? `t-${state.label}` : "t-unknown"}`}
-                  title="状态引擎按证据强度算出来的当前状态标签；可信度低时会如实说「现金流不明」"
+                  title="按你账本里的证据算出来的当前状态；数据太少时会直说「还说不准」，不硬给结论"
                 >
                   <span className="dot" />
                   {state ? LABEL_CN[state.label] ?? state.label : apiOk ? "载入中…" : "后端未连接"}
                 </span>
               </div>
-              <div className="kpi">
-                <div className="cell">
-                  <div className="v num">{healthPct}%</div>
-                  <div className="k">
-                    健康度
-                    <Hint text="按你记的每一笔逐笔更新：收入把它推高、支出把它压低，证据越硬权重越大。它不是资产数字，是账本证据算出来的状态分。" />
-                  </div>
-                </div>
-                <div className="cell">
-                  <div className="v num">{confPct}%</div>
-                  <div className="k">
-                    现金流可信度
-                    <Hint text="看最近一笔收入距今多久、收入间隔稳不稳。越久没进账、间隔越乱，这个数字越低；数据太少时它会很低，我们就直接说「现金流不明」，不编数字。" />
-                  </div>
-                </div>
-              </div>
-              <div className="bar good">
-                <i style={{ width: `${healthPct}%` }} />
-              </div>
-              <div className="bar">
-                <i style={{ width: `${confPct}%` }} />
-              </div>
               <div className="fc-note">
-                可信度只看「最近一笔收入距今多久、收入间隔稳不稳」，它衡量的是
-                <b>进账节奏的可信度</b>，不是「下面这个区间有多准」——区间有多宽要看下面三行。
+                近 30 天：收 {yuan(state?.income_30d_cents ?? 0)} ·
+                支 {yuan(state?.expense_30d_cents ?? 0)} ·
+                净 {net30Cents < 0 ? "" : "+"}{yuan(net30Cents)}
               </div>
-            </section>
 
-            <section className="sect">
-              <div className="sect-head">
-                <h3>
-                  {fc && fc.extrapolated === false
-                    ? "现金流预测（数据不足，暂不外推）"
-                    : "未来 30 天现金流（90% 区间）"}
-                  <Hint text="按你过去 90 天的收支节奏往后推 30 天。区间下沿是偏悲观的情形、上沿是偏乐观的情形，真实结果大约有 90% 的可能性落在这两条线之间。" />
-                </h3>
-              </div>
-              {fc ? (
-                fc.extrapolated === false ? (
-                  <>
-                    <div className="fc-row">
-                      <span className="k">
-                        当前已知净额
-                        <Hint text="账本里所有收入减掉所有支出之后的数。数据还不够 5 天，我们不硬推 30 天，只把已经记下的实情告诉你。" />
-                      </span>
-                      <b className={`num ${fc.median_balance_cents < 0 ? "amt-out" : "amt-in"}`}>
-                        {yuan(fc.median_balance_cents)}
-                      </b>
-                    </div>
-                    <div className="fc-note">{fc.reason}</div>
-                  </>
-                ) : (
-                  <>
-                    <div className="fc-row">
-                      <span className="k">
-                        期末预计（中位）
-                        <Hint text="30 天后最可能落在的位置：一半概率高于它、一半低于它。" />
-                      </span>
-                      <b className="num">{yuan(fc.median_balance_cents)}</b>
-                    </div>
-                    <div className="fc-row">
-                      <span className="k">
-                        区间下沿
-                        <Hint text="偏悲观的情形：90% 的可能，30 天后的余额不会低于这个数。" />
-                      </span>
-                      <b className={`num ${fc.band90_low_cents < 0 ? "amt-out" : "amt-in"}`}>{yuan(fc.band90_low_cents)}</b>
-                    </div>
-                    <div className="fc-row">
-                      <span className="k">
-                        区间上沿
-                        <Hint text="偏乐观的情形：90% 的可能，30 天后的余额不会高于这个数。" />
-                      </span>
-                      <b className="num">{yuan(fc.band90_high_cents)}</b>
-                    </div>
-                    <div className="fc-note">{fc.reason} · 可信度低时如实标注「现金流不明」</div>
-                    {fcTooWide && (
-                      <div className="fc-note fc-warn">
-                        这个区间宽到 ¥{Math.round(fcBandWidthYuan).toLocaleString("zh-CN")}
-                        （下沿到上沿），<b>已经给不出可操作的信息</b>：本次外推只用到
-                        {" "}{fc.reason.match(/(\d+)\s*天有记录/)?.[1] ?? "很少"}{" "}
-                        天有记录，记账天数越多、区间会自动收窄。
-                      </div>
-                    )}
-                  </>
-                )
-              ) : (
+              <div className="sect-div"><span>30 天后</span></div>
+              {!fc ? (
                 <div className="empty">{apiOk ? "等待数据…" : "后端未连接"}</div>
+              ) : fc.extrapolated === false ? (
+                <>
+                  {/* 还推不出来时：只报「现在账上的净额」，把「还差几天」说成能行动的下一步 */}
+                  <div className="fc-row">
+                    <span className="k">
+                      现在账上的净额
+                      <Hint text="收入减支出，就是账本里的净额。数据还不够，我们不硬推 30 天，只把已经记下的实情告诉你。" />
+                    </span>
+                    <b className={`num ${fc.median_balance_cents < 0 ? "amt-out" : "amt-in"}`}>
+                      {yuan(fc.median_balance_cents)}
+                    </b>
+                  </div>
+                  <div className="fc-note">
+                    近 90 天只有 {fc.days_with_records ?? 0} 天有记录 —— {gapText}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* 能推的时候：一个数字 + 一句范围 + 一行依据（A 版，2026-10-19） */}
+                  <div className="fc-hero">
+                    <b className={`num ${fc.median_balance_cents < 0 ? "amt-out" : ""}`}>
+                      {yuan(fc.median_balance_cents)}
+                    </b>
+                  </div>
+                  <div className={`fc-band${fcTooWide ? " fc-band-wide" : ""}`}>
+                    大概率在 {yuan(fc.band90_low_cents)} 到 {yuan(fc.band90_high_cents)} 之间
+                    {fcTooWide && <> —— <b>范围太宽，还看不出规律</b></>}
+                    {fc.band90_low_cents < 0 && <> · 最少的时候可能不够付</>}
+                  </div>
+                  <div className="fc-note">{fc.reason} · 九成把握落在这个范围</div>
+                </>
               )}
             </section>
 
             <section className="sect">
               <div className="sect-head">
-                <h3>最近事件</h3>
+                <h3>最近记的账</h3>
                 {events.length > EV_WINDOW && (
                   <span className="sect-note">共 {events.length} 笔</span>
                 )}
@@ -2499,7 +2570,7 @@ export default function Workbench() {
                     : " · 还没有账本记录"}
                 </div>
 
-                <h4 className="dt-h">支出构成（按分类）</h4>
+                <h4 className="dt-h">钱花在哪了（按分类）</h4>
                 {detail.expense_by_category.length === 0
                   ? <div className="dt-empty">还没有支出记录</div>
                   : detail.expense_by_category.map((c) => (
@@ -2512,7 +2583,7 @@ export default function Workbench() {
                       </div>
                     ))}
 
-                <h4 className="dt-h">收入构成（按分类）</h4>
+                <h4 className="dt-h">钱从哪来（按分类）</h4>
                 {detail.income_by_category.length === 0
                   ? <div className="dt-empty">还没有收入记录</div>
                   : detail.income_by_category.map((c) => (
@@ -2705,7 +2776,7 @@ export default function Workbench() {
               </div>
               <div>
                 <dt>能做什么</dt>
-                <dd>票据与账单导入（图片 / PDF / Excel 报销表 / CSV）、财务状态引擎、现金流区间预测；接单报价决策开发中。</dd>
+                <dd>票据与账单导入（图片 / PDF / Excel 报销表 / CSV）、账本状态判断、30 天收支推算；接单报价决策开发中。</dd>
               </div>
               <div>
                 <dt>开发者</dt>
