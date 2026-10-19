@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import (categories, data_reset, intake, invoice_tax, llm_skill,
+from .services import (categories, data_reset, export_xlsx, intake, invoice_tax, llm_skill,
                        model_config, parser_rule, pending, projects, query_tools,
                        session_mem, tenancy, timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
@@ -265,6 +265,27 @@ def add_event(ev: EventIn):
     if project_hint:
         out["project_hint"] = project_hint
     return out
+
+
+@app.get("/api/export/xlsx")
+def export_ledger_xlsx(project: str = ""):
+    """导出账目为 Excel（明细 + 汇总）。project 留空＝全部项目。
+
+    口径与工作台**完全一致**：复用 `projects.summary()`，同项目内同号发票只计一次，
+    被剔除的行在明细里标出来、汇总里单列一行（不许悄悄删）。
+    """
+    from urllib.parse import quote
+    try:
+        data, filename = export_xlsx.build_workbook(data_dir(), _events(), project=project)
+    except ValueError as e:  # 项目名解析不到
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    disposition = (f"attachment; filename=\"account.xlsx\"; "
+                   f"filename*=UTF-8''{quote(filename)}")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": disposition},
+    )
 
 
 @app.get("/api/events")

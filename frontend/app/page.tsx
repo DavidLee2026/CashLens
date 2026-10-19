@@ -938,6 +938,30 @@ export default function Workbench() {
     return parts.join(" · ");
   }
 
+  /** 导出 Excel（2026-10-19）：走 fetch + blob，而不是直接 location.href ——
+      这样后端出错（比如项目名解析不到 404）时能如实提示，而不是把浏览器带到一页 JSON 上。 */
+  async function exportXlsx(projectId: string) {
+    try {
+      const r = await fetch(`/api/export/xlsx${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const cd = r.headers.get("content-disposition") ?? "";
+      const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+      const name = m ? decodeURIComponent(m[1]) : "CashLens-账目.xlsx";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMsgs((m2) => [...m2, { role: "ai", text: `已导出：${name}（明细 + 汇总两张表）` }]);
+    } catch {
+      setMsgs((m2) => [...m2, { role: "ai", text: "导出失败：请确认后端在运行后重试。" }]);
+    }
+  }
+
   /** 项目改名：只改后端映射表里的显示名，账本里的事件一字不动。 */
   async function saveRename() {
     const name = renameText.trim();
@@ -2029,6 +2053,10 @@ export default function Workbench() {
             <section className="sect acct-hero">
               <div className="sect-head">
                 <h3>总账目</h3>
+                <button className="btn-mini" onClick={() => exportXlsx("")}
+                  title="导出全部项目的账目：一张明细 + 一张汇总，数字与工作台一致">
+                  导出 Excel
+                </button>
               </div>
               {/* 形式按 David 的要求回到「两张白卡片 + 大数字」（2026-10-19 二次调整）：
                   之前那个百分比版的样子是对的，只是里面装的应该是钱、不是分数。 */}
@@ -2156,6 +2184,14 @@ export default function Workbench() {
                                 onClick={() => { setProjMenuId(""); openDetail(p.id); }}
                               >
                                 详情
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => { setProjMenuId(""); exportXlsx(p.id); }}
+                                title="只导出这个项目的明细与汇总"
+                              >
+                                导出
                               </button>
                             </div>
                           )}
