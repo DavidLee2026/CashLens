@@ -33,9 +33,7 @@ def _launcher_src() -> str:
 
 def _isolate_paths(tmp_path, monkeypatch):
     """把 main 的三条路径都指到临时目录（只改 DATA_DIR 不够，见 test_pending 的教训）。"""
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     return main
 
 
@@ -174,7 +172,7 @@ def test_reset_endpoint_clears_ledger_and_reports(tmp_path, monkeypatch):
     assert body["ok"] and body["action"] == "reset"
     assert body["before"]["events"] == 1 and body["after"]["events"] == 0
     assert body["backup_dir"]
-    assert m.EventLedger(m.LEDGER_PATH).load() == [], "端点必须真的把账本清空"
+    assert m.EventLedger(m.ledger_path()).load() == [], "端点必须真的把账本清空"
     assert (tmp_path / "model_config.json").exists(), "模型配置不能被端点误清"
     # 报告要能被前端直接拼成一句人话
     assert body["kept"] == ["model_config.json"]
@@ -190,7 +188,7 @@ def test_reset_endpoint_defaults_to_plain_reset(tmp_path, monkeypatch):
     r = client.post("/api/reset")
     assert r.status_code == 200, r.text
     assert r.json()["action"] == "reset"
-    assert m.EventLedger(m.LEDGER_PATH).load() == []
+    assert m.EventLedger(m.ledger_path()).load() == []
 
 
 def test_reset_endpoint_can_seed_demo(tmp_path, monkeypatch):
@@ -202,7 +200,7 @@ def test_reset_endpoint_can_seed_demo(tmp_path, monkeypatch):
     r = client.post("/api/reset", json={"seed_demo": True})
     assert r.status_code == 200, r.text
     assert r.json()["action"] == "reset_seeded"
-    assert len(m.EventLedger(m.LEDGER_PATH).load()) > 0
+    assert len(m.EventLedger(m.ledger_path()).load()) > 0
 
 
 def test_reset_endpoint_says_sample_missing_instead_of_a_flat_500(tmp_path, monkeypatch):

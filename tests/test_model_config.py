@@ -20,6 +20,9 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(model_config, "config_path", lambda: tmp_path / "model_config.json")
     for var in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
         monkeypatch.delenv(var, raising=False)
+    # 2026-10-19：public_view 会问一次本机 Ollama 装了哪些模型 —— 单测一律默认「探不到」，
+    # 保证这套用例在任何机器上都不发网络请求；需要结论的用例自己 stub。
+    monkeypatch.setattr(model_config, "_ollama_tags", lambda *a, **k: None)
     return model_config
 
 
@@ -200,3 +203,89 @@ def test_probe_short_circuits_on_none_tier(isolated):
     out = isolated.probe()
     assert out["ok"] is True
     assert "无需连通" in out["detail"]
+
+
+# ─── 本机是否真的装了这些模型（2026-10-19 立）────────────────
+# 起因：界面把四个本地模型并列摆着，看着都能用；而真机上往往只 pull 了其中一个，
+# 选没装的那个必然识别失败 —— 界面承诺大于实际能力。
+# 规矩：探到才下结论；探不到一律 None（不许把选项标成不可用）。
+def _by_id(view: dict) -> dict:
+    return {p["id"]: p for p in view["local_presets"]}
+
+
+def test_local_presets_mark_installed_from_ollama_tags(isolated, monkeypatch):
+    monkeypatch.setattr(model_config, "_ollama_tags",
+                        lambda *a, **k: {"qwen3-vl:30b-a3b", "llava:13b"})
+    by = _by_id(isolated.public_view())
+    assert by["ollama-qwen3-vl"]["installed"] is True
+    assert by["ollama-llava"]["installed"] is True
+    assert by["ollama-qwen-vl"]["installed"] is False
+    assert by["ollama-minicpm-v"]["installed"] is False
+    # 「自定义端点」是别人的服务，探不到就不猜
+    assert by["custom"]["installed"] is None
+
+
+def test_local_presets_unknown_when_ollama_unreachable(isolated, monkeypatch):
+    monkeypatch.setattr(model_config, "_ollama_tags", lambda *a, **k: None)
+    view = isolated.public_view()
+    assert all(p["installed"] is None for p in view["local_presets"])
+    assert view["tier"] == "cloud"                  # 探不到不许影响档位判断
+    assert [t["id"] for t in view["tiers"]] == ["cloud", "local", "none"]
+
+
+def test_public_view_does_not_mutate_local_presets(isolated, monkeypatch):
+    monkeypatch.setattr(model_config, "_ollama_tags", lambda *a, **k: {"qwen3-vl:30b-a3b"})
+    for _ in range(3):
+        isolated.public_view()
+    assert all("installed" not in p for p in model_config.LOCAL_PRESETS)
+
+
+def test_ollama_tags_parses_payload(monkeypatch):
+    class _Resp:
+        def read(self):
+            return json.dumps({"models": [{"name": "qwen3-vl:30b-a3b"},
+                                          {"name": "llava:13b"},
+                                          {"size": 1}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(model_config.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    assert model_config._ollama_tags(refresh=True) == {"qwen3-vl:30b-a3b", "llava:13b"}
+
+
+def test_ollama_tags_is_none_on_connection_error(monkeypatch):
+    def boom(*a, **k):
+        raise model_config.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(model_config.urllib.request, "urlopen", boom)
+    assert model_config._ollama_tags(refresh=True) is None
+
+
+def test_ollama_tags_is_none_on_garbage(monkeypatch):
+    class _Resp:
+        def read(self):
+            return b"<html>not json</html>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(model_config.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    assert model_config._ollama_tags(refresh=True) is None
+
+
+def test_model_picker_marks_missing_local_models():
+    """界面护栏：没装的那档必须挂出「本机未安装」，不能和能用的长得一样。"""
+    root = Path(__file__).resolve().parents[1]
+    page = (root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+    assert 'p.installed === false' in page
+    assert "本机未安装" in page
+    assert "ollama pull" in page        # 悬停给出补救命令
+    css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    assert ".model-subitem.off" in css

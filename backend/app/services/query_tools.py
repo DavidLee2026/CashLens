@@ -77,6 +77,16 @@ def recent_events_text(events: list[dict], limit: int = 5) -> str:
     return "最近流水：" + "；".join(rows) + "。"
 
 
+_LABEL_CN = {
+    "unknown": "还说不准",
+    "learning": "还在攒数据",
+    "fragile": "周转偏紧",
+    "review_due": "需复查",
+    "stable": "比较稳",
+    "misconception": "有个地方要提醒",
+}
+
+
 def cashflow_text(events: list[dict]) -> dict:
     """现金流状态 + 30 天区间（90% 置信带）；数据不足时如实标注不可信。"""
     st = compute(events)
@@ -85,15 +95,15 @@ def cashflow_text(events: list[dict]) -> dict:
     if st["events_count"] == 0:
         return {"text": "账本还是空的——先记几笔，我才能照见你的现金流。", "state": st, "forecast": fc}
     low, med, high = fc["band90_low_cents"], fc["median_balance_cents"], fc["band90_high_cents"]
-    gap = "未见缺口"
-    if low < 0:
-        gap = f"最坏情形 {_yuan(-low)} 缺口"
+    # 2026-10-19 改口语（David：「客户来自不同行业，行话看不懂」）：
+    # 原来这句是「当前状态：learning · 健康度 0.50 · 现金流可信度 0.30。未来 30 天期末预计…区间…」
+    # —— 三个内部指标名 + 两个 0~1 的小数。现在只留结论，数字按「一个数 + 一句范围」给。
+    label_cn = _LABEL_CN.get(st["label"], st["label"])
     if fc.get("insufficient"):
-        band = f"当前已知净额 {_yuan(med)}（{fc.get('reason', '数据不足，暂不外推')}）"
+        band = f"还推不出来 —— {fc.get('reason', '数据还不够，再记几笔就能算')}"
     else:
-        band = f"期末预计 {_yuan(med)}，区间 {_yuan(low)} ~ {_yuan(high)}（{gap}）"
-    text = (
-        f"当前状态：{st['label']} · 健康度 {st['financial_health']:.2f} · 现金流可信度 {st['cashflow_confidence']:.2f}。"
-        f"未来 30 天{band}。"
-    )
+        band = f"账上大概还有 {_yuan(med)}，大概率在 {_yuan(low)} 到 {_yuan(high)} 之间"
+        if low < 0:
+            band += f"；最少的时候可能不够付 {_yuan(-low)}"
+    text = f"现在的情况：{label_cn}。30 天后{band}。"
     return {"text": text, "state": st, "forecast": fc}

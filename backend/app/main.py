@@ -18,21 +18,33 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .services import (categories, data_reset, intake, invoice_tax, llm_skill,
                        model_config, parser_rule, pending, projects, query_tools,
-                       session_mem, timesheet, timesheet_records)
+                       session_mem, tenancy, timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
                                     make_event, run_state)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = Path(os.environ.get("CASH_DATA_DIR", str(REPO_ROOT / "data")))
-LEDGER_PATH = DATA_DIR / "finance_events.jsonl"
-DB_PATH = DATA_DIR / "proj.db"
+
+
+# 路径全部按「当前请求」解析（2026-10-19 多租户改造）：
+# 单用户/本地开发时 = CASH_DATA_DIR 本身；CASH_MULTI_TENANT=1 时 = 当前邀请码的租户目录。
+# 服务层本来就接收 data_dir 参数，所以只改这里的取值来源，不动任何服务签名。
+def data_dir() -> Path:
+    return tenancy.data_dir()
+
+
+def ledger_path() -> Path:
+    return tenancy.ledger_path()
+
+
+def db_path() -> Path:
+    return tenancy.db_path()
 
 
 def _source_mtime() -> int:
@@ -56,7 +68,54 @@ def _source_mtime() -> int:
 
 SOURCE_MTIME = _source_mtime()
 
+class TenantMiddleware:
+    """多租户鉴权 + 当前请求用哪个账本（2026-10-19）。
+
+    - **只在 `CASH_MULTI_TENANT=1` 时生效**；关着就直通，本地行为与改造前一致。
+    - 把会话 cookie 解成 slug 放进 contextvar，`data_dir()` 据此选目录。
+    - `/api/*` 里除白名单外，没有有效会话一律 401 —— 前端看到 401 就弹邀请码页。
+    """
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or not tenancy.enabled():
+            await self.inner(scope, receive, send)
+            return
+        slug = tenancy.verify_token(_cookie_from(scope, tenancy.COOKIE_NAME))
+        tenancy.set_current(slug)
+        try:
+            path = scope.get("path", "")
+            if path.startswith("/api/") and slug is None and not _session_free(path):
+                body = json.dumps({"detail": "需要邀请码才能使用", "code": "tenant_required"},
+                                  ensure_ascii=False).encode("utf-8")
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                                        (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+            await self.inner(scope, receive, send)
+        finally:
+            tenancy.reset_current()
+
+
+def _cookie_from(scope, name: str) -> str | None:
+    for key, value in scope.get("headers") or []:
+        if key == b"cookie":
+            for part in value.decode("latin-1").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == name:
+                    return v.strip()
+    return None
+
+
+def _session_free(path: str) -> bool:
+    return path in tenancy.ALLOW_EXACT or path.startswith(tenancy.ALLOW_PREFIXES)
+
+
 app = FastAPI(title="CashLens API", version="0.1")
+app.add_middleware(TenantMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000",
@@ -92,8 +151,60 @@ class EventIn(BaseModel):
 @app.get("/api/health")
 def health():
     """健康检查 + **代码新鲜度**（source_mtime 供启动脚本判断"这个进程是不是旧代码"）。"""
-    return {"ok": True, "api": "cashlens", "ledger": str(LEDGER_PATH),
+    return {"ok": True, "api": "cashlens", "ledger": str(ledger_path()),
             "source_mtime": SOURCE_MTIME}
+
+
+class RedeemIn(BaseModel):
+    """邀请码兑换会话。"""
+    code: str = ""
+
+
+@app.post("/api/session/redeem")
+def session_redeem(body: RedeemIn, request: Request, response: Response):
+    """用邀请码换一个 30 天会话。
+
+    失败时**不区分**「码不存在」「码已停用」「抄错了」—— 只回一句「不对或已停用」，
+    不给枚举线索；同一个来源 10 分钟内错 8 次就先拦住（码本身够长，这层是兜底）。
+    """
+    if not tenancy.enabled():
+        return {"ok": True, "multi_tenant": False, "label": ""}
+    who = request.client.host if request.client else "unknown"
+    if tenancy.too_many_attempts(who):
+        raise HTTPException(status_code=429, detail="尝试次数太多，请 10 分钟后再试")
+    slug = tenancy.verify_code(body.code)
+    if not slug:
+        tenancy.note_attempt(who)
+        raise HTTPException(status_code=401, detail="邀请码不对，或者已经停用")
+    tenancy.clear_attempts(who)
+    tenancy.touch(slug)
+    tenancy.set_current(slug)
+    row = tenancy.get_tenant(slug) or {}
+    response.set_cookie(tenancy.COOKIE_NAME, tenancy.issue_token(slug),
+                        max_age=tenancy.SESSION_DAYS * 86400, httponly=True,
+                        samesite="lax", secure=tenancy.session_cookie_secure(), path="/")
+    return {"ok": True, "multi_tenant": True, "label": row.get("label", "")}
+
+
+@app.get("/api/session/me")
+def session_me():
+    """当前会话是谁。前端启动时调它决定「显示工作台」还是「弹邀请码页」。"""
+    if not tenancy.enabled():
+        return {"multi_tenant": False, "label": "", "active": True}
+    slug = tenancy.current_slug()
+    row = tenancy.get_tenant(slug) if slug else None
+    if not row:
+        raise HTTPException(status_code=401, detail="需要邀请码")
+    return {"multi_tenant": True, "label": row.get("label", ""),
+            "active": bool(row.get("active"))}
+
+
+@app.post("/api/session/logout")
+def session_logout(response: Response):
+    """退出：清掉会话 cookie（账本一根手指都不动）。"""
+    response.delete_cookie(tenancy.COOKIE_NAME, path="/")
+    tenancy.reset_current()
+    return {"ok": True}
 
 
 class ResetIn(BaseModel):
@@ -112,7 +223,7 @@ def reset_data(body: ResetIn = ResetIn()):
     """
     session_mem.clear_all()  # 旧会话上下文不能渗进新对话
     try:
-        return data_reset.reset(DATA_DIR, seed_demo=body.seed_demo)
+        return data_reset.reset(data_dir(), seed_demo=body.seed_demo)
     except FileNotFoundError as e:
         # 演示样本是**本机生成**的（`.gitignore` 的 `data/` 规则把 samples 下的 data 目录也挡住了，
         # 所以它不在版本库里）。缺了就如实说清怎么办 —— 不能让前端笼统报成"后端没在运行"。
@@ -129,7 +240,7 @@ def add_event(ev: EventIn):
     project 留空时归入当前默认项目（没有就建 Project A），并在返回里附一句名称提醒。
     """
     ts = datetime.fromisoformat(ev.ts) if ev.ts else datetime.now()
-    pid, project_hint = projects.resolve_incoming(DATA_DIR, ev.project)
+    pid, project_hint = projects.resolve_incoming(data_dir(), ev.project)
     invoice_no = str(ev.invoice_no or "").strip()
     # hours 与 invoice_no 一样走 extra 透传（账本 schema 不动，向后兼容 v3 旧事件）
     extra: dict = {}
@@ -147,9 +258,9 @@ def add_event(ev: EventIn):
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    book = EventLedger(LEDGER_PATH)
+    book = EventLedger(ledger_path())
     result = book.append(event, strict_dedupe=True)
-    state = run_state(LEDGER_PATH, DB_PATH)["state"]
+    state = run_state(ledger_path(), db_path())["state"]
     out = {"appended": result["appended"], "event": event, "state": state}
     if project_hint:
         out["project_hint"] = project_hint
@@ -159,20 +270,20 @@ def add_event(ev: EventIn):
 @app.get("/api/events")
 def list_events(limit: int = 50):
     """最近事件（倒序展示用）。"""
-    events = EventLedger(LEDGER_PATH).load()
+    events = EventLedger(ledger_path()).load()
     return {"total": len(events), "events": list(reversed(events[-limit:]))}
 
 
 @app.get("/api/state")
 def get_state():
     """当前财务状态（真计算：asOf 重放）。"""
-    return run_state(LEDGER_PATH, DB_PATH)
+    return run_state(ledger_path(), db_path())
 
 
 @app.get("/api/forecast")
 def get_forecast(horizon_days: int = 30):
     """未来现金流区间（90% 置信带，真计算）。"""
-    events = EventLedger(LEDGER_PATH).load()
+    events = EventLedger(ledger_path()).load()
     state = calc.compute(events)
     fc = calc.forecast_cashflow(events, horizon_days=horizon_days)
     fc["confidence"] = state["cashflow_confidence"]
@@ -230,7 +341,7 @@ def _yuan(cents: int) -> str:
 
 
 def _events() -> list[dict]:
-    return EventLedger(LEDGER_PATH).load()
+    return EventLedger(ledger_path()).load()
 
 
 def _cashflow_text() -> dict:
@@ -258,7 +369,7 @@ def _append_event(direction: str, amount_cents: int, category: str, channel: str
         # 口述/手工确认的条目不去重（见 make_event 的 dedupe_unique 说明）
         dedupe_unique=not strict_dedupe,
     )
-    book = EventLedger(LEDGER_PATH)
+    book = EventLedger(ledger_path())
     res = book.append(ev, strict_dedupe=strict_dedupe)
     return ev, res["appended"]
 
@@ -270,7 +381,7 @@ def _project_label(pid: str) -> str:
     也回落成「未归项目」（见 `projects.detail`）。否则同一笔钱在草稿和账本里
     会显示成两个不同的归属（2026-09-28 修：此前草稿挂在已删项目上会照旧显示旧名）。
     """
-    row = projects.get(DATA_DIR, pid) if pid else None
+    row = projects.get(data_dir(), pid) if pid else None
     if row and not projects.is_deleted(row):
         return str(row.get("name") or projects.UNASSIGNED_LABEL)
     return projects.UNASSIGNED_LABEL
@@ -285,9 +396,76 @@ def _scope_note(project_ref: str) -> str:
     s = str(project_ref or "").strip()
     if not s:
         return ""
-    pid = projects.resolve(DATA_DIR, s) or s
+    pid = projects.resolve(data_dir(), s) or s
     return (f"（口径提示：以上数字是全部项目的合计——总账户；"
             f"当前选中只是让新账默认记入「{_project_label(pid)}」，查询不分项目）")
+
+
+def _text_channel(raw: str | None) -> str:
+    """这笔是**打字**进来的，不是语音（2026-10-19 修）。
+
+    现象：界面里明明没有语音输入，三笔手动记的收入却显示「语音」。根因是提示词把
+    `voice` 列成了 channel 的可选值，模型看着「说一句话记账」的语境就猜成了 voice，
+    而规则解析那条路给的是 manual/wechat —— 同一句换个解析方式，来源标签就变了。
+
+    口径：**输入途径服务端比模型清楚**。模型说 voice 一律落 manual；
+    微信 / 支付宝 / 现金 / 银行卡 是**付款渠道**（文字里真说了），保留原样。
+    以后真做语音输入，由请求显式带 channel，不再让模型猜。
+    """
+    ch = (raw or "").strip()
+    if not ch or ch == "voice":
+        return "manual"
+    return ch
+
+
+# 「这笔记到 X / 记入 X / 归到 X」这类句式（2026-10-19 立）
+_PROJECT_HINT_RE = re.compile(
+    r"(?:这?笔记(?:到|入|在)|记(?:到|入|在)|算(?:到|入)|归(?:到|入)|属于|挂在|划到)"
+    r"[\s「“\"']*([^，,。；;！!？?、「」“”\"'\s]{1,20})"
+)
+
+
+def _project_from_text(text: str, known: list[str] | None = None) -> str | None:
+    """从一句话里取项目名（确定性，不问模型）。
+
+    起因（2026-10-19 真机）：David 第二次说「收到尾款 5200，这笔记到秋季市集」，
+    草稿却落到「未归项目」—— 因为项目归属**完全靠模型抽**，这一次它没抽出来。
+    这与 9/13 工时那次是同一个病：**结构性字段不能让模型猜**。
+
+    三条规矩：
+    1. 先认句式（这笔记到 / 记入 / 归到 / 属于…）；
+    2. 句式没命中，就看文字里有没有**已存在的项目名**（长的优先，免得截短）；
+    3. 候选名字若是某个已知项目名的延长（如「秋季市集项目」），落回那个已知项目 ——
+       `projects.resolve` 只做**精确**匹配，多一个字就会新建出一个重复项目。
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    known = [n for n in (known or []) if n]
+
+    def _snap(cand: str) -> str:
+        c = cand.strip("「」“”\"' 　")
+        for name in sorted(known, key=len, reverse=True):
+            if c == name or c.startswith(name) or name in c:
+                return name
+        return c
+
+    m = _PROJECT_HINT_RE.search(t)
+    if m:
+        cand = _snap(m.group(1))
+        if cand:
+            return cand
+    for name in sorted(known, key=len, reverse=True):
+        if name in t:
+            return name
+    return None
+
+
+def _known_project_names() -> list[str]:
+    try:
+        return [str(r.get("name") or "") for r in projects.visible_rows(data_dir())]
+    except Exception:  # noqa: BLE001  读不到就当没有已知项目，不阻断记账
+        return []
 
 
 def _draft_one(direction: str, amount_cents: int, category: str, channel: str, note: str,
@@ -297,11 +475,11 @@ def _draft_one(direction: str, amount_cents: int, category: str, channel: str, n
     project 可传 id 或显示名（"当前选中的项目"也走这里）；**留空 ＝ 未归项目（总账户）**，
     不再落到"表里第一个项目"（见 `projects.resolve_incoming` 的 2026-09-26 改动）。
     """
-    pid, hint = projects.resolve_incoming(DATA_DIR, project)
+    pid, hint = projects.resolve_incoming(data_dir(), project)
     d = pending.create(
-        DATA_DIR, direction=direction, amount_cents=amount_cents,
+        data_dir(), direction=direction, amount_cents=amount_cents,
         category=category, channel=channel, note=note, counterparty=counterparty,
-        project=pid,
+        project=pid, occurred_at=datetime.now().isoformat(timespec="seconds"),
     )
     if hint:
         d["project_hint"] = hint
@@ -366,7 +544,7 @@ def _rule_reply(text: str, current_project: str = "",
         return {"ok": True, "text": out["text"] + (f"\n{note}" if note else ""),
                 "state": out.get("state"), "forecast": out.get("forecast")}
     d = _draft_one(r["direction"], r["amount_cents"], r["category"], r["channel"], r["text"],
-                   project=current_project or None)
+                   project=_project_from_text(text, _known_project_names()) or current_project or None)
     dir_cn = "收入" if r["direction"] == "income" else "支出"
     return {
         "ok": True,
@@ -389,13 +567,13 @@ def _record_timesheet(entries: list[dict], current_project: str, text: str) -> t
     要入账必须用户另行确认（与「工时表」那条路同一口径）。
     """
     for e in entries:
-        timesheet_records.append(DATA_DIR, person=e.get("person") or "（没写名字）",
+        timesheet_records.append(data_dir(), person=e.get("person") or "（没写名字）",
                                  qty=e.get("qty") or 0, unit=e.get("unit") or "hours",
                                  rate_cents=e.get("rate_cents"),
                                  kind=e.get("kind") or "outsourced",
                                  project=e.get("project") or current_project or "",
                                  date=e.get("date") or "", source="chat", note=text)
-    summary = timesheet_records.summarize(timesheet_records.list_all(DATA_DIR))
+    summary = timesheet_records.summarize(timesheet_records.list_all(data_dir()))
     unit_cn = "工分（点数）" if summary["unit"] == "points" else "工时（小时）"
     names = "、".join(f"{e.get('person') or '（没写名字）'} {e.get('qty')}"
                      f"{'分' if (e.get('unit') == 'points') else ' 小时'}" for e in entries)
@@ -497,9 +675,10 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
             except (TypeError, ValueError):
                 continue
             executed = True
-            d = _draft_one(direction, amount, a.get("category"), a.get("channel"),
+            d = _draft_one(direction, amount, a.get("category"), _text_channel(a.get("channel")),
                            a.get("note") or text, a.get("counterparty", ""),
-                           a.get("project") or current_project or None)
+                           _project_from_text(text, _known_project_names())
+                           or a.get("project") or current_project or None)
             drafts.append(d)
             dir_cn = "收入" if direction == "income" else "支出"
             parts.append(f"识别到{dir_cn} {_yuan(amount)}（{d['category']} · {d['channel']}）——请确认后入账。{_project_line(d)}")
@@ -650,7 +829,7 @@ def projects_list():
 
     项目是账本事件的属性维度：真实项目（如 示例项目 A），不是费用类别（打车/吃饭）。
     """
-    return projects.list_projects(DATA_DIR, _events())
+    return projects.list_projects(data_dir(), _events())
 
 
 @app.post("/api/projects")
@@ -661,15 +840,15 @@ def projects_upsert(body: ProjectIn):
     因此重命名只改映射，账本一字不动（守住账本不可变）。
     """
     if body.id:
-        pid = projects.resolve(DATA_DIR, body.id)
+        pid = projects.resolve(data_dir(), body.id)
         if pid is None:
             raise HTTPException(status_code=404, detail=f"项目不存在：{body.id}")
         try:
-            row = projects.rename(DATA_DIR, pid, body.name)
+            row = projects.rename(data_dir(), pid, body.name)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         return {"ok": True, "action": "renamed", "project": row}
-    return {"ok": True, "action": "created", "project": projects.create(DATA_DIR, body.name)}
+    return {"ok": True, "action": "created", "project": projects.create(data_dir(), body.name)}
 
 
 @app.delete("/api/projects/{pid}")
@@ -699,11 +878,11 @@ def projects_delete(pid: str, with_data: bool = False):
                 f"（把这 {len(uids)} 笔作废）。"))
         uvoided = 0
         if uids:
-            uvoided = EventLedger(LEDGER_PATH).append_void(
+            uvoided = EventLedger(ledger_path()).append_void(
                 uids, reason=f"清理「{projects.UNASSIGNED_LABEL}」名下的账（用户主动作废）",
                 project="")["voided"]
-            uproj = Projection(DB_PATH)
-            uproj.rebuild(EventLedger(LEDGER_PATH).load())
+            uproj = Projection(db_path())
+            uproj.rebuild(EventLedger(ledger_path()).load())
             uproj.close()
         return {
             "ok": True,
@@ -716,24 +895,24 @@ def projects_delete(pid: str, with_data: bool = False):
                      f"以后没指定项目的新账还会进这里。"),
         }
 
-    target = projects.resolve(DATA_DIR, pid)
+    target = projects.resolve(data_dir(), pid)
     if target is None:
         raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
-    row = projects.get(DATA_DIR, target) or {}
+    row = projects.get(data_dir(), target) or {}
     label = str(row.get("name") or target)
 
     ids = projects.event_ids_of(_events(), target)
     voided = 0
     if with_data:
-        voided = EventLedger(LEDGER_PATH).append_void(
+        voided = EventLedger(ledger_path()).append_void(
             ids, reason=f"删除项目「{label}」时一并作废", project=target)["voided"]
         # SQLite 投影是按 MODEL_VERSION 缓存的，作废不改变模型版本 —— 必须显式重建，
         # 否则投影里的旧行（assumptions/transactions）还会留着已被作废的事件。
-        proj = Projection(DB_PATH)
-        proj.rebuild(EventLedger(LEDGER_PATH).load())
+        proj = Projection(db_path())
+        proj.rebuild(EventLedger(ledger_path()).load())
         proj.close()
 
-    out = projects.mark_deleted(DATA_DIR, target, purged_count=voided, with_data=with_data)
+    out = projects.mark_deleted(data_dir(), target, purged_count=voided, with_data=with_data)
     if out is None:
         raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
     return {
@@ -756,7 +935,7 @@ def projects_summary(project: str | None = None):
     支出侧即报销口径：同一项目内发票号码相同的事件只计一次，剔除的如实列在 duplicates 里；
     账本未记录发票号码的事件不参与去重（不推断）。
     """
-    out = projects.summary(DATA_DIR, _events(), project=project)
+    out = projects.summary(data_dir(), _events(), project=project)
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
     return out
@@ -769,7 +948,7 @@ def projects_detail(pid: str):
     口径复用 `/api/projects/summary`（支出侧按发票号去重），所以"总览"与"详情"的数字必然一致
     —— 不另写一套算法，避免同一笔在两处显示不同金额。
     """
-    out = projects.detail(DATA_DIR, _events(), pid)
+    out = projects.detail(data_dir(), _events(), pid)
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
     return out
@@ -1162,7 +1341,7 @@ def intake_upload(body: IntakeIn):
     files = _intake_decode(body)
 
     try:
-        out = intake.ingest(DATA_DIR, files, project_ref=body.project or None,
+        out = intake.ingest(data_dir(), files, project_ref=body.project or None,
                           reconcile=body.reconcile)
     except Exception as e:  # noqa: BLE001 失败要报出来，不吞
         raise HTTPException(status_code=500, detail=f"导入失败：{type(e).__name__}: {str(e)[:200]}")
@@ -1172,7 +1351,7 @@ def intake_upload(body: IntakeIn):
     for b in out["batches"]:
         pid = str(b.get("project_id") or "")
         for m in b["list_matches"]:
-            made = [d for d in (intake.draft_for_list_order(DATA_DIR, pid, o, m["file"])
+            made = [d for d in (intake.draft_for_list_order(data_dir(), pid, o, m["file"])
                                 for o in (m.get("unmatched") or [])) if d]
             if made:
                 m["drafted"] = [{"amount_cents": d["amount_cents"], "category": d["category"]}
@@ -1184,7 +1363,7 @@ def intake_upload(body: IntakeIn):
                        "amount_cents": d["amount_cents"], "category": d["category"],
                        "project": d.get("project", ""),
                        "project_name": _project_label(d.get("project", ""))}
-                      for d in pending.list_all(DATA_DIR)]
+                      for d in pending.list_all(data_dir())]
     return out
 
 
@@ -1224,7 +1403,7 @@ def _intake_stream_events(files: list[dict], project: str | None = None,
     但**正在读的那个文件停不下来** —— 它在工作线程里调识别，没有中断点。
     所以界面上的取消文案必须如实写这一句，不许承诺「立刻全停」。
     """
-    root = Path(data_dir if data_dir is not None else DATA_DIR)
+    root = Path(data_dir) if data_dir is not None else tenancy.data_dir()
     total = len(files)
     batches: list[dict] = []
     for i, f in enumerate(files, 1):
@@ -1354,7 +1533,7 @@ def pending_list():
     这样项目改名后草稿跟着显示新名（与账本同一条纪律：只存 id、显示名走映射表），
     项目被删掉时也如实回落成「未归项目」，与账本事件的回落口径一致。
     """
-    items = pending.list_all(DATA_DIR)
+    items = pending.list_all(data_dir())
     for d in items:
         d["project_name"] = _project_label(d.get("project", ""))
     return {"pending": items}
@@ -1371,7 +1550,7 @@ def pending_accept(pid: str, body: PendingAcceptIn | None = None):
     if override is not None:
         # ⚠️ 必须先把"名字"解析成 id 再写账本：`_append_event` 假定拿到的是已解析好的 id
         # （账本只存稳定 id，显示名走映射表）。传名字就写，会存进一个不存在 id 的幽灵值。
-        override = projects.resolve_incoming(DATA_DIR, override)[0] if override.strip() else ""
+        override = projects.resolve_incoming(data_dir(), override)[0] if override.strip() else ""
     # 分类同理可在确认那一刻改：草稿分类是「待确认」（机器没判出来）时就该由人补上。
     # `pending.accept` 内部还会把占位符收成「其他」，账本里永远不出现「待确认」这个"分类"。
     # ⚠️ **空字符串 ＝ 用户没改分类，不是"把分类清空"**：草稿识别出来的分类必须留住。
@@ -1381,14 +1560,14 @@ def pending_accept(pid: str, body: PendingAcceptIn | None = None):
     cat_override = (body.category or "").strip() if body is not None else None
     if not cat_override:
         cat_override = None
-    draft = pending.get(DATA_DIR, pid) or {}
+    draft = pending.get(data_dir(), pid) or {}
     strict = draft.get("source") in _FILE_DRAFT_SOURCES
     append = functools.partial(_append_event, strict_dedupe=strict)
-    out = pending.accept(DATA_DIR, pid, append, project_override=override,
+    out = pending.accept(data_dir(), pid, append, project_override=override,
                          category_override=cat_override)
     if out is None:
         raise HTTPException(status_code=404, detail="待确认草稿不存在")
-    state = run_state(LEDGER_PATH, DB_PATH)["state"]
+    state = run_state(ledger_path(), db_path())["state"]
     return {"ok": True, "appended": out["appended"], "draft": out["draft"],
             "project_name": _project_label((out.get("event") or {}).get("project", "")),
             "state": state}
@@ -1401,7 +1580,7 @@ def pending_decline(pid: str, group: str = ""):
     **软删除**：草稿进回收站（打 `discarded_at`），界面上消失但随时能撤回。
     `group` 由前端给（一次批量丢弃用同一个），撤回时按它一次放回来。
     """
-    g = pending.decline(DATA_DIR, pid, group=group)
+    g = pending.decline(data_dir(), pid, group=group)
     if g is None:
         raise HTTPException(status_code=404, detail="待确认草稿不存在")
     return {"ok": True, "id": pid, "group": g}
@@ -1419,7 +1598,7 @@ def pending_restore(body: PendingRestoreIn):
     用户 2026-09-28 要求「已丢弃 N 笔…」那句小字后面加一个撤回按钮 ——
     丢弃本来就没动账本，撤回只是把草稿从回收站拿回来，**不产生任何账本事件**。
     """
-    rows = pending.restore(DATA_DIR, ids=body.ids, group=body.group)
+    rows = pending.restore(data_dir(), ids=body.ids, group=body.group)
     return {"ok": True, "restored": len(rows), "ids": [d["id"] for d in rows]}
 
 

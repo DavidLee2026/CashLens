@@ -70,7 +70,8 @@ def _save(data_dir: str | Path, drafts: list[dict]) -> None:
 
 
 def create(data_dir: str | Path, *, direction: str, amount_cents: int, category: str,
-           channel: str, note: str, counterparty: str = "", project: str = "") -> dict:
+           channel: str, note: str, counterparty: str = "", project: str = "",
+           occurred_at: str | None = None) -> dict:
     drafts = list_all(data_dir)
     draft = {
         "id": uuid.uuid4().hex[:12],
@@ -82,6 +83,9 @@ def create(data_dir: str | Path, *, direction: str, amount_cents: int, category:
         "counterparty": counterparty or "",
         "project": project or "",
         "created": datetime.now().isoformat(timespec="seconds"),
+        # 这笔钱哪天发生的（2026-10-19 修）：以前聊天记的草稿不带日期，
+        # 面板只能显示「日期待补」，可它明明是今天记的。导入来的草稿仍由文件决定。
+        "occurred_at": occurred_at or datetime.now().isoformat(timespec="seconds"),
     }
     drafts.append(draft)
     _save(data_dir, drafts)

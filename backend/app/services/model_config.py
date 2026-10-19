@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -111,6 +112,75 @@ LOCAL_PRESETS: list[dict] = [
         "note": "通用视觉模型，中文票据识别弱于前两者。",
     },
 ]
+
+# ─── 「本机到底装没装」探测（2026-10-19 立）──────────────────
+# 起因：界面把四个本地模型并列摆出来，看着都能用；而真机上往往只 pull 了其中一个，
+# 选没装的那个必然识别失败 —— 这是「界面承诺 > 实际能力」，和本文件第 15 行
+# 「能力边界如实暴露」自相矛盾。所以点开选择器时问一次本机 Ollama 的 /api/tags。
+#
+# 三条纪律：
+# 1. 探不到 ≠ 没装。Ollama 没在跑、超时、返回体不对 → 一律回 None（界面保持原样），
+#    绝不因为「我没问到」就把选项标成不可用。
+# 2. 只对 Ollama 端点做这个判断（base_url 里带 :11434）；「自定义端点」是别人的服务，
+#    探不到就是 None，不做猜测。
+# 3. 探测带 20 秒缓存且只探一次，连不通时立刻返回（localhost 拒绝连接是毫秒级），
+#    不许让打开设置弹层卡住。
+
+_OLLAMA_DEFAULT = "http://127.0.0.1:11434"
+_TAGS_TTL_SECONDS = 20.0
+_tags_cache: dict = {"probed": False, "at": 0.0, "value": None}
+
+
+def ollama_base_url() -> str:
+    return (os.environ.get("OLLAMA_BASE_URL") or _OLLAMA_DEFAULT).rstrip("/")
+
+
+def _fetch_ollama_tags(timeout: float = 1.5) -> set[str] | None:
+    """问一次本机 Ollama 装了哪些模型；连不通/超时/返回体不对一律回 None。"""
+    req = urllib.request.Request(f"{ollama_base_url()}/api/tags", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001  拒绝连接 / 超时 / 405 都算「探不到」
+        return None
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    items = data.get("models")
+    if not isinstance(items, list):
+        return None
+    return {str(m["name"]) for m in items if isinstance(m, dict) and m.get("name")}
+
+
+def _ollama_tags(refresh: bool = False, timeout: float = 1.5) -> set[str] | None:
+    """带缓存的探测结果：set = 本机装了这些；None = 探不到（不等于没装）。"""
+    now = time.monotonic()
+    if (not refresh and _tags_cache["probed"]
+            and now - float(_tags_cache["at"]) < _TAGS_TTL_SECONDS):
+        return _tags_cache["value"]
+    value = _fetch_ollama_tags(timeout)
+    _tags_cache.update({"probed": True, "at": time.monotonic(), "value": value})
+    return value
+
+
+def installed_state(preset: dict, tags: set[str] | None) -> bool | None:
+    """本机有没有这个模型。True / False 是探到的结论，None 是「探不到，别乱标」。"""
+    model = str(preset.get("model") or "")
+    base_url = str(preset.get("base_url") or "")
+    if tags is None or not model or ":11434" not in base_url:
+        return None
+    if model in tags:
+        return True
+    if ":" not in model and any(n.split(":")[0] == model for n in tags):
+        return True  # 预设没写 tag，而本机装的是同名默认 tag
+    return False
+
+
+def local_presets_view() -> list[dict]:
+    """对外视图用的本地预设副本（带 installed），不改写模块常量 LOCAL_PRESETS。"""
+    tags = _ollama_tags()
+    return [{**p, "installed": installed_state(p, tags)} for p in LOCAL_PRESETS]
 
 
 # ─── 读写 ───────────────────────────────────────────────
@@ -302,7 +372,7 @@ def public_view() -> dict:
                    "vision": act["vision"], "usable": act["usable"]},
         "tiers": tiers,
         "cloud_presets": CLOUD_PRESETS,
-        "local_presets": LOCAL_PRESETS,
+        "local_presets": local_presets_view(),
         "api_key_configured": bool(cfg["cloud"].get("api_key")),
         "updated_at": cfg["updated_at"],
         "warnings": warnings_for(act),

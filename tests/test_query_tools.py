@@ -49,6 +49,9 @@ def test_recent_events_text():
 def test_cashflow_text_insufficient_marked():
     evs = _events()
     out = query_tools.cashflow_text(evs)
-    assert "数据不足" in out["text"] or "未见缺口" in out["text"]
+    # 2026-10-19 文案口语化：不再出现「数据不足 / 健康度 / 可信度」这些词，
+    # 但要如实说「还推不出来」，且不许报一个假区间。
+    assert "还推不出来" in out["text"]
+    assert "大概率在" not in out["text"]
     fc = forecast_cashflow(evs, horizon_days=30)
     assert fc["insufficient"] is True  # 4 个不同日期 < 5 → 如实标注

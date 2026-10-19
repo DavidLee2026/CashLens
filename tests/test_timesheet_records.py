@@ -23,9 +23,7 @@ def _isolate(tmp_path, monkeypatch):
     """
     from app import main
 
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     return main
 
 

@@ -20,9 +20,7 @@ from app.services.state_engine import EventLedger  # noqa: E402
 @pytest.fixture()
 def temp_data(tmp_path, monkeypatch):
     """把 main 的数据目录指到临时目录，避免碰真实账本/映射表。"""
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main, "LEDGER_PATH", tmp_path / "finance_events.jsonl")
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "proj.db")
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))   # 2026-10-19：路径改成按请求解析，改为设环境变量
     return tmp_path
 
 
@@ -127,7 +125,7 @@ def test_accept_endpoint_resolves_name_to_id(temp_data):
     out = main.pending_accept(d["id"], main.PendingAcceptIn(project="示例出差"))
     assert out["appended"] is True
     assert out["project_name"] == "示例出差"
-    events = EventLedger(main.LEDGER_PATH).load()
+    events = EventLedger(main.ledger_path()).load()
     assert events[-1]["project"] == p["id"]            # 存 id，不是名字
 
 
@@ -138,7 +136,7 @@ def test_accept_endpoint_empty_override_means_unassigned(temp_data):
                        category="交通", channel="manual", note="打车", project="")
     out = main.pending_accept(d["id"], main.PendingAcceptIn(project=""))
     assert out["project_name"] == "未归项目"
-    assert EventLedger(main.LEDGER_PATH).load()[-1]["project"] == ""
+    assert EventLedger(main.ledger_path()).load()[-1]["project"] == ""
 
 
 # ─── ④ 查询口径：全账本 + 标注范围 ──────────────────────────
@@ -308,7 +306,7 @@ def test_unassigned_has_no_project_row_but_its_bills_can_be_voided(temp_data):
     assert body["bill_count"] == 2 and body["voided_count"] == 2
     assert "可追溯" in body["note"]
 
-    live = main.EventLedger(main.LEDGER_PATH).load()
+    live = main.EventLedger(main.ledger_path()).load()
     live_exp = [e for e in live if e["type"] == "expense"]
     assert len(live_exp) == 1, "只应剩下那个属于某项目的一笔"
     assert live_exp[0]["project"] == pid and live_exp[0]["amount_cents"] == 9900
