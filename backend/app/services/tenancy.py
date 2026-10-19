@@ -60,7 +60,14 @@ def root() -> Path:
 
 
 def tenants_dir() -> Path:
-    return root() / "tenants"
+    """租户目录根。权限收到 700：目录名是随机 slug，但也没必要让本机其他用户列出来。"""
+    d = root() / "tenants"
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.chmod(0o700)
+    except OSError:
+        pass
+    return d
 
 
 def current_slug() -> str | None:
@@ -82,6 +89,10 @@ def data_dir() -> Path:
     if enabled() and slug:
         d = tenants_dir() / slug
         d.mkdir(parents=True, exist_ok=True)
+        try:
+            d.chmod(0o700)   # 文件本身已 600，目录也别让别的本机用户列出来
+        except OSError:
+            pass
         return d
     d = root()
     d.mkdir(parents=True, exist_ok=True)
@@ -166,7 +177,12 @@ def create_code(label: str) -> tuple[str, str]:
         "last_seen": "",
     })
     _save(rows)
-    (tenants_dir() / slug).mkdir(parents=True, exist_ok=True)
+    d = tenants_dir() / slug
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.chmod(0o700)
+    except OSError:
+        pass
     return code, slug
 
 

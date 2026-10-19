@@ -47,6 +47,18 @@ def db_path() -> Path:
     return tenancy.db_path()
 
 
+def _mem_sid(sid: str) -> str:
+    """会话记忆按租户分开。
+
+    起因（2026-10-19）：聊天会话 id 存在浏览器 localStorage 里，同一台电脑换一个
+    邀请码登录时，旧 id 还在 —— 后端若按裸 session_id 存上下文，新租户会读到
+    上一个租户的对话。key 前缀用 slug（随机 8 位十六进制，目录名同源），
+    单用户模式不加前缀，行为与改造前一致。
+    """
+    slug = tenancy.current_slug()
+    return f"{slug}:{sid}" if tenancy.enabled() and slug else sid
+
+
 def _source_mtime() -> int:
     """`backend/app/**/*.py` 里**最新**的修改时间（epoch 秒），导入时算一次。
 
@@ -190,13 +202,15 @@ def session_redeem(body: RedeemIn, request: Request, response: Response):
 def session_me():
     """当前会话是谁。前端启动时调它决定「显示工作台」还是「弹邀请码页」。"""
     if not tenancy.enabled():
-        return {"multi_tenant": False, "label": "", "active": True}
+        return {"multi_tenant": False, "label": "", "tenant": "", "active": True}
     slug = tenancy.current_slug()
     row = tenancy.get_tenant(slug) if slug else None
     if not row:
         raise HTTPException(status_code=401, detail="需要邀请码")
+    # tenant 给前端做本地缓存分区用（消息 / 会话 id 按租户分开）；
+    # 它不是凭证 —— 真正的凭证是 HttpOnly 的会话 cookie。
     return {"multi_tenant": True, "label": row.get("label", ""),
-            "active": bool(row.get("active"))}
+            "tenant": slug or "", "active": bool(row.get("active"))}
 
 
 @app.post("/api/session/logout")
@@ -221,7 +235,13 @@ def reset_data(body: ResetIn = ResetIn()):
     守住「账本可追溯、误删可救」这条红线。模型档位配置（model_config.json）不动。
     返回 before/after 两套计数与备份路径，界面据此如实回报（2026-09-29）。
     """
-    session_mem.clear_all()  # 旧会话上下文不能渗进新对话
+    # 旧会话上下文不能渗进新对话。多租户下只清当前租户的 key，
+    # 不能把别人正在聊的上下文一起清掉（2026-10-19 隔离修复）。
+    slug = tenancy.current_slug()
+    if tenancy.enabled() and slug:
+        session_mem.clear_prefix(f"{slug}:")
+    else:
+        session_mem.clear_all()
     try:
         return data_reset.reset(data_dir(), seed_demo=body.seed_demo)
     except FileNotFoundError as e:
@@ -777,6 +797,9 @@ def models():
 @app.post("/api/models/select")
 def models_select(body: ModelSelectIn):
     """切换模型档位。运行中立即生效，无需重启后端。"""
+    if model_config.locked():
+        raise HTTPException(status_code=403,
+                            detail="服务器已锁定模型档位，请在服务器的环境变量里修改")
     try:
         return model_config.select(tier=body.tier, base_url=body.base_url, model=body.model,
                                    api_key=body.api_key, preset_id=body.preset_id,
@@ -788,6 +811,9 @@ def models_select(body: ModelSelectIn):
 @app.post("/api/models/test")
 def models_test():
     """按当前档位做一次连通性自检。只发一句固定文本，不发送任何用户数据。"""
+    if model_config.locked():
+        raise HTTPException(status_code=403,
+                            detail="服务器已锁定模型档位，不能从界面触发连通性测试")
     return model_config.probe()
 
 
@@ -1627,8 +1653,9 @@ def pending_restore(body: PendingRestoreIn):
 def chat(body: ChatIn):
     """多轮自由对话：会话记忆 + LLM 选动作 + 真执行 + 结果合成（记录走待确认）。"""
     sid = body.session_id or uuid.uuid4().hex
-    session_mem.touch(sid)
-    memory = session_mem.context_of(sid)
+    mem_sid = _mem_sid(sid)
+    session_mem.touch(mem_sid)
+    memory = session_mem.context_of(mem_sid)
     prompt = f"[对话上下文]\n{memory}\n[用户现在说]\n{body.text}" if memory else body.text
     # 本机登录名：三条路（LLM 解析 / LLM 润色 / 规则兜底）都要带上，
     # 否则「我是谁」在有 Key 和没 Key 两种档位下会给出两个不同答案。
@@ -1643,10 +1670,10 @@ def chat(body: ChatIn):
     if ts["entries"]:
         parts, summary = _record_timesheet(ts["entries"], body.project or "", body.text)
         final = "\n".join(parts)
-        session_mem.add_turn(sid, body.text, final, result_note=final[:120])
+        session_mem.add_turn(mem_sid, body.text, final, result_note=final[:120])
         return {"ok": True, "text": final, "session_id": sid, "pending": [], "timesheet": summary}
     if ts["contract"]:
-        session_mem.add_turn(sid, body.text, _CONTRACT_REFUSAL, result_note=_CONTRACT_REFUSAL[:120])
+        session_mem.add_turn(mem_sid, body.text, _CONTRACT_REFUSAL, result_note=_CONTRACT_REFUSAL[:120])
         return {"ok": True, "text": _CONTRACT_REFUSAL, "session_id": sid, "pending": []}
 
     if llm_skill.is_configured():
@@ -1674,7 +1701,7 @@ def chat(body: ChatIn):
                         final = f"{final}\n{note}"
             else:
                 final = str(parsed.get("reply", "")).strip() or "我还在学习这句怎么接——可以记一笔账，或问我最近流水 / 现金流。"
-            session_mem.add_turn(sid, body.text, final, result_note=final[:120])
+            session_mem.add_turn(mem_sid, body.text, final, result_note=final[:120])
             out = {"ok": True, "text": final, "session_id": sid,
                    "pending": [{"id": d["id"], "direction": d["direction"],
                                 "amount_cents": d["amount_cents"], "category": d["category"],
@@ -1688,6 +1715,6 @@ def chat(body: ChatIn):
             return out
 
     r = _rule_reply(body.text, body.project, body.user)
-    session_mem.add_turn(sid, body.text, r.get("text", ""))
+    session_mem.add_turn(mem_sid, body.text, r.get("text", ""))
     r["session_id"] = sid
     return r

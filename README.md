@@ -58,17 +58,18 @@
 
 | 路径 | 职责 |
 |:--|:--|
-| `backend/` | FastAPI 后端：事件账本、状态引擎、四类输入通道（图片 / PDF / 报销表 / 账单）与页面类型判定、项目归集、待确认草稿、接单决策（报价下限）、工时与开票税务归集、查询工具、Excel 导出（明细 + 汇总）、邀请码会话（默认关闭）、对话 API（规则 + LLM 双通道） |
+| `backend/` | FastAPI 后端：事件账本、状态引擎、四类输入通道（图片 / PDF / 报销表 / 账单）与页面类型判定、项目归集、待确认草稿、接单决策（报价下限）、工时与开票税务归集、查询工具、Excel 导出（明细 + 汇总）、邀请码会话（服务器上已启用，本地默认关闭）、对话 API（规则 + LLM 双通道） |
 | `engine/` | 编排式智能体工作区：SKILL 方法论、MCP 工具服务器 |
 | `frontend/` | 真数据对话式财务工作台（记账对话 + 现金流/状态面板 + 待确认面板 + 项目详情） |
 | `docs/` | 网页版创意阐述页（GitHub Pages 发布，含实弹证据与出处） |
 | `scripts/` | 工具脚本（票据批量识别、语音识别客户端、PDF 渲染等） |
 | `samples/` | 合成演示样本（可入库；真实用户数据一律隔离） |
 | `tests/` | 后端单测（pytest）与 demo 行为回归（Node，直接加载真实页面脚本断言） |
+| `requirements.txt` | 后端运行时依赖（服务器 `python3 -m venv` + `pip install -r` 用） |
 
 ## 快速开始（原型阶段）
 
-> **本仓库为原型，未提供在线服务。** 产品（后端 API + 前端工作台）需按下述步骤在本机启动。`docs/` 是介绍页，已单独发布为静态网站（https://davidlee2026.github.io/CashLens/），不含产品功能。账本与金额计算全部在本机完成。
+> **线上实例（邀请制）**：https://cashlens.leerobert.site —— 一码一账，需要邀请码；未登录只显示邀请码页。本机开发仍按下述步骤启动。`docs/` 是介绍页，已单独发布为静态网站（https://davidlee2026.github.io/CashLens/），不含产品功能。
 
 ```bash
 # 0) 配置环境（可选：不填 LLM API Key 时对话走规则兜底）
@@ -103,6 +104,25 @@ node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 
 > 语音识别依赖本机 ASR 工具与模型：通过环境变量 `ASR_CLI` / `ASR_MODEL` 指向本机可执行文件与模型（仓库不内置、不记录路径）。
 > 启动后端 API 前请先在仓库根目录执行 `cp .env.example .env`；`.env` 已被 `.gitignore` 拦截，永不入库。
+
+## 服务器部署（2026-10-19 上线）
+
+线上实例：https://cashlens.leerobert.site （邀请制，一码一账）
+
+| 项 | 位置 / 做法 |
+|:--|:--|
+| 前端 | 本机 `CASH_STATIC_EXPORT=1 pnpm exec next build --webpack` → `frontend/out/` → rsync 到 nginx 站点根目录；服务器上不装 Node、不跑 `next start` |
+| 后端 | `/opt/cashlens/releases/<时间戳>/` + `/opt/cashlens/current` 软链；systemd 单元 `cashlens-api.service`，**1 个 uvicorn worker**，只监听 `127.0.0.1:8001` |
+| 环境变量 | `/etc/cashlens.env`（600 root）：`CASH_DATA_DIR=/var/lib/cashlens`、`CASH_MULTI_TENANT=1`、`CASH_COOKIE_SECURE=1`、`CASH_LOCK_MODEL=1` |
+| 数据 | `/var/lib/cashlens/`（700 cashlens），一码一个 `tenants/<slug>/`；`tenants.json` 与 `session.key` 在根目录 |
+| nginx | `/www/server/panel/vhost/nginx/cashlens.leerobert.site.conf`；`/api/` 反代 8001，`proxy_buffering off`、900s 超时、`client_max_body_size 128m` |
+| 证书 | `/www/server/panel/vhost/cert/cashlens.leerobert.site/`（Let's Encrypt，acme.sh 每日检查、自动续期；TrustAsia 那份留在同目录作备用） |
+| 备份 | 每天 03:30 `/opt/cashlens/backup.sh` → `/www/backup/cashlens/`，保留 14 天；已实测可还原 `tenants.json` / `session.key` |
+| 健康检查 | 每 5 分钟 `/opt/cashlens/healthcheck.sh`，探不到 `/api/health` 就重启 |
+| 邀请码 | `python3 scripts/manage_tenants.py create --label "客户A"`（码只显示一次，库里只存哈希；`list` / `rotate` / `revoke` 同脚本） |
+
+> 改前端的流程＝本机重新导出 + rsync `out/`；改后端＝新建 release + 切 `current` + `systemctl restart cashlens-api`。
+> 模型档位在服务器上被 `CASH_LOCK_MODEL=1` 锁死，界面只读；要改只能改 `/etc/cashlens.env` 后重启。
 
 ## 安全与隐私
 

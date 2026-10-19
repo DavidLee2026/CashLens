@@ -576,4 +576,22 @@ button{font-family:inherit}
 .reset-final{margin:0;font-size:12.5px;line-height:1.7;color:var(--text)}
 .reset-msg{margin-top:12px;padding-top:10px;border-top:1px dashed var(--gray-200);
   font-size:12px;line-height:1.7;color:var(--text-2)}
+/* 邀请码登录页（2026-10-19 部署到服务器时加）：一码一账的第一道门。
+   沿用既有 token，不引入新配色；焦点态与登录输入框保持一致。 */
+.login-gate{min-height:100vh;display:grid;place-items:center;background:var(--gray-50);padding:24px}
+.login-card{width:min(400px,100%);background:var(--white);border:1px solid var(--border);border-radius:16px;
+  padding:32px 28px;box-shadow:0 12px 40px rgba(10,37,64,.08)}
+.login-brand{margin-bottom:22px}
+.login-card h1{font-size:20px;margin-bottom:6px;color:var(--text)}
+.login-sub{font-size:13px;color:var(--text-2);line-height:1.6;margin-bottom:18px}
+.login-card input{width:100%;border:1px solid var(--border);background:var(--white);border-radius:10px;
+  padding:11px 12px;font-size:14px;font-family:var(--font-mono);letter-spacing:.04em;outline:none;color:var(--text)}
+.login-card input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
+.login-err{color:var(--risk);font-size:13px;margin-top:10px}
+.login-btn{width:100%;margin-top:16px;border:0;border-radius:10px;padding:11px 14px;cursor:pointer;
+  background:var(--brand);color:#fff;font-size:14px;font-weight:600;font-family:inherit}
+.login-btn:hover{background:var(--indigo-600)}
+.login-btn:disabled{opacity:.6;cursor:not-allowed}
+.login-foot{margin-top:22px;font-size:12px;color:var(--text-2);text-align:center;line-height:1.6}
+.tenant-chip{font-size:12px;color:var(--text-2);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

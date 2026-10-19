@@ -184,6 +184,17 @@ def local_presets_view() -> list[dict]:
 
 
 # ─── 读写 ───────────────────────────────────────────────
+def locked() -> bool:
+    """服务器是否锁死模型档位（多租户部署时用）。
+
+    为什么需要：`model_config.json` 放在数据根目录，是**设备级**配置 ——
+    但 `/api/models/select` 对所有租户开放，任何一个拿了邀请码的人都能把
+    全局档位切走（甚至让识别改走一个不存在的本地端点），所有人一起坏。
+    服务器上用 `CASH_LOCK_MODEL=1` 打开后，只读展示、写操作直接 403。
+    """
+    return os.environ.get("CASH_LOCK_MODEL", "").strip() in ("1", "true", "yes", "on")
+
+
 def config_path() -> Path:
     data_dir = Path(os.environ.get("CASH_DATA_DIR") or (REPO_ROOT / "data"))
     return data_dir / "model_config.json"
@@ -368,6 +379,7 @@ def public_view() -> dict:
 
     return {
         "tier": cfg["tier"],
+        "locked": locked(),
         "active": {"tier": act["tier"], "model": act["model"],
                    "vision": act["vision"], "usable": act["usable"]},
         "tiers": tiers,

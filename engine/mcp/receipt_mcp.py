@@ -160,12 +160,8 @@ def send(msg: dict):
 
 
 # ─── 本机 PDF 文本层 ────────────────────────────────────
-def extract_pdf_text_layer(pdf_path: str) -> str | None:
-    """用 macOS Quartz/PDFKit 抽 PDF 版式文本层。非 macOS 或抽取失败返回 None。
-
-    注意：文本流的先后顺序**不等于**视觉上的左右分栏，因此本函数只当"字符来源"用，
-    不做字段归属判断（归属交给 VLM 或人工）。
-    """
+def _extract_pdf_text_macos(pdf_path: str) -> str | None:
+    """macOS Quartz/PDFKit 抽文本层。非 macOS 或失败返回 None。"""
     if not _PDF_TEXT_AVAILABLE:
         return None
     try:
@@ -175,8 +171,41 @@ def extract_pdf_text_layer(pdf_path: str) -> str | None:
         text = doc.string() or ""
         return text if text.strip() else None
     except Exception as e:  # noqa: BLE001
-        log(f"PDF 文本层抽取失败：{type(e).__name__}: {e}")
+        log(f"PDF 文本层抽取失败（Quartz）：{type(e).__name__}: {e}")
         return None
+
+
+def _extract_pdf_text_pymupdf(pdf_path: str) -> str | None:
+    """Linux / 容器兜底：PyMuPDF 抽文本层（2026-10-19 部署到服务器时补）。
+
+    为什么必须有：Quartz/PDFKit 只有 macOS 自带；服务器是 Linux，走不到那条路。
+    而数电票 PDF 带版式文本层，本机直读既快又不把图像发出去 —— 缺了这段，
+    服务器上所有 PDF 都会落进「把 PDF 当图片发给模型」的分支，而那条路模型不收 PDF。
+    没装 PyMuPDF 时返回 None，保持原有降级行为，不把导入搞崩。
+    """
+    try:
+        try:
+            import pymupdf as fitz  # type: ignore[import-not-found]
+        except Exception:  # noqa: BLE001 老版本只有 fitz 这个名字
+            import fitz  # type: ignore[import-not-found]
+    except Exception:  # noqa: BLE001 没装就退回原行为
+        return None
+    try:
+        with fitz.open(pdf_path) as doc:
+            text = "\n".join(page.get_text("text") for page in doc)
+        return text if text.strip() else None
+    except Exception as e:  # noqa: BLE001
+        log(f"PDF 文本层抽取失败（PyMuPDF）：{type(e).__name__}: {e}")
+        return None
+
+
+def extract_pdf_text_layer(pdf_path: str) -> str | None:
+    """抽 PDF 版式文本层：优先 macOS Quartz/PDFKit，Linux 用 PyMuPDF 兜底。
+
+    注意：文本流的先后顺序**不等于**视觉上的左右分栏，因此本函数只当"字符来源"用，
+    不做字段归属判断（归属交给 VLM 或人工）。
+    """
+    return _extract_pdf_text_macos(pdf_path) or _extract_pdf_text_pymupdf(pdf_path)
 
 
 def _twenty_digit_candidates(text: str) -> list[str]:

@@ -63,3 +63,13 @@ def clear_all() -> None:
     界面看着是空的，助手却"记得"刚才那些已经不存在的账目。
     """
     _sessions.clear()
+
+
+def clear_prefix(prefix: str) -> None:
+    """只清掉某个前缀的会话（多租户重置时用）。
+
+    租户的 key 形如 `<slug>:<session_id>`；一个租户点「重置」不该把
+    别人的对话上下文一起清掉。单用户模式仍走 clear_all()。
+    """
+    for key in [k for k in _sessions if k.startswith(prefix)]:
+        _sessions.pop(key, None)

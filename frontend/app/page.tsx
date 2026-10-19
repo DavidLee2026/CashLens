@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 
 type PendingDraft = {
   id: string; direction: "income" | "expense"; amount_cents: number; category: string;
@@ -267,6 +267,8 @@ type LocalPreset = {
 };
 type ModelsView = {
   tier: "cloud" | "local" | "none";
+  /** 服务器锁定模型档位（多租户部署）：界面只读，不给切。 */
+  locked?: boolean;
   active: { tier: string; model: string; vision: boolean; usable: boolean };
   tiers: ModelTier[];
   local_presets: LocalPreset[];
@@ -379,6 +381,12 @@ const LABEL_CN: Record<string, string> = {
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
+  if (r.status === 401) {
+    // 多租户下会话过期 / 被换码：统一通知界面退回邀请码页，
+    // 不要把它当成「后端未连接」（那是两件事）。
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("cl-auth-required"));
+    throw new Error("HTTP 401");
+  }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json() as Promise<T>;
 }
@@ -410,17 +418,35 @@ function Hint({ text }: { text: string }) {
   );
 }
 
+/** 多租户：本地缓存按租户分区。
+ *  同一台电脑换一个邀请码登录时，如果还用同一组 localStorage key，
+ *  上一个租户的对话历史与会话 id 会被带进新租户（2026-10-19 部署前修）。
+ *  单用户模式 slug 固定为 "local"，行为与改造前一致。 */
+let tenantKey = "local";
+function setTenantKey(k: string) { tenantKey = k || "local"; }
+function lsKey(base: string): string { return `${base}:${tenantKey}`; }
+
 /** 会话 id：localStorage 持久化，多轮追问共享同一上下文。
- *  key 带 v2：数据清零时一并作废旧会话（旧 key 的历史上下文不再被读到）。 */
+ *  key 带 v2：数据清零时一并作废旧会话（旧 key 的历史上下文不再被读到）。
+ *  key 再按租户分区：换邀请码后不会接着上一个租户的会话上下文聊。 */
 function sessionId(): string {
   if (typeof window === "undefined") return "";
-  let s = window.localStorage.getItem("cl_session_v2");
+  const key = lsKey("cl_session_v2");
+  let s = window.localStorage.getItem(key);
   if (!s) {
     s = window.crypto?.randomUUID?.() ?? `s-${Date.now()}`;
-    window.localStorage.setItem("cl_session_v2", s);
+    window.localStorage.setItem(key, s);
   }
   return s;
 }
+
+type SessionView = {
+  multi_tenant: boolean;
+  label: string;
+  /** 租户 slug，仅用于前端本地缓存分区；不是登录凭证。 */
+  tenant?: string;
+  active?: boolean;
+};
 
 /** 空会话占位 · 开场白 B+ 版（2026-09-06 定稿：B 极简上手型为基底，加长+增人情味 ·
  *  与 backend _PERSONA_PROMPT 同源，规格见 02-脑暴/对话人格层规格-20260906.md 第四节）。
@@ -429,6 +455,82 @@ const WELCOME_MSG: Msg = {
   role: "ai",
   text: "你好，我是 CashLens 财务管家。不用懂会计，也不用记格式，把花钱和收钱的事用大白话讲给我就行。\n\n我能帮你做三件事：\n1. 记账：说一句「昨天微信收了 3000 尾款」或「打车花了 28」，我记下来，还能记到对应项目上；\n2. 收票据：点左下角的「＋」，发票照片、发票 PDF、项目工时表、微信支付宝账单都能传，我先认出来给你看，你确认了才入账；\n3. 看钱够不够：问我「这个月花了多少」「下个月会不会缺钱」，我用你自己的账本算，并把依据一起说清楚。\n\n先来一句试试？",
 };
+
+/** 邀请码登录页（2026-10-19 上线到服务器时加）。
+ *
+ *  为什么必须在前端做：多租户后端默认开着 `CASH_MULTI_TENANT=1` 时，除
+ *  `/api/health`、`/api/session/*` 之外所有接口都 401；没有这页，工作台
+ *  只会显示「后端未连接」，而且没有任何地方能输入邀请码。
+ *
+ *  失败文案按后端的真实原因分：401 = 码不对/停用，429 = 试太多次，
+ *  其它 = 服务器问题。不把三种情况都报成「网络错误」。
+ */
+function LoginGate() {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const v = code.trim();
+    if (!v) { setErr("请输入邀请码"); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await fetch("/api/session/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: v }),
+      });
+      if (r.ok) {
+        // 登录成功后整页重载：让首次数据请求带上新 cookie，
+        // 也避免把登录前的空状态（apiOk=false）带进工作台。
+        window.location.reload();
+        return;
+      }
+      if (r.status === 429) setErr("尝试次数太多，请 10 分钟后再试");
+      else if (r.status === 401) setErr("邀请码不对，或者已经停用");
+      else setErr("进不去：服务器暂时有问题，请稍后再试");
+    } catch {
+      setErr("连不上服务器，请检查网络后再试");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="login-gate">
+      <form className="login-card" onSubmit={(e) => { void submit(e); }}>
+        <div className="brand login-brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="16.5" y1="16.5" x2="21" y2="21" />
+            </svg>
+          </span>
+          CashLens
+        </div>
+        <h1>输入邀请码</h1>
+        <p className="login-sub">一个码对应一本账，各看各的。邀请码由 CashLens 提供。</p>
+        <input
+          value={code}
+          onChange={(e) => { setCode(e.target.value); if (err) setErr(""); }}
+          placeholder="CL-XXXX-XXXX-XXXX"
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+          aria-label="邀请码"
+        />
+        {err && <div className="login-err" role="alert">{err}</div>}
+        <button type="submit" className="login-btn" disabled={busy}>
+          {busy ? "正在进入…" : "进入工作台"}
+        </button>
+        <p className="login-foot">帮小项目制公司算清一个项目的真实成本，让下次报价有据可依。</p>
+      </form>
+    </main>
+  );
+}
 
 export default function Workbench() {
   // 首屏固定默认开场白（与服务端渲染一致，避免 hydration mismatch）；历史消息在挂载后从 localStorage 加载
@@ -439,6 +541,14 @@ export default function Workbench() {
   const [fc, setFc] = useState<Fc | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [apiOk, setApiOk] = useState(true);
+  /* 多租户会话：挂载时先问 /api/session/me，决定渲染工作台还是邀请码页。
+     `sessionChecked=false` 时先不渲染工作台，避免登录页闪一下再跳。 */
+  const [session, setSession] = useState<SessionView | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  /* 历史消息是否已从 localStorage 读完：没读完不许写回，否则会用首屏的
+     默认开场白把真实历史覆盖掉（读写两个 effect 的时序问题）。 */
+  const [msgsReady, setMsgsReady] = useState(false);
   const [models, setModels] = useState<ModelsView | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
@@ -577,6 +687,7 @@ export default function Workbench() {
 
   /** 切换模型档位：运行中立即生效，不用重启后端。 */
   async function pickModel(tier: ModelTier["id"]) {
+    if (models?.locked) return;   // 服务器锁定：界面不给切（后端也会 403）
     if (modelBusy || !models || models.tier === tier) {
       setPickOpen(false);
       return;
@@ -678,9 +789,55 @@ export default function Workbench() {
     return cur.preset_label || cur.model || cur.label;
   }
 
+  /* 还没登录 / 登录失效：只渲染邀请码页。单用户模式（multi_tenant=false）永远不拦。 */
+  const needLogin = !!session && session.multi_tenant && !session.label;
+
   useEffect(() => {
-    refresh();
+    // 先问会话：401 → 邀请码页；成功 → 记下租户 key（本地缓存分区）再进工作台。
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/session/me");
+        if (r.status === 401) {
+          if (alive) {
+            setTenantKey("local");
+            setSession({ multi_tenant: true, label: "" });
+            setSessionChecked(true);
+          }
+          return;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const s = (await r.json()) as SessionView;
+        if (!alive) return;
+        setTenantKey(s.multi_tenant ? (s.tenant || "tenant") : "local");
+        setSession(s);
+        setSessionChecked(true);
+      } catch {
+        // 后端不可达：仍然渲染工作台（顶部会显示「后端未连接」），
+        // 不能把人挡在登录页外——那会把「服务器挂了」误报成「你没邀请码」。
+        if (alive) {
+          setTenantKey("local");
+          setSession({ multi_tenant: false, label: "" });
+          setSessionChecked(true);
+        }
+      }
+    })();
+    return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    // 任何接口回 401（cookie 过期 / 被换码）都退回邀请码页。
+    const onAuthRequired = () => {
+      setSession((prev) => (prev && prev.multi_tenant ? { ...prev, label: "" } : prev));
+    };
+    window.addEventListener("cl-auth-required", onAuthRequired);
+    return () => window.removeEventListener("cl-auth-required", onAuthRequired);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionChecked || needLogin) return;
+    refresh();
+  }, [sessionChecked, needLogin]);
 
   useEffect(() => {
     // 用户名只存在本地（原型阶段无账号体系，不登录也能用全部功能）
@@ -694,10 +851,11 @@ export default function Workbench() {
   }, []);
 
   useEffect(() => {
+    if (!sessionChecked || needLogin) return;
     // 挂载后再从 localStorage 恢复历史（与服务端渲染解耦，修复 hydration mismatch）
     if (typeof window === "undefined") return;
     try {
-      const raw = window.localStorage.getItem("cl_msgs_v2");
+      const raw = window.localStorage.getItem(lsKey("cl_msgs_v2"));
       if (raw) {
         const arr: unknown = JSON.parse(raw);
         if (Array.isArray(arr)) {
@@ -709,23 +867,26 @@ export default function Workbench() {
       }
     } catch {
       /* 忽略损坏缓存 */
+    } finally {
+      setMsgsReady(true);
     }
-  }, []);
+  }, [sessionChecked, needLogin]);
 
 
   useEffect(() => {
+    if (!msgsReady) return;
     // 对话历史持久化（刷新不丢；只存文本，最近 40 条）
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
-          "cl_msgs_v2",
+          lsKey("cl_msgs_v2"),
           JSON.stringify(msgs.slice(-40).map((m) => ({ role: m.role, text: m.text })))
         );
       }
     } catch {
       /* 忽略存储失败 */
     }
-  }, [msgs]);
+  }, [msgs, msgsReady]);
 
   useEffect(() => {
     const el = logRef.current;
@@ -1037,6 +1198,25 @@ export default function Workbench() {
     setNameText("");
   }
 
+  /** 退出当前邀请码：清会话 cookie + 本租户的本地缓存，然后回登录页。
+   *  账本一根手指都不动（后端 logout 只删 cookie）。 */
+  async function logoutTenant() {
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    try {
+      await fetch("/api/session/logout", { method: "POST" });
+    } catch {
+      /* 网络失败也照样清本地并回登录页，不能把人卡在工作台 */
+    }
+    try {
+      window.localStorage.removeItem(lsKey("cl_msgs_v2"));
+      window.localStorage.removeItem(lsKey("cl_session_v2"));
+    } catch {
+      /* 忽略存储失败 */
+    }
+    window.location.reload();
+  }
+
   /** 打开设置弹窗（每次都从第 0 步开始，不记住上次停在哪一步）。 */
   function openSettings() {
     setResetStep(0);
@@ -1088,8 +1268,8 @@ export default function Workbench() {
       }
       const r = (await resp.json()) as ResetResult;
       try {
-        window.localStorage.removeItem("cl_msgs_v2");
-        window.localStorage.removeItem("cl_session_v2");
+        window.localStorage.removeItem(lsKey("cl_msgs_v2"));
+        window.localStorage.removeItem(lsKey("cl_session_v2"));
       } catch {
         /* 忽略存储失败：账本已经重置了，别因为清缓存失败就报"重置失败" */
       }
@@ -1472,6 +1652,19 @@ export default function Workbench() {
     ? "未归项目（总账户）"
     : (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject);
 
+  // 会话还没问完：先不渲染工作台，避免登录页闪一下再跳到工作台。
+  if (!sessionChecked) {
+    return (
+      <main className="login-gate">
+        <div className="login-card">
+          <p className="login-sub">正在连接 CashLens…</p>
+        </div>
+      </main>
+    );
+  }
+  // 多租户下没有有效会话：只给邀请码页，工作台一个请求都不发。
+  if (needLogin) return <LoginGate />;
+
   return (
     <>
       <div className="main">
@@ -1520,7 +1713,23 @@ export default function Workbench() {
                 >
                   设置
                 </button>
-                {loginOpen ? (
+                {session?.multi_tenant ? (
+                  <>
+                    {/* 多租户模式：右上角显示当前邀请码的备注名 + 退出。
+                        本地用户名（cl_user）仍保留给对话人格用，不在这里改。 */}
+                    <span className="tenant-chip" title="当前邀请码对应的账本">
+                      {session.label || "已登录"}
+                    </span>
+                    <button
+                      className="btn-mini"
+                      onClick={() => { void logoutTenant(); }}
+                      disabled={logoutBusy}
+                      title="退出当前邀请码（账本不动）"
+                    >
+                      {logoutBusy ? "退出中…" : "退出"}
+                    </button>
+                  </>
+                ) : loginOpen ? (
                   <span className="login-edit">
                     <input
                       value={nameText}
@@ -1872,9 +2081,9 @@ export default function Workbench() {
                   <button
                     className="model-pick"
                     onClick={() => setPickOpen((v) => !v)}
-                    disabled={!apiOk || modelBusy}
+                    disabled={!apiOk || modelBusy || !!models?.locked}
                     aria-haspopup="listbox"
-                    aria-expanded={pickOpen}
+                    aria-expanded={pickOpen && !models?.locked}
                     aria-label="选择模型"
                   >
                     <span
@@ -1882,14 +2091,20 @@ export default function Workbench() {
                         models?.tier === "cloud" ? "cloud" : models?.tier === "none" ? "off" : ""
                       }`}
                     />
-                    {modelBusy ? "切换中…" : currentModelLabel()}
-                    <span className="caret" aria-hidden="true">▾</span>
+                    {modelBusy
+                      ? "切换中…"
+                      : models?.locked
+                        ? `${currentModelLabel()}（已锁定）`
+                        : currentModelLabel()}
+                    {!models?.locked && <span className="caret" aria-hidden="true">▾</span>}
                   </button>
                   <span className="tip-text">
-                    模型{models?.active.model ? `：${models.active.model}` : ""}
+                    {models?.locked
+                      ? "模型档位由服务器设定，界面不能改"
+                      : `模型${models?.active.model ? `：${models.active.model}` : ""}`}
                   </span>
                 </span>
-                {pickOpen && models && (
+                {pickOpen && models && !models.locked && (
                   <div className="model-menu" role="group" aria-label="选择模型档位">
                     {models.tiers.map((t) => (
                       <div key={t.id}>

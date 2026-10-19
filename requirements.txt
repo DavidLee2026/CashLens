@@ -1,0 +1,12 @@
+# CashLens 后端运行时依赖（Python 3.11+）
+# 服务器：python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# 版本按 2026-10-19 本机实测通过的组合钉住，避免部署时漂移。
+
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.4
+openpyxl==3.1.5
+
+# 服务器（Linux）上的 PDF 文本层兜底：macOS 用系统 Quartz，Linux 用 PyMuPDF。
+# 没有它，数电票 PDF 在服务器上会走「把 PDF 当图片发给模型」的死路。
+PyMuPDF==1.28.2

@@ -269,8 +269,12 @@ def test_reset_ui_states_scope_and_backup_honestly():
     src = _page_src()
     for word in ("会清空", "会保留", "备份到", "对话历史也会清空"):
         assert word in src, f"重置弹层里缺少如实说明：{word}"
-    # 只清后端账本是不够的：对话历史与 session id 在 localStorage 里，也要清
-    assert 'removeItem("cl_msgs_v2")' in src and 'removeItem("cl_session_v2")' in src
+    # 只清后端账本是不够的：对话历史与 session id 在 localStorage 里，也要清。
+    # 2026-10-19 多租户：key 走 lsKey() 按租户分区（换邀请码不能读到上一家的对话），
+    # 所以断言的是 lsKey(...) 而不是裸字符串。
+    assert 'removeItem(lsKey("cl_msgs_v2"))' in src
+    assert 'removeItem(lsKey("cl_session_v2"))' in src
+    assert 'function lsKey(base: string)' in src
     # 清完把对话恢复正常开场白（抽成常量，避免各处各写一份）
     assert "setMsgs([WELCOME_MSG])" in src
     assert "const WELCOME_MSG: Msg" in src
