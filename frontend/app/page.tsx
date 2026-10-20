@@ -2087,6 +2087,12 @@ export default function Workbench() {
                     </span>
                   )}
                 </div>
+                <div className="pd-summary">
+                  <span>共 <b>{pendingList.length}</b> 笔</span>
+                  {batchExpense > 0 && <span>支出 <b className="num amt-out">{yuan(batchExpense)}</b></span>}
+                  {batchIncome > 0 && <span>收入 <b className="num amt-in">{yuan(batchIncome)}</b></span>}
+                  <span className="pd-summary-note">还没入账</span>
+                </div>
                 {batchAsk === "accept" && (
                   <div className="pd-confirm">
                     <p>
@@ -2125,29 +2131,27 @@ export default function Workbench() {
                 {(pendingOpen ? pendingList : pendingList.slice(0, 4)).map((p) => (
                   <div className="pd-row" key={p.id}>
                     <div className="pd-main">
-                      <span className={`pd-amt num ${p.direction === "income" ? "in" : ""}`}>
+                      <span className={`pd-amt num ${p.direction === "income" ? "in" : "out"}`}>
                         {p.direction === "income" ? "+" : "−"}{yuan(p.amount_cents)}
                       </span>
-                      <span
-                        className="pd-meta"
-                        title={[
-                          p.source ? `通道：${p.source}` : "",
-                          p.date ? "" : `导入于 ${p.created ? p.created.slice(0, 10) : "未知"}`,
-                          p.note || "",
-                        ].filter(Boolean).join(" · ")}
-                      >
-                        {/* 分类是「待确认」时不当分类显示 —— 它只是"机器没判出来"，
-                            要不要给它一个分类由用户在下面那行下拉里定。 */}
-                        {isUnconfirmed(p.category) ? "分类待定" : p.category}
-                        {` · ${p.date || "日期待补"}`}
-                        {/* 第四段必须标出它到底是什么：报销表那一列装的是归属（部门/模块），
-                            不是商户。此前不标注，界面上会显示成「−¥17.88 餐饮 · 09-28 · 后端」，
-                            看起来像商户叫「后端」（2026-09-28 用户当场问这是啥）。 */}
-                        {p.counterparty
-                          ? ` · ${p.source === "报销表" ? "表内归属" : "商户"} ${p.counterparty}`
-                          : ""}
-                        {needsReview(p) && <span className="pd-warn">需核对</span>}
-                      </span>
+                      {isUnconfirmed(p.category)
+                        ? <span className="pd-cat todo">分类待定</span>
+                        : <span className="pd-cat">{p.category}</span>}
+                      {needsReview(p) && <span className="pd-warn">需核对</span>}
+                    </div>
+                    <div
+                      className="pd-sub"
+                      title={[
+                        p.source ? `通道：${p.source}` : "",
+                        p.date ? "" : `导入于 ${p.created ? p.created.slice(0, 10) : "未知"}`,
+                        p.note || "",
+                      ].filter(Boolean).join(" · ")}
+                    >
+                      {p.date || "日期待补"}
+                      {p.counterparty
+                        ? ` · ${p.source === "报销表" ? "表内归属" : "商户"} ${p.counterparty}`
+                        : ""}
+                      {p.source ? ` · ${p.source}` : ""}
                     </div>
                     <div className="pd-acts">
                       {/* 「待确认」的行：给一个分类下拉。机器没判出来的分类只有人能补 ——

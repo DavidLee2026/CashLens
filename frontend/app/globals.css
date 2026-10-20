@@ -452,11 +452,17 @@ button{font-family:inherit}
 .proj-pick:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
 /* 左栏「待确认」区块：识别 → 确认 → 入账 里的确认环节（2026-09-28 补） */
 .sect-note{font-size:10.5px;color:var(--text-3)}
-.pd-row{display:flex;flex-direction:column;gap:6px;padding:8px 0;border-top:1px solid var(--border)}
+.pd-row{display:flex;flex-direction:column;gap:7px;padding:11px 0;border-top:1px solid var(--border)}
 .pd-row:first-of-type{border-top:none;padding-top:2px}
-.pd-main{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.pd-amt{font-size:14px;font-weight:700;color:var(--text)}
+.pd-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+/* 金额与分类是待确认里最该被看见的两样：金额 20px、分类做成胶囊（2026-10-20 用户反馈） */
+.pd-amt{font-size:20px;line-height:1.15;font-weight:750;color:var(--text)}
+.pd-amt.out{color:var(--money-out)}
 .pd-amt.in{color:var(--money-in)}
+.pd-cat{display:inline-block;padding:2px 9px;border-radius:999px;background:var(--brand-bg);
+  color:var(--brand);font-size:12px;font-weight:600;line-height:1.6}
+.pd-cat.todo{background:var(--warn-bg);color:var(--warn)}
+.pd-sub{font-size:11.5px;color:var(--text-2);line-height:1.5;word-break:break-all}
 .pd-meta{font-size:11px;color:var(--text-2);line-height:1.4;word-break:break-all}
 .pd-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .pd-acts .proj-pick{max-width:132px;flex:1 1 110px}
@@ -465,8 +471,17 @@ button{font-family:inherit}
    确认是"动作"，统一放对话区；左侧只留数据汇总，不再重复一份。
    卡片自己滚（最多 32vh），不把输入框顶出视口。 */
 .pending-inbox{flex:0 0 auto;margin:0 22px 10px;padding:10px 14px;background:var(--card);
-  border:1px solid var(--border);border-radius:var(--radius);max-height:32vh;overflow-y:auto}
+  border:1px solid var(--border);border-radius:var(--radius);max-height:36vh;overflow-y:auto}
 .pending-inbox .sect-head{margin-bottom:6px}
+.pending-inbox .sect-head h3{font-size:13px;color:var(--text);letter-spacing:.04em}
+/* 待确认合计：笔数 + 支出/收入，放在卡片顶部，不用点批量确认才看得到 */
+.pd-summary{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 8px;
+  padding:8px 10px;border-radius:8px;background:var(--gray-50)}
+.pd-summary span{font-size:12px;color:var(--text-2)}
+.pd-summary b{font-size:15px;color:var(--text)}
+.pd-summary .amt-out{color:var(--money-out)}
+.pd-summary .amt-in{color:var(--money-in)}
+.pd-summary-note{margin-left:auto;font-size:10.5px;color:var(--text-3)}
 @media (max-width:980px){.pending-inbox{margin:0 12px 10px;max-height:40vh}}
 /* 批量确认条：先把「共几笔 / 多少钱 / 几笔带核对提示」摆出来，再让用户点确认 */
 .pd-confirm{margin:6px 0 2px;padding:9px 10px;border:1px solid var(--border);
