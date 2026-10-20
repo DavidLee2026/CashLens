@@ -14,7 +14,7 @@
 ## 核心闭环
 
 ```
-采集（说一句 / 拍一张 / 导一份）→ 财务状态引擎 → 决策建议 → 反馈回灌
+采集（说一句 / 拍一张 / 导一份）→ **你逐笔确认** → 财务状态引擎 → 决策建议 → 反馈回灌
 ```
 
 ## 三个核心创新
@@ -23,7 +23,9 @@
 2. **CashPulse 现金流预测**——把历史收支按**周**聚合成桶（没记录的周也计入），输出未来 30/90 天现金流**区间**（90% 带宽，带宽按 √周数 增长而非乘天数），数据不够时直说「还推不出来」，数据不足时如实标注不可信，不做假装精确的点预测。
 3. **假设检验闭环**——每次决策记录当初假设，账本自动检验偏差（如回款周期 3 天 vs 实际 3 周），下次报价自动参考。**（事件类型与判定逻辑已在引擎层就位，偏差标记与回灌尚未实装——账本里暂无实际记录，如实标注）**
 
-> 当前阶段：状态引擎与 CashPulse 最小版已实现（真实计算）；**接单决策最小版已落地**（报价下限 + 三道闸门，每个数字可追到账本事件）；**假设检验回灌、前端邀请码登录页与部署件为下一阶段**（邀请码会话的后端能力已实装、默认关闭）。本仓库按「原型 / 早期验证」口径对外呈现（证据见 `docs/` 实弹记录，含如实披露的缺陷）。
+> 当前阶段：状态引擎与 CashPulse 最小版已实现（真实计算）；**接单决策最小版已落地**（报价下限 + 三道闸门，每个数字可追到账本事件）；**邀请码登录页与线上部署已上线**（2026-10-19，https://cashlens.leerobert.site，一码一账）；**假设检验回灌仍是下一阶段**（事件类型与判定逻辑在引擎层，偏差标记与回灌未实装）。本仓库按「原型 / 早期验证」口径对外呈现（证据见 `docs/` 实弹记录，含如实披露的缺陷）。
+>
+> **形态**：网页版已加 PWA 壳（`manifest.webmanifest` + 图标 + 独立窗口），手机可「加到主屏」；**手机浏览器可直接用**（2026-10-20 首位真实用户在手机上完成了建项目 + 12 笔记账），移动端重排尚未做。
 
 ## 编排式智能体架构
 
@@ -98,7 +100,7 @@ pnpm install && pnpm dev
 python3 scripts/batch_recognize.py samples/
 
 # 5) 测试
-python3 -m pytest tests/            # 后端单测
+python3 -m pytest tests/            # 后端单测（当前 481 条）
 node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 ```
 
@@ -111,9 +113,9 @@ node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 
 | 项 | 位置 / 做法 |
 |:--|:--|
-| 前端 | 本机 `CASH_STATIC_EXPORT=1 pnpm exec next build --webpack` → `frontend/out/` → rsync 到 nginx 站点根目录；服务器上不装 Node、不跑 `next start` |
+| 前端 | 本机 `python3 frontend/scripts/make_icons.py`（生成 PWA 图标，二进制不入库）→ `CASH_STATIC_EXPORT=1 pnpm exec next build --webpack` → `frontend/out/` → rsync 到 nginx 站点根目录；服务器上不装 Node、不跑 `next start` |
 | 后端 | `/opt/cashlens/releases/<时间戳>/` + `/opt/cashlens/current` 软链；systemd 单元 `cashlens-api.service`，**1 个 uvicorn worker**，只监听 `127.0.0.1:8001` |
-| 环境变量 | `/etc/cashlens.env`（600 root）：`CASH_DATA_DIR=/var/lib/cashlens`、`CASH_MULTI_TENANT=1`、`CASH_COOKIE_SECURE=1`、`CASH_LOCK_MODEL=1` |
+| 环境变量 | `/etc/cashlens.env`（600 root）：`CASH_DATA_DIR=/var/lib/cashlens`、`CASH_MULTI_TENANT=1`、`CASH_COOKIE_SECURE=1`（`CASH_LOCK_MODEL` 已于 2026-10-20 移除，见下） |
 | 数据 | `/var/lib/cashlens/`（700 cashlens），一码一个 `tenants/<slug>/`；`tenants.json` 与 `session.key` 在根目录 |
 | nginx | `/www/server/panel/vhost/nginx/cashlens.leerobert.site.conf`；`/api/` 反代 8001，`proxy_buffering off`、900s 超时、`client_max_body_size 128m` |
 | 证书 | `/www/server/panel/vhost/cert/cashlens.leerobert.site/`（Let's Encrypt，acme.sh 每日检查、自动续期；TrustAsia 那份留在同目录作备用） |
@@ -122,7 +124,7 @@ node tests/demo_behavior.test.mjs   # demo 行为回归（当前 16 项）
 | 邀请码 | `python3 scripts/manage_tenants.py create --label "客户A"`（码只显示一次，库里只存哈希；`list` / `rotate` / `revoke` 同脚本） |
 
 > 改前端的流程＝本机重新导出 + rsync `out/`；改后端＝新建 release + 切 `current` + `systemctl restart cashlens-api`。
-> 模型档位在服务器上被 `CASH_LOCK_MODEL=1` 锁死，界面只读；要改只能改 `/etc/cashlens.env` 后重启。
+> **模型档位按账号各存一份**（2026-10-20）：`/var/lib/cashlens/tenants/<slug>/model_config.json`，界面上可各自切换云端 / 自定义端点，互不影响。服务器自带的 `LLM_API_KEY` 不落进租户文件（写盘存哨兵 `__from_server_env__`，读时换回环境变量真值，换 key 时所有租户自动跟上）。运维仍可用 `CASH_LOCK_MODEL=1` 临时全站只读。⚠️ 线上这台机器（2C1.7G）跑不了本地视觉模型，界面里的「本地」指**用户自己机器/内网的端点**。
 
 ## 安全与隐私
 
