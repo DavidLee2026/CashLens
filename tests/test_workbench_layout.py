@@ -494,3 +494,39 @@ def test_local_claims_are_branched_by_deployment():
     assert "账本与预估存在本机 data/ 目录" in src                       # 关于页·本机
     # 三处（输入框下方提示 / 页脚 / 关于页）都得是分支写法
     assert src.count("session?.multi_tenant") >= 3
+
+
+def test_no_architecture_jargon_in_user_facing_hint():
+    """输入框下方那行是给用户看的，不是架构图（2026-10-20 外部评审指出）。
+
+    原文案「LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算」把内部术语直接摆到
+    第一次用的人眼前；用户看不懂，也不该需要看懂。要留下的是他能感知的那半句：
+    模型只负责听懂，账不由它算。
+    """
+    src = _page_src()
+    assert "LLM 语义理解 + 规则兜底" not in src
+    assert "状态引擎真计算" not in src
+    assert "模型只负责听懂你的话，账由账本自己算" in src
+
+
+def test_recent_events_label_does_not_claim_to_be_total():
+    """「最近记的账」只能报它自己那一窗的笔数。
+
+    曾出现的错（外部评审先发现的）：上面总账目写「27 笔」，这里写「共 20 笔」——
+    「共」是个承诺，可它只是界面加载的那一窗。记账产品里数字对不上账，
+    比任何文案错误都伤信任。
+    """
+    src = _page_src()
+    assert '>共 {events.length} 笔<' not in src
+    assert "最近 {events.length} 笔" in src
+    assert "账本共 ${acct.count} 笔" in src
+
+
+def test_forecast_divider_matches_what_it_labels():
+    """「30 天后」这条分隔线下面，装的不一定是 30 天后的数。
+
+    推不出来的时候，下面显示的是「现在账上的净额」；标题还写着「30 天后」，
+    用户会以为那是预测值，而数字跟现在一模一样 —— 看着就像 bug。
+    """
+    src = _page_src()
+    assert 'fc && fc.extrapolated === false ? "还推不出 30 天后" : "30 天后"' in src

@@ -2346,13 +2346,15 @@ export default function Workbench() {
                     {modelBusy
                       ? "切换中…"
                       : models?.locked
-                        ? `${currentModelLabel()}（已锁定）`
+                        ? `${currentModelLabel()}（当前模型）`
                         : currentModelLabel()}
                     {!models?.locked && <span className="caret" aria-hidden="true">▾</span>}
                   </button>
                   <span className="tip-text">
+                    {/* 「已锁定」像在说“出事了 / 被锁住了”，改成「当前模型」+ 一句为什么不能改
+                        （2026-10-20 外部评审：用户会担心被锁死在一家模型上）。 */}
                     {models?.locked
-                      ? "模型档位由服务器设定，界面不能改"
+                      ? "模型档位由服务器统一设定，你这边不能改（其余功能不受影响）"
                       : `模型${models?.active.model ? `：${models.active.model}` : ""}`}
                   </span>
                 </span>
@@ -2460,9 +2462,13 @@ export default function Workbench() {
             </div>
             <div className="inputfoot">
               <div className="hint">
+                {/* 2026-10-20 改口径（外部评审指出）：原来这行写的是内部架构链
+                    （语义理解 / 规则兜底 / 事件账本 / 引擎计算）——那是架构图，
+                    用户看不懂，也不该需要看懂。保留的是**他能感知的那半句**：
+                    模型只负责听懂，账不由它算。 */}
                 {session?.multi_tenant
-                  ? "LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态都是你账本里的真数。"
-                  : "LLM 语义理解 + 规则兜底 → 事件账本 → 状态引擎真计算；金额与状态均为本地真实数据。"}
+                  ? "模型只负责听懂你的话，账由账本自己算——每个数都能追到具体那笔。"
+                  : "模型只负责听懂你的话，账由账本自己算——数据都留在本机，每个数都能追到那笔。"}
               </div>
             </div>
             {modelMsg && <div className="hint">{modelMsg}</div>}
@@ -2548,7 +2554,7 @@ export default function Workbench() {
                 净 <b className={`num ${acct.income - acct.expense < 0 ? "amt-out" : "amt-in"}`}>
                   {acct.income - acct.expense < 0 ? "" : "+"}{yuan(acct.income - acct.expense)}
                 </b>
-                <span className="hn-meta">· 全部项目 · {acct.count} 笔</span>
+                <span className="hn-meta">· 全部时间 · 含未归项目 · {acct.count} 笔</span>
               </div>
             </section>
             {/* 项目维度：账本按项目归集，这里是项目的唯一入口 */}
@@ -2832,7 +2838,12 @@ export default function Workbench() {
                 净 {net30Cents < 0 ? "" : "+"}{yuan(net30Cents)}
               </div>
 
-              <div className="sect-div"><span>30 天后</span></div>
+              {/* 分隔条的小标题要跟着下面装的东西改（2026-10-20 外部评审指出）：
+                  推不出来的时候，下面显示的是**现在**的净额，标题却写着「30 天后」——
+                  用户会以为那是 90/30 天后的预测值，而且数字跟现在一模一样，就更像 bug。 */}
+              <div className="sect-div">
+                <span>{fc && fc.extrapolated === false ? "还推不出 30 天后" : "30 天后"}</span>
+              </div>
               {!fc ? (
                 <div className="empty">{apiOk ? "等待数据…" : "后端未连接"}</div>
               ) : fc.extrapolated === false ? (
@@ -2872,8 +2883,14 @@ export default function Workbench() {
             <section className="sect">
               <div className="sect-head">
                 <h3>最近记的账</h3>
+                {/* 🔴 2026-10-20 修一处会伤信任的标错（外部评审指出：上面写「27 笔」、
+                    这里写「共 20 笔」，用户第一反应是「哪个是真的、丢了 7 笔？」）。
+                    原因是 events 只是**界面加载的那一窗**，而 acct.count 才是账本真实笔数。
+                    一个数一个说法：这里只说「最近 N 笔」，账本总数照实另外写。 */}
                 {events.length > EV_WINDOW && (
-                  <span className="sect-note">共 {events.length} 笔</span>
+                  <span className="sect-note">
+                    最近 {events.length} 笔{acct.count > events.length ? ` / 账本共 ${acct.count} 笔` : ""}
+                  </span>
                 )}
               </div>
               {events.length === 0 ? (
