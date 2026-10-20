@@ -2494,7 +2494,7 @@ export default function Workbench() {
                 记下第一笔后整行消失 —— 它是脚手架，不是广告牌。 */}
             {isEmptyLedger && (
               <div className="start-chips" role="group" aria-label="示例：可以这样说">
-                <span className="sc-lead">不知道说什么？点一条试试：</span>
+                <span className="sc-lead">试一句：</span>
                 {[
                   { text: "昨天买画材 200", fill: true },
                   { text: "这个月花了多少", fill: false },
@@ -2809,12 +2809,9 @@ export default function Workbench() {
                 </div>
                 <div className="demo-title">秋季市集</div>
                 <div className="demo-nums">
-                  <span>收入 <b className="num amt-in">¥18,600</b></span>
-                  <span>支出 <b className="num amt-out">¥12,340</b></span>
-                  <span>净 <b className="num amt-in">+¥6,260</b></span>
-                </div>
-                <div className="demo-note">
-                  14 笔 · 其中 3 张发票同号，已只算一次 · 每一笔都能追到那张票
+                  <span>花 <b className="num amt-out">¥12,340</b></span>
+                  <span>收 <b className="num amt-in">¥18,600</b></span>
+                  <span>赚 <b className="num amt-in">+¥6,260</b></span>
                 </div>
               </section>
             )}
@@ -2889,7 +2886,7 @@ export default function Workbench() {
                   : "点一个项目，之后记的账默认算它的；每一笔都能改"}
               </div>
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
-                <div className="empty">还没有项目。点上面的「新建项目」，或记账时说一句「这笔记到 示例项目 A」，就建好了</div>
+                <div className="empty">还没有项目 —— 点「新建项目」，或记账时说「这笔记到 秋季市集」</div>
               ) : (
                 <>
                   {projView.projects.map((p) => (
@@ -3160,10 +3157,14 @@ export default function Workbench() {
             </section>
 
 
+            {/* ⚠️ 空账本时这一块整个不渲染（2026-10-20 David 反馈首屏"有点乱、文字信息很多"）：
+                账本为空时它只会连说三句废话 ——「还说不准」「近 90 天只有 0 天有记录」「还推不出 30 天后」。
+                首屏只该有一个动作；等真的有数据了它才重新出现（那时它说的每句都是结论）。 */}
+            {!isEmptyLedger && (
             <section className="sect">
               {/* 2026-10-19 合并：原来「你的账现在什么样」和「还推不出 30 天后」是两块，
                   各说一遍「再记 4 天」—— 其实是一条链：**状态 → 能不能预测 → 预测结果**。
-                  现在一块里说完：上面是近 30 天，中间一条分隔，下面是 30 天后。 */}
+                  现在一块里说完：上面是 30 天，中间一条分隔，下面是预测。 */}
               <div className="sect-head">
                 <h3>你的账现在什么样</h3>
                 <span
@@ -3221,7 +3222,10 @@ export default function Workbench() {
                 </>
               )}
             </section>
+            )}
 
+            {/* 最近记的账：空账本时也不占位（示例卡已经交代了"账本为空"） */}
+            {!isEmptyLedger && (
             <section className="sect">
               <div className="sect-head">
                 <h3>最近记的账</h3>
@@ -3270,6 +3274,7 @@ export default function Workbench() {
                 </>
               )}
             </section>
+            )}
             </div>
           </aside>
         </div>
