@@ -469,6 +469,11 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
     rows = _sync(data_dir, events)
     stat = {p["project"]: p for p in summary(data_dir, events)["projects"]}
 
+    # **新建的排最上面**（2026-10-20 David：「默认在最顶上的项目，新建项目了以后，
+    # 就在新建的项目里增加」）：前端默认选中第一行，所以顺序必须让新项目出现在第一行；
+    # 否则重新打开页面时默认会落回最早建的那个项目。
+    rows = sorted(rows, key=lambda r: str(r.get("created") or ""), reverse=True)
+
     out = []
     for r in rows:
         if is_deleted(r):

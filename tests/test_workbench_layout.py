@@ -555,9 +555,19 @@ def test_account_aggregate_appears_once_and_projects_are_projects_only():
     assert "yuan(acct.income)" in hero and "yuan(acct.expense)" in hero
 
 
-def test_clicking_the_selected_project_again_clears_it():
-    """取消选中＝再点一次同一个项目（新账回到「未归项目」）—— 少了这条路，用户就没法不选项目。"""
+def test_current_project_defaults_to_the_topmost_and_never_clears():
+    """当前项目＝列表最上面那个，**没有"取消选中"这条路**（2026-10-20 David 定稿）。
+
+    原话：「点中了就是要放在这个项目里，默认在最顶上的项目，新建项目了以后，就在新建的
+    项目里增加」——「再点一次取消」在他看来是多此一举，会把账记回未归项目。
+    """
     src = _page_src()
-    assert "setActiveProject(activeProject === p.id ? \"\" : p.id)" in src
-    assert "再点一次取消" in src, "要把这个动作写在提示里，否则没人知道能取消"
-    assert "未归项目（还没选项目）" in src, "没选项目时那行要如实说清，别叫「总账户」"
+    # 点一下只设项目，不再有"再点一次清空"的分支
+    assert "onClick={() => setActiveProject(p.id)}" in src
+    assert 'setActiveProject(activeProject === p.id ? "" : p.id)' not in src, \
+        "不许再有「再点一次取消」这条分支"
+    assert "再点一次取消" not in src
+    # 默认落在列表第一行（后端按创建时间倒序，新建的排第一）
+    assert "setActiveProject(projView.projects[0]?.id ?? \"\")" in src
+    # 只有"一个项目都没有"时才显示未归
+    assert "未归项目（还没有项目）" in src

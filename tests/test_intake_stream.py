@@ -563,12 +563,16 @@ def test_workbench_intake_request_carries_current_project():
     # 用 fetch 调用点定位：字符串 "/api/intake/stream" 在文件里出现多次（文件头的注释里也有）
     idx = page.find('authedFetch("/api/intake/stream"')
     assert idx != -1, "找不到导入端点的调用点"
-    # 取调用点后面一小段（请求体就在紧邻的几行里），确认带了 project
-    window = page[idx: idx + 700]
+    # 取调用点前面一小段（判断 + 请求体就在紧邻的几行里），确认两个事实：
+    #   ① 单文件导入带**当前选中项目**（用户选了项目就该落到那里）；
+    #   ② **带文件夹的批次不传**（后端口径「显式指定 > 文件夹名」——现在当前项目总有默认值，
+    #      照旧传就会把"按文件夹名建项目"整条规则盖掉，2026-10-20 因此绊了一次）。
+    window = page[max(0, idx - 900): idx + 700]
     assert "JSON.stringify" in window, "导入请求体不是 JSON.stringify？"
-    assert "project: activeProject" in window, (
-        "导入请求没有带当前选中项目 —— 用户选了项目也会被文件夹名另建一个项目盖掉"
+    assert "project: hasFolder ? \"\" : activeProject" in window, (
+        "导入请求的归属口径不对：单文件要跟随当前项目，带文件夹的要让文件夹名说话"
     )
+    assert "hasFolder" in window and "rel_path" in window, "要按 rel_path 里有没有 / 判断带不带文件夹"
 
 
 def test_workbench_chat_request_carries_the_local_user_name():

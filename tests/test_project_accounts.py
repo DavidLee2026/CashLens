@@ -335,3 +335,17 @@ def test_pending_accept_defaults_to_the_selected_project():
     # 「未归」在确认下拉里必须仍然选得到（否则想不归项目的人没有出路），但别再叫「总账户」
     assert '<option value="">未归项目（不归任何项目）</option>' in src
     assert "未归项目（总账户）" not in src
+
+
+def test_projects_are_listed_newest_first():
+    """项目列表按创建时间**倒序**（新建的排最上面）。
+
+    为什么：前端"当前项目"默认取第一行（David：「默认在最顶上的项目，新建项目了以后，
+    就在新建的项目里增加」）。若列表是正序，用户新建完刷新一遍，默认又会落回最早那个项目。
+    """
+    src = (Path(__file__).resolve().parents[1] / "backend" / "app" / "services"
+           / "projects.py").read_text(encoding="utf-8")
+    body = src[src.index("def list_projects"):]
+    body = body[body.index("\n") :]          # 去掉函数签名那一行
+    body = body[: body.index("\ndef ")] if "\ndef " in body else body
+    assert 'sorted(rows, key=lambda r: str(r.get("created") or ""), reverse=True)' in body

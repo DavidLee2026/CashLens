@@ -644,10 +644,14 @@ export default function Workbench() {
   const [detailBusy, setDetailBusy] = useState(false);
   /* 详情读取失败也要说清楚：错误提示必须显示在弹窗内——写进左栏 projMsg 会被遮罩挡着，用户只看到空白卡片 */
   const [detailErr, setDetailErr] = useState("");
-  // 选中的项目被删掉之后，别让"当前项目"指向一个不存在的 id
+  /* 当前项目（2026-10-20 David 定稿）：**默认就是列表最上面那个项目**，而且不再有"取消选中"。
+     原话：「点中了就是要放在这个项目里，默认在最顶上的项目，新建项目了以后，就在新建的项目里增加」。
+     所以要处理的只有两种情况：第一次拿到列表、以及当前项目被删掉 —— 都落回最上面那个。
+     列表按创建时间倒序（后端 `list_projects`），新建的项目排第一，重新打开也还是它。 */
   useEffect(() => {
-    if (!activeProject || !projView) return;
-    if (!projView.projects.some((x) => x.id === activeProject)) setActiveProject("");
+    if (!projView) return;
+    if (activeProject && projView.projects.some((x) => x.id === activeProject)) return;
+    setActiveProject(projView.projects[0]?.id ?? "");
   }, [activeProject, projView]);
   // 登录：原型阶段只在本地记一个用户名，不接账号体系；不登录也能用全部功能
   const [user, setUser] = useState("");
@@ -1571,6 +1575,11 @@ export default function Workbench() {
         rel_path: it.rel_path,
         content_b64: await fileToB64(it.file),
       })));
+      /* 传不传当前项目：**带文件夹的不传**。后端口径是「显式指定 > 文件夹名 > 当前默认」，
+         而现在当前项目总有一个默认值（最上面那个）—— 照旧传就会把"按文件夹名建项目"
+         这条规则整个盖掉（真机：拖「示例项目A发票」文件夹，全进了另一个项目）。
+         单张图片 / 单个文件照旧跟随当前项目。 */
+      const hasFolder = items.some((it) => String(it.rel_path || "").includes("/"));
 
       const res = await authedFetch("/api/intake/stream", {
         method: "POST",
@@ -1579,7 +1588,7 @@ export default function Workbench() {
         // **必须带当前选中项目**：后端归属优先级是「显式指定 > 文件夹名 > 未归」，
         // 漏传这一项时，选了项目也会被文件夹名新建一个项目盖掉（2026-09-28 真机踩到：
         // 选了「示例项目 A」，拖「示例项目A发票」文件夹却又建出一个同名项目）。
-        body: JSON.stringify({ files, project: activeProject, reconcile }),
+        body: JSON.stringify({ files, project: hasFolder ? "" : activeProject, reconcile }),
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -1761,9 +1770,9 @@ export default function Workbench() {
     : 0;
   const fcTooWide = fcBandWidthYuan >= FC_WIDE_YUAN;
   const acct = accountTotals(projView);
-  const activeProjectName = activeProject === ""
-    ? "未归项目（还没选项目）"
-    : (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject);
+  const activeProjectName = activeProject
+    ? (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject)
+    : "未归项目（还没有项目）";
 
   // 会话还没问完：先不渲染工作台，避免登录页闪一下再跳到工作台。
   if (!sessionChecked) {
@@ -2619,7 +2628,7 @@ export default function Workbench() {
                   取消选中＝再点一次已选中的项目（新账回到「未归项目」），取消态在输入区那行写明。 */}
               <div className="proj-tip">
                 {projView && projView.project_count > 0
-                  ? "点一个项目＝之后记的账算它；再点一次取消（新账先进「未归项目」）；双击看详情"
+                  ? "点一个项目＝之后记的账算它（默认就是最上面那个）；双击看详情"
                   : "点一个项目，之后记的账默认算它的；每一笔都能改"}
               </div>
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
@@ -2632,10 +2641,10 @@ export default function Workbench() {
                         <button
                           type="button"
                           className="ev-pick"
-                          onClick={() => setActiveProject(activeProject === p.id ? "" : p.id)}
+                          onClick={() => setActiveProject(p.id)}
                           onDoubleClick={() => openDetail(p.id)}
                           aria-pressed={activeProject === p.id}
-                          title="点一下＝设为当前项目；再点一下＝取消（新账进「未归项目」）；双击＝看详情"
+                          title="点一下＝之后记的账算这个项目；双击＝看它的详情"
                         >
                           <b>{p.name}</b>
                           <span className="m">
