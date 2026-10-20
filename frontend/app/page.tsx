@@ -2250,7 +2250,7 @@ export default function Workbench() {
             {/* 输入区上方常显"正在记入哪本账"，免得用户不知道新账会落到哪儿 */}
             <div className="scope-bar">
               正在记入：<b>{activeProjectName}</b>
-              <span className="sb-note">查询始终是全部项目合计（总账户）</span>
+              <span className="sb-note">查询始终是整个总账户（不分项目）</span>
               <label
                 className="sb-toggle"
                 title="默认只用表内数字（快）。勾上会把报销表里的嵌入发票逐张识别、与表内金额逐张核对，能发现「表和票对不上」——每张图要跑一次识别，会慢一些。"
@@ -2527,12 +2527,15 @@ export default function Workbench() {
               </span>
             </div>
             <div className="side-body">
-            {/* 总账目（2026-10-19 David：「需要把总账目的收入和支出在左边显示出来，
+            {/* 总账户（2026-10-19 David：「需要把总账目的收入和支出在左边显示出来，
                 用比较大的形式，让客户一目了然」）。放在最上面 = 打开工作台第一眼就是这两个数。
-                口径与「总账户」那一行、以及查询完全一致（accountTotals），不另算一套。 */}
+                口径与「总账户」那一行、以及查询完全一致（accountTotals），不另算一套。
+                ⚠️ 术语统一（2026-10-20 外部评审）：同一个东西原来有三个叫法 ——
+                「总账目」（这块标题）/「总账户」（项目选择器那一行）/「全部项目合计」（输入区提示）。
+                现在统一成**总账户**一个名字；「全部项目合计」只当解释用一次，不再当名字。 */}
             <section className="sect acct-hero">
               <div className="sect-head">
-                <h3>总账目</h3>
+                <h3>总账户</h3>
                 <button className="btn-mini" onClick={() => exportXlsx("")}
                   title="导出全部项目的账目：一张明细 + 一张汇总，数字与工作台一致">
                   导出 Excel
@@ -2596,7 +2599,7 @@ export default function Workbench() {
                 className={`proj-sel${activeProject === "" ? " on" : ""}`}
                 onClick={() => setActiveProject("")}
                 aria-pressed={activeProject === ""}
-                title="选中它：新账不指定具体项目，进「未归项目」；查询本来就是全部项目合计"
+                title="选中它：新账不指定具体项目，进「未归项目」；查询本来就是整个总账户"
               >
                 <span className="ps-name">总账户（全部项目）</span>
                 <span className="ps-sub">

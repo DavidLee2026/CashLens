@@ -414,22 +414,24 @@ def test_chat_timesheet_reply_renders_the_same_card_with_outsourcing_wording():
     assert ".ts-kind{" in _css()
 
 
-def test_money_colors_are_red_in_green_out():
-    """金额配色（2026-10-19 David 明确要求）：**红=收入，绿=支出**（中式记账/看盘习惯）。
+def test_money_colors_are_green_in_red_out():
+    """金额配色 = **绿=收入，红=支出**（2026-10-20 David 拍板改回来）。
 
-    刻意用独立的 --money-in / --money-out，不去改 --income / --risk ——
-    后两个还管着「确认入账」按钮、状态标签「比较稳」、决策卡通过态，
-    跟着变红会让人以为按钮是要删东西。
+    10-19 曾按股市/中式看盘习惯定成红=收入、绿=支出；外部评审拿真实用户心智对照后指出：
+    记账类产品的普遍约定是「绿=进钱」。我们的用户是不炒股的小老板，颜色反了不会显得专业，
+    只会让他怀疑数字 —— 在以「数可信」为卖点的产品里，这处反直觉的代价高于文化习惯的收益。
+
+    仍然只用 --money-in / --money-out 两个专用 token，不去改 --income / --risk：
+    后两个还管着「确认入账」按钮、状态标签「比较稳」、决策卡通过态，跟着变红会让人以为按钮是要删东西。
     """
     css = _CSS.read_text(encoding="utf-8")
-    assert "--money-in:var(--red-500)" in css
-    assert "--money-out:var(--green-500)" in css
+    assert "--money-in:var(--green-500)" in css
+    assert "--money-out:var(--red-500)" in css
     assert ".amt-in{color:var(--money-in)" in css
     assert ".amt-out{color:var(--money-out)" in css
     # 语义色不许被顺手改掉（确认入账仍是绿、⚠️ 仍是红）
     assert ".btn-mini.ok{background:var(--income-bg)" in css
     assert ".t-fragile{color:var(--risk)" in css
-
 
 def test_beta_badge_next_to_logo():
     """测试版标志（2026-10-20 David：「在 logo 旁边放一个 beta 或者是测试的标志」）。
