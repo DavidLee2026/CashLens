@@ -1063,6 +1063,118 @@ def projects_upsert(body: ProjectIn):
     return {"ok": True, "action": "created", "project": projects.create(data_dir(), body.name)}
 
 
+def _reassign_events(ids: list[str], target_pid: str) -> dict:
+    """把一批已入账事件的**归属**改到 target_pid（追加式订正，不重写历史）。
+
+    为什么不是"改一下那个字段"：账本是追加式事件流，事件的 project 就是它的归属，
+    直接改历史等于让"这笔钱当时记在哪"无从追溯。所以按同一套订正写法走：
+    **追加一条作废记录（void）+ 按新项目重记一笔**，两笔都留在账本里，谁改的、从哪改到哪、
+    什么时候改的都能查（`reason` 里写明原归属与新归属）。
+
+    ts **沿用原事件的交易时间**（不能换成 now）—— 否则改一次归属，这笔钱就从"上周"
+    跳到"今天"，月度统计会跟着变。金额/分类/渠道/对手方/备注原样保留。
+    """
+    book = EventLedger(ledger_path())
+    live = {str(e.get("event_id")): e for e in book.load()}
+    moved, skipped = [], []
+    for eid in ids:
+        ev = live.get(str(eid))
+        if ev is None:
+            skipped.append(str(eid))   # 不存在或已被作废：如实跳过，不假装成功
+            continue
+        moved.append(ev)
+    if not moved:
+        return {"moved": 0, "skipped": skipped, "total_cents": 0, "new_ids": []}
+
+    to_label = _project_label(target_pid)
+    new_ids = []
+    for ev in moved:
+        from_label = _project_label(str(ev.get("project") or ""))
+        book.append_void(
+            [ev["event_id"]],
+            reason=f"改归属：从「{from_label}」改到「{to_label}」（用户订正）",
+            project=str(ev.get("project") or ""))
+        evidence = ev.get("evidence") or {}
+        new = make_event(
+            ts=ev.get("ts"), event_type=str(ev.get("type")),
+            amount_cents=int(ev.get("amount_cents") or 0),
+            evidence_kind=str(evidence.get("kind") or "voice"),
+            channel=str(ev.get("channel") or "manual"),
+            category=str(ev.get("category") or ""),
+            counterparty=str(ev.get("counterparty") or ""),
+            note=str(ev.get("note") or ""),
+            confirmed=True, project=target_pid,
+            # 留痕：这条是从哪个项目改过来的（void 里也有 reason，两处都能查）
+            extra={"reassigned_from": str(ev.get("project") or "")},
+            dedupe_unique=True,
+        )
+        book.append(new, strict_dedupe=False)
+        new_ids.append(new["event_id"])
+
+    # 作废 + 重记会改变投影里的行，必须显式重建（同删除项目那条的理由）
+    proj = Projection(db_path())
+    proj.rebuild(EventLedger(ledger_path()).load())
+    proj.close()
+    return {"moved": len(moved), "skipped": skipped,
+            "total_cents": sum(int(e.get("amount_cents") or 0) for e in moved),
+            "new_ids": new_ids}
+
+
+class ReassignIn(BaseModel):
+    """改归属：把哪些事件改到哪个项目（项目可传 id 或完整名；空串＝未归）。"""
+
+    ids: list[str] = Field(default_factory=list)
+    project: str = ""
+
+
+@app.post("/api/events/reassign")
+def events_reassign(body: ReassignIn):
+    """逐笔改归属（一条或几条）。前端「未归项目」那一行用的是批量版本，核心是同一段代码。"""
+    ids = [str(x).strip() for x in (body.ids or []) if str(x).strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="没有指定要改归属的账目")
+    pid, hint = projects.resolve_incoming(data_dir(), body.project)
+    out = _reassign_events(ids, pid)
+    if out["moved"] == 0:
+        raise HTTPException(status_code=404, detail="这些账目不存在，或已经被作废了")
+    return {"ok": True, "project": pid, "project_name": _project_label(pid),
+            "project_hint": hint, **out}
+
+
+class AbsorbUnassignedIn(BaseModel):
+    """把「未归项目」名下的账一次性归到一个项目。"""
+
+    project: str = ""
+
+
+@app.post("/api/projects/unassigned/absorb")
+def projects_absorb_unassigned(body: AbsorbUnassignedIn):
+    """一键收编：把「未归项目」名下的**全部**账改到指定项目（追加式订正，可追溯）。
+
+    起因（2026-10-20 真机）：客户先确认了一批草稿、之后才建项目，12 笔全落在未归，
+    他建的项目一笔都没有。逐笔改要 12 次，所以给「未归项目」那一行一个批量出口。
+    ⚠️ 硬要求只有一条：**目标不能是空串**（"收编到未归"毫无意义）。
+    传一个还没建过的名字会照 `resolve_incoming` 的既定语义**顺手建出这个项目**
+    （与"记账时说一个新项目名"同一个行为）——界面上是下拉选已有项目，走不到这条路。
+    """
+    ref = str(body.project or "").strip()
+    if not ref:
+        raise HTTPException(status_code=400,
+                            detail="要把未归的账归到哪个项目？请先选一个项目")
+    pid, _ = projects.resolve_incoming(data_dir(), ref)
+    if not pid:
+        raise HTTPException(status_code=400, detail="目标项目不存在（先新建它，再收编）")
+    ids = projects.event_ids_of(_events(), "")
+    if not ids:
+        return {"ok": True, "moved": 0, "skipped": [], "total_cents": 0,
+                "project": pid, "project_name": _project_label(pid),
+                "note": "「未归项目」里现在没有账，不用收编。"}
+    out = _reassign_events(ids, pid)
+    return {"ok": True, "project": pid, "project_name": _project_label(pid), **out,
+            "note": (f"已把「未归项目」里的 {out['moved']} 笔改到「{_project_label(pid)}」。"
+                     f"账本里每笔都留了一条「作废」和一条「重记」，改了什么可追溯。")}
+
+
 @app.delete("/api/projects/{pid}")
 def projects_delete(pid: str, with_data: bool = False):
     """删除项目。两种口径由用户在界面上自己选：

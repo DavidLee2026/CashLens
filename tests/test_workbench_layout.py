@@ -571,3 +571,20 @@ def test_current_project_defaults_to_the_topmost_and_never_clears():
     assert "setActiveProject(projView.projects[0]?.id ?? \"\")" in src
     # 只有"一个项目都没有"时才显示未归
     assert "未归项目（还没有项目）" in src
+
+
+def test_unassigned_row_offers_batch_absorb():
+    """「未归项目」那一行要有「归到…」批量入口（2026-10-20 David 选定）。
+
+    起因：客户先确认草稿、后建项目，12 笔全落在未归；逐笔改要 12 次。
+    入口必须摆在未归那一行（那里才是"这些账该归到哪"的现场），并且要说清
+    「几笔 / 合计多少 / 会留一条作废 + 一条重记」—— 不能只给一个按钮。
+    """
+    src = _page_src()
+    assert "归到…" in src, "按钮文案"
+    assert 'authedFetch("/api/projects/unassigned/absorb"' in src, "要调批量收编端点"
+    block = src[src.index("归到…"):]
+    block = block[: block.index("deletingId === \"unassigned\" && (")]
+    assert "projView.unassigned.count" in block and "expense_cents" in block, \
+        "要把笔数和合计摆出来再说下一步"
+    assert "作废" in block and "重记" in block, "要说清账本会留两条记录，别让人以为是无痕改"

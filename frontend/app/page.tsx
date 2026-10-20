@@ -942,6 +942,11 @@ export default function Workbench() {
   }, [msgs]);
 
   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
+  /* 「未归项目」一键收编（2026-10-20）：把未归的账一次性改到某个项目。
+     用 popover 而不是原生 confirm：要摆出"多少笔 / 合计多少 / 改到哪个项目"三件事。 */
+  const [absorbOpen, setAbsorbOpen] = useState(false);
+  const [absorbTo, setAbsorbTo] = useState("");
+  const [absorbBusy, setAbsorbBusy] = useState(false);
 
   /** 打开项目详情弹窗：拉这个项目的明细（合计 / 构成 / 报销与发票 / 最近记录）。 */
   async function openDetail(pid: string) {
@@ -1231,6 +1236,33 @@ export default function Workbench() {
       setProjMsg("清理失败：请确认后端在运行。");
     }
   }
+
+  /** 一键收编：把「未归项目」名下的账全部改到选中的项目（2026-10-20 David 选定）。
+   *
+   *  起因：客户先确认了一批草稿、之后才建项目 —— 12 笔全落在未归，他建的项目一笔都没有。
+   *  后端是**追加式订正**（作废 + 按新项目重记，留痕可追溯），所以这里如实说清"会留两条记录"。
+   */
+  async function absorbUnassigned() {
+    if (absorbBusy || !absorbTo) return;
+    setAbsorbBusy(true);
+    try {
+      const res = await authedFetch("/api/projects/unassigned/absorb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: absorbTo }),
+      }).then((r) => r.json()) as { ok?: boolean; moved?: number; total_cents?: number;
+        project_name?: string; note?: string };
+      setMsgs((m) => [...m, { role: "ai", text: res.note
+        || `已把 ${res.moved ?? 0} 笔改到「${res.project_name ?? ""}」。` }]);
+      setAbsorbOpen(false);
+      refresh();
+    } catch {
+      setMsgs((m) => [...m, { role: "ai", text: "收编失败：请确认后端在运行后重试。" }]);
+    } finally {
+      setAbsorbBusy(false);
+    }
+  }
+
 
   /** 删除项目：两种口径由用户自己选（只删项目 / 连同账单一起删）。
    *  账本是追加式的，所以「一起删」在后端是追加一条作废记录，不是重写历史。 */
@@ -2797,6 +2829,23 @@ export default function Workbench() {
                           </span>
                         </div>
                         <div className="ev-acts">
+                          {/* 一键收编（2026-10-20）：未归的账通常是"建项目之前记的"，
+                              逐笔改太麻烦，这里一次全归到一个项目。 */}
+                          <button
+                            type="button"
+                            className="btn-mini"
+                            title="把「未归项目」名下的账一次性归到某个项目（账本会留一条作废 + 一条重记，可追溯）"
+                            aria-expanded={absorbOpen}
+                            onClick={() => {
+                              setAbsorbOpen(!absorbOpen);
+                              setAbsorbTo(projView.projects[0]?.id ?? "");
+                              setDeletingId("");
+                              setRenamingId("");
+                              setProjMenuId("");
+                            }}
+                          >
+                            归到…
+                          </button>
                           <button
                             type="button"
                             className="btn-x"
@@ -2814,6 +2863,36 @@ export default function Workbench() {
                           </button>
                         </div>
                       </div>
+                      {absorbOpen && (
+                        <div className="proj-pop row" data-pop="1">
+                          <div className="proj-edit">
+                            <select
+                              className="proj-pick"
+                              value={absorbTo}
+                              onChange={(e) => setAbsorbTo(e.target.value)}
+                              aria-label="收编到哪个项目"
+                              disabled={absorbBusy}
+                            >
+                              {projView.projects.map((x) => (
+                                <option key={x.id} value={x.id}>{x.name}</option>
+                              ))}
+                            </select>
+                            <button className="btn-mini ok" onClick={absorbUnassigned}
+                              disabled={absorbBusy || !absorbTo}>
+                              {absorbBusy ? "处理中…" : "确认归到"}
+                            </button>
+                            <button className="btn-mini" onClick={() => setAbsorbOpen(false)}>
+                              取消
+                            </button>
+                          </div>
+                          <div className="proj-tip">
+                            {`把这 ${projView.unassigned.count} 笔（合计 ¥${(projView.unassigned.expense_cents / 100).toFixed(2)}）`
+                              + `归到「${projView.projects.find((x) => x.id === absorbTo)?.name ?? ""}」。`
+                              + "账本里每笔会留一条「作废」和一条「重记」，改了什么可追溯；"
+                              + "金额与日期都不变。"}
+                          </div>
+                        </div>
+                      )}
                       {deletingId === "unassigned" && (
                         <div className="proj-pop row" data-pop="1">
                           <div className="proj-del">
