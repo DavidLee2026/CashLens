@@ -82,3 +82,21 @@ def test_prompt_lines_cover_all_categories():
         assert cat in line
     assert c.UNCONFIRMED_CATEGORY in line
     assert c.NEUTRAL_CATEGORY not in line  # 不进提示词，它不是分类
+
+
+def test_production_equipment_is_business():
+    """活动 / 拍摄的器材与班组 → 经营（2026-10-20，来自一份真实的项目成本清单）。
+
+    口径收得窄：只收**生产侧专有**的词（三脚架 / 调音台 / 话筒 / 摄像 / 场务…），
+    不收会被日常消费借用的商品名（对照「文具」那条教训）。
+    """
+    for label in ("3个n6三脚架", "一套调音台配4手持话筒", "4个摄像", "2个摄像助理",
+                  "1个场务", "灯光助理2位", "灯光1200w 四套", "大监1"):
+        assert c.match_category(label) == c.BUSINESS_CATEGORY, label
+
+
+def test_移动_alone_no_longer_means_telecom():
+    """「移动」单独一个词太宽：真机上「1台电视机和移动支架配1个电小二」被归成了通讯。"""
+    assert c.match_category("移动话费充值") == "通讯"
+    assert c.match_category("中国移动话费") == "通讯"
+    assert c.match_category("1台电视机和移动支架配1个电小二") != "通讯"

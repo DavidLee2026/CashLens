@@ -30,7 +30,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import categories, pending, projects, report_sheet
+from . import categories, expense_list, pending, projects, report_sheet
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _ENGINE_MCP = REPO_ROOT / "engine" / "mcp"
@@ -483,6 +483,43 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
         if doc_kind in ("payment", "unpaid", "list", "chat"):
             # 非发票档位不该提发票号码（提示词说了它会忘，所以这里再清一遍）
             note = _strip_invoice_noise(note)
+        # ── 费用清单：优先于「页面类型」判断（2026-10-20 立）──────────────────
+        # 起因：客户发了一张 16 行的成本清单截图（`3个n6三脚架 100` … `灯光1200w 四套 1000`）。
+        # 同一张图，模型给的 doc_kind 一次是 chat、一次是 list（温度 0 也不稳）：
+        #   - 判 list → 走「订单列表」配对，产出「订单列表里的一笔…没配到对应的付款凭证」这种话；
+        #   - 判 chat → 走"图里文字挑金额"，文案对一点，但分类与标签仍不是清单口径。
+        # 清单就是清单：**逐行一笔、行尾数字是金额、合计由代码加**，与模型怎么命名无关。
+        # 判据见 `services/expense_list.py`（≥3 行「名称 + 行尾金额」，且模型没给出订单行）。
+        listing = expense_list.parse(res.get("text_lines") or [])
+        orders_raw = res.get("orders") or []
+        # 「订单列表」的判据是**行里带时间或支付状态**（「11:55 打车 40.50 支付成功」）。
+        # 清单的行没有这两样 —— 实弹：同一张清单截图模型一次给 doc_kind=chat、一次给 list，
+        # 而 list 那次吐回来的 orders 每条都是 `at="" / status=""`，等于把清单冒充成订单列表。
+        order_has_state = any(
+            str((o or {}).get("at") or "").strip() or str((o or {}).get("status") or "").strip()
+            for o in orders_raw if isinstance(o, dict)
+        )
+        if listing["is_list"] and not order_has_state:
+            made = []
+            for it in listing["items"]:
+                d = _draft(data_dir, pid, direction=it["direction"],
+                           amount_cents=it["amount_cents"], category=it["category"],
+                           note=f"清单行：{it['label']}", source="识别", image_name=f["name"])
+                if d:
+                    made.append(d)
+            if made:
+                drafts += made
+                items.append({"file": f["name"], "ok": True, "amount_cents": 0,
+                              "doc_kind": "expense_list", "no_draft_reason": None,
+                              "list_lines": len(listing["items"]),
+                              "list_total_cents": listing["total_cents"],
+                              "skipped_lines": len(listing["skipped"]),
+                              "context_filled": listing.get("context_filled") or 0,
+                              "text_amounts": 0, "draft_count": len(made),
+                              "date": "", "merchant": "", "category": "",
+                              "invoice_no": "", "cloud_uploaded": bool(res.get("_cloud_uploaded")),
+                              "confidence": res.get("confidence")})
+                continue
         # ── 页面类型分流（2026-09-28 用户口径）────────────────────────────
         #   unpaid（待支付）与 list（订单列表）：**都不建草稿** ——
         #   一个钱还没出去，一个只是同一笔钱的另一个视角（实弹：一个「我的订单」列表里

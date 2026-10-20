@@ -23,9 +23,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import (amount_guard, categories, data_reset, export_xlsx, intake, invoice_tax,
-                       llm_skill, model_config, parser_rule, pending, projects, query_tools,
-                       session_mem, tenancy, timesheet, timesheet_records)
+from .services import (amount_guard, categories, data_reset, expense_list, export_xlsx, intake,
+                       invoice_tax, llm_skill, model_config, parser_rule, pending, projects,
+                       query_tools, session_mem, tenancy, timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
                                     make_event, run_state)
 
@@ -594,7 +594,7 @@ def _draft_block(drafts: list[dict]) -> tuple[list[str], dict]:
     lines = [f"{head} —— 都还没入账，逐笔确认后才进账本："]
     for d in drafts:
         label = _draft_label(d)
-        lines.append(f"· {label}{_yuan(d['amount_cents'])}（{d['category']}）")
+        lines.append(f"· {label}{' ' if label else ''}{_yuan(d['amount_cents'])}（{d['category']}）")
     bits = []
     if exp:
         bits.append(f"支出 {_yuan(exp)}")
@@ -852,6 +852,44 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
     )
     return {"parts": parts, "executed": executed, "results": results, "drafts": drafts,
             "totals": totals, "decision": decision_payload, "timesheet": timesheet_payload}
+
+
+def _skipped_line(skipped: list[str], limit: int = 3) -> str:
+    """清单里没标金额的行 —— 如实点名，别让用户以为系统把它们吃了。"""
+    shown = "、".join(s[:14] + ("…" if len(s) > 14 else "") for s in skipped[:limit])
+    more = f" 等 {len(skipped)} 行" if len(skipped) > limit else ""
+    return f"另有 {len(skipped)} 行没标金额，没计入合计（{shown}{more}）—— 补上数字我再帮你加。"
+
+
+def _reply_expense_list(lst: dict, body, sid: str, mem_sid: str) -> dict:
+    """一份「清单」的确定性回复：逐行落草稿 + 代码算合计（2026-10-20 立）。
+
+    不经过模型：金额、条数、合计全部由 `services/expense_list.py` 与 `_draft_block()` 给出。
+    这样即使当前档位是「不用模型」，或者模型这次没开窍，用户也不用先解释一遍格式。
+    """
+    project_ref = (_project_from_text(body.text, _known_project_names())
+                   or body.project or None)
+    drafts = [_draft_one(it["direction"], it["amount_cents"], it["category"], "manual",
+                         it["label"], project=project_ref)
+              for it in lst["items"]]
+    block, _totals = _draft_block(drafts)
+    lines = list(block)
+    if lst.get("skipped"):
+        lines.append(_skipped_line(lst["skipped"]))
+    if lst.get("context_filled"):
+        # 分类里有一部分是"跟着这份清单的性质"给的，必须说清，别让它看起来像逐条判出来的
+        lines.append(f"（其中 {lst['context_filled']} 条按「这份清单是项目成本」整体归到经营，"
+                     f"不对可以在「待确认」里改分类）")
+    final = "\n".join(lines)
+    session_mem.add_turn(mem_sid, body.text, final, result_note=final[:120])
+    return {"ok": True, "text": final, "session_id": sid,
+            "pending": [{"id": d["id"], "direction": d["direction"],
+                         "amount_cents": d["amount_cents"], "category": d["category"],
+                         "channel": d["channel"], "project": d.get("project", ""),
+                         "project_name": _project_label(d.get("project", ""))}
+                        for d in drafts],
+            "list": {k: lst[k] for k in ("items", "skipped", "total_cents",
+                                         "expense_cents", "income_cents")}}
 
 
 def _guard_reply(reply: str, run: dict, user_text: str) -> str:
@@ -1357,7 +1395,18 @@ def _file_stages(name: str, items: list[dict], errors: list[dict],
     doc_kind = str(got.get("doc_kind") or "")
     refund = int(got.get("refund_cents") or 0)
     gross = int(got.get("gross_cents") or 0)
-    if reason == "unreadable":
+    if doc_kind == "expense_list":
+        # 费用清单（2026-10-20）：逐行一笔，行尾数字是金额，合计由代码加。
+        # 这一段要说清三件事：读到了几行、生成了几条、有几行没标金额所以没算进去 ——
+        # 用户最怕的不是少算，是"悄悄少算"。
+        n_lines = int(got.get("list_lines") or 0)
+        n_skip = int(got.get("skipped_lines") or 0)
+        recognized = f"这是一份费用清单：图里读到 {n_lines} 行带金额的条目"
+        made = (f"生成 {draft_count} 条待确认草稿，合计 {total_cents / 100:.2f} 元"
+                f"——逐条核对后确认，别整批点到不该报的")
+        how = "每行末尾的数字当金额、合计由系统加" + (
+            f"；另有 {n_skip} 行没标金额，没计入合计" if n_skip else "")
+    elif reason == "unreadable":
         # 没读出来就直说，并给出**可执行的下一步**：重新上传这一张（用户 2026-09-28 的建议）
         recognized = "这张没读出来（没识别到金额，也没有可用的文字）"
         made = "未生成草稿——**请把这张图重新上传一次**（尽量用原图、别截屏压缩）"
@@ -1819,6 +1868,17 @@ def chat(body: ChatIn):
     if ts["contract"]:
         session_mem.add_turn(mem_sid, body.text, _CONTRACT_REFUSAL, result_note=_CONTRACT_REFUSAL[:120])
         return {"ok": True, "text": _CONTRACT_REFUSAL, "session_id": sid, "pending": []}
+
+    # ── 「每行一个条目 + 行尾金额」的清单**也先过确定性解析**（2026-10-20）─────────────
+    # 起因：客户把同一份 16 行成本清单连发两次 ——
+    #   第一次（只有清单 + 一句「帮我算个总价」）模型只挑出 1 行（「10块v口电池」→ ¥10.00），
+    #   剩下 12 行全丢；第二次他补一句「**每一行空格之后的数字是需要合计的费用 请帮我合计**」，
+    #   模型才按行拆对。也就是说这个结构原来**靠人解释才成立**。
+    # 而「名称 + 行尾数字」是报价单 / 成本清单最常见的写法，没有理由让用户先教一遍；
+    # 金额与合计更不能交给模型加（见 `services/amount_guard.py` 那次真机）。所以排在模型前面。
+    lst = expense_list.parse(body.text)
+    if lst["is_list"]:
+        return _reply_expense_list(lst, body, sid, mem_sid)
 
     if llm_skill.is_configured():
         parsed = llm_skill.parse_accounting(prompt, user_ctx)
