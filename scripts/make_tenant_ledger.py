@@ -126,7 +126,14 @@ def _stats(events: list[dict]) -> dict:
     return {"count": count, "latest": latest[:10]}
 
 
-def _load_manual(out_path: Path) -> dict[str, dict[str, str]]:
+def _load_manual(out_path: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """读上一次生成的台账，返回 (按邀请码, 按账号名) 两份手填列。
+
+    **为什么按邀请码优先**（2026-10-20 真机教训）：客户会在表里把「朋友A」改成真名，
+    而 tenants.json 里的 label 还是「朋友A」。如果只按名字对，重新生成会把两件事一起搞坏：
+    ① 他改的名字被覆盖回「朋友A」；② 那一行手填的反馈全部丢掉。
+    邀请码是唯一且稳定的，所以先用它对；没有码的旧表退回按名字对。
+    """
     """读上一次生成的台账，把**手填列**按账号名 + 表头名带过来。
 
     不这么做的话，「重新生成」会把几周的反馈一次抹掉 —— 而台账的价值恰好在手填那几列。
@@ -135,32 +142,43 @@ def _load_manual(out_path: Path) -> dict[str, dict[str, str]]:
     认得出的列名就带过来，认不出的（比如已删掉的金额列）直接跳过。
     """
     if not out_path.exists():
-        return {}
+        return {}, {}
     try:
         wb = load_workbook(out_path)
         ws = wb[SHEET] if SHEET in wb.sheetnames else wb.active
     except Exception:  # noqa: BLE001  文件坏了就当没有，别因此生不出新台账
         # ⚠️ 这条宽 except 曾把「未 import load_workbook」的 NameError 也吞掉，
         # 表现为「手填列莫名其妙没保留」——所以读取逻辑必须有测试兜着（见 tests）。
-        return {}
+        return {}, {}
     head = [str(c.value or "") for c in ws[1]]
     idx = {k: head.index(k) for k in MANUAL if k in head}
     if not idx:
-        return {}
-    keep: dict[str, dict[str, str]] = {}
+        return {}, {}
+    col_code = head.index("邀请码") if "邀请码" in head else -1
+    by_code: dict[str, dict[str, str]] = {}
+    by_name: dict[str, dict[str, str]] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
         name = str(row[0] or "").strip()
         if not name or name == "合计":
             continue
-        keep[name] = {k: (str(row[i] or "") if i < len(row) else "") for k, i in idx.items()}
-    return keep
+        vals = {k: (str(row[i] or "") if i < len(row) else "") for k, i in idx.items()}
+        vals["__name__"] = name
+        code = str(row[col_code] or "").strip() if col_code >= 0 and col_code < len(row) else ""
+        if code:
+            by_code[code] = vals
+        by_name[name] = vals
+    return by_code, by_name
 
 
 def build(data_dir: Path, out_path: Path, codes: dict[str, str] | None = None,
-          source_note: str = "") -> Path:
+          source_note: str = "", include_inactive: bool = False) -> Path:
     as_of = datetime.now()
     tenants = _load_tenants(data_dir)
-    manual = _load_manual(out_path)
+    if not include_inactive:
+        # 2026-10-20：自测会临时建账号再停用，它们不是客户 —— 默认不进台账
+        # （David 真机看到「自检临时1..5」问「这些是什么」）
+        tenants = [r for r in tenants if r.get("active")]
+    manual_by_code, manual_by_name = _load_manual(out_path)
     codes = codes or {}
     wb = Workbook()
     ws = wb.active
@@ -178,11 +196,15 @@ def build(data_dir: Path, out_path: Path, codes: dict[str, str] | None = None,
     total = 0
     for r in sorted(tenants, key=lambda x: str(x.get("created_at") or "")):
         st = _stats(_read_events(data_dir / "tenants" / str(r["slug"]) / "finance_events.jsonl"))
-        label = str(r.get("label") or "（未命名）")
-        filled = manual.get(label, {})
+        raw_label = str(r.get("label") or "（未命名）")
+        code = codes.get(raw_label) or codes.get(str(r["slug"])) or ""
+        prior = manual_by_code.get(code, {}) if code else {}
+        # 显示名优先级：表里已经改过的名字 > tenants.json 的 label
+        label = prior.get("__name__") or raw_label
+        filled = prior or manual_by_name.get(raw_label, {})
         ws.append([
             label,
-            codes.get(label) or codes.get(str(r["slug"])) or "",
+            code,
             "在用" if r.get("active") else "停用",
             str(r.get("created_at") or "")[:10],
             str(r.get("last_seen") or "—")[:10],
@@ -203,11 +225,12 @@ def build(data_dir: Path, out_path: Path, codes: dict[str, str] | None = None,
     lines = [
         ("生成时间", f"{as_of:%Y-%m-%d %H:%M}"),
         ("数据来源", source_note or str(data_dir)),
-        ("账号数", f"{len(tenants)} 个（在用 {sum(1 for r in tenants if r.get('active'))}）"),
+        ("账号数", f"{len(tenants)} 个（只列在用；停用账号与自测临时账号不进表）"),
         ("", ""),
         ("自动列（灰）", "账号 / 邀请码 / 状态 / 创建日 / 最近登录 / 记账笔数 / 最近一笔"),
         ("手填列（黄）", "反馈 / 卡在哪一步 / 他想要什么 / 我改了什么 / 是否付费 / 备注"
-                        " —— 重新生成时按账号名 + 表头保留旧值（脚本只写自动列）"),
+                        " —— 重新生成时**按邀请码**保留旧值（没码的旧表按账号名）；"
+                        "你在这张表里改过的显示名也不会被覆盖（脚本只写自动列）"),
         ("", ""),
         ("「最近登录」口径", "打点在**用邀请码换会话**那一刻。⚠️ 建码后立刻自己换一次也会打点，"
                             "所以「创建日」与「最近登录」是同一分钟、或同一秒 —— 那是我在试，不是他用过"
@@ -238,6 +261,8 @@ def main() -> int:
     ap.add_argument("--out", default="", help="输出文件名（默认 账号台账-YYYYMMDD.xlsx）")
     ap.add_argument("--codes", default="", help='邀请码表（JSON：{"账号名": "CL-XXXX-XXXX-XXXX"}）')
     ap.add_argument("--source-note", default="", help="写在「说明」页的数据来源（默认用目录路径）")
+    ap.add_argument("--include-inactive", action="store_true",
+                    help="连停用账号一起导出（默认只导在用的；自测临时账号会被排除）")
     args = ap.parse_args()
 
     if args.data_dir:
@@ -259,7 +284,8 @@ def main() -> int:
         else:
             print(f"⚠ 找不到邀请码文件 {cp}，邀请码列留空")
 
-    path = build(data_dir, out, codes=codes, source_note=args.source_note)
+    path = build(data_dir, out, codes=codes, source_note=args.source_note,
+                 include_inactive=args.include_inactive)
     print(f"✓ 已生成：{path}")
     return 0
 

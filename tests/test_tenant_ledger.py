@@ -80,7 +80,7 @@ def test_duplicate_invoice_counted_once(tmp_path):
 
 def test_inactive_account_is_marked_and_empty(tmp_path):
     root = _env(tmp_path)
-    out = ledger.build(root, tmp_path / "ledger.xlsx")
+    out = ledger.build(root, tmp_path / "ledger.xlsx", include_inactive=True)
     row = _row(out, "账号二")
     assert row["状态"] == "停用"
     assert row["记账笔数"] == 0
@@ -152,6 +152,42 @@ def test_invite_code_column_comes_from_the_codes_file(tmp_path):
     """邀请码列：服务器上没有明文码，只能由 --codes 指定的本地文件填。"""
     root = _env(tmp_path)
     out = tmp_path / "ledger.xlsx"
-    ledger.build(root, out, codes={"账号一": "CL-AAAA-BBBB-CCCC"})
+    ledger.build(root, out, codes={"账号一": "CL-AAAA-BBBB-CCCC"}, include_inactive=True)
     assert _row(out, "账号一")["邀请码"] == "CL-AAAA-BBBB-CCCC"
     assert _row(out, "账号二")["邀请码"] in (None, "")   # 没给的留空，不编（空串读回来是 None）
+
+
+def test_rename_and_codes_survive_regeneration(tmp_path):
+    """你在表里改过的显示名 + 手填反馈，重新生成时都不许被覆盖（2026-10-20 真机）。
+
+    真机经过：客户把「朋友A」改成真名、并在反馈列写了东西；如果按名字对，重新生成会
+    把名字覆盖回「朋友A」、而且那一行的反馈全丢。所以**按邀请码**对，显示名以表里为准。
+    """
+    root = _env(tmp_path)
+    out = tmp_path / "ledger.xlsx"
+    ledger.build(root, out, codes={"账号一": "CL-AAAA-BBBB-CCCC"})
+
+    wb = load_workbook(out)
+    ws = wb["账号台账"]
+    head = [c.value for c in ws[1]]
+    for row in ws.iter_rows(min_row=2):
+        if row[0].value == "账号一":
+            row[head.index("账号")].value = "张三（改过的名字）"
+            row[head.index("反馈 / 用得怎么样")].value = "他说能省半小时"
+    wb.save(out)
+
+    ledger.build(root, out, codes={"账号一": "CL-AAAA-BBBB-CCCC"})
+    row = _row(out, "张三（改过的名字）")
+    assert row["反馈 / 用得怎么样"] == "他说能省半小时"
+    assert row["邀请码"] == "CL-AAAA-BBBB-CCCC"
+    assert row["记账笔数"] == 2          # 自动列照旧刷新
+
+
+def test_inactive_accounts_are_left_out_by_default(tmp_path):
+    """停用账号（自测临时建的）默认不进台账（2026-10-20 真机：客户看到「自检临时1..5」问这是什么）。"""
+    root = _env(tmp_path)
+    out = tmp_path / "ledger.xlsx"
+    ledger.build(root, out)
+    wb = load_workbook(out)["账号台账"]
+    names = [r[0] for r in wb.iter_rows(min_row=2, values_only=True) if r[0] and r[0] != "合计"]
+    assert names == ["账号一"], names
