@@ -282,12 +282,19 @@ def load() -> dict:
     _load_env_file()
     cfg = _defaults()
     p = config_path()
-    if not p.exists():
+    # ⚠️ 2026-10-20 真机：用 root 建邀请码会留下 root 的租户目录，app 以 cashlens 跑，
+    # 连 `exists()` 都抛 PermissionError —— 而它是**所有接口**的第一跳（每个接口都读模型配置），
+    # 于是一个权限问题让整站 500、界面显示"后端未连接"。
+    # 权限读不到就按默认值走（云端档位 + 环境变量里的 key），把故障限制在"模型"这一层。
+    try:
+        if not p.exists():
+            return cfg
+    except OSError:
         return cfg
     try:
         saved = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return cfg
+        return cfg   # 读不到（权限/坏文件）就用默认值，不让模型配置拖垮整站
     if not isinstance(saved, dict):
         return cfg
     if saved.get("tier") in TIERS:

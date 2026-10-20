@@ -1832,8 +1832,9 @@ export default function Workbench() {
     return () => window.removeEventListener("keydown", onKey);
   }, [settingsOpen, resetBusy]);
 
-  async function send() {
-    const t = text.trim();
+  async function send(override?: string) {
+    // override：示例 chips 点一下直接发（只用于**只读查询**那两句；记账那句只预填，等用户自己按发送）
+    const t = (override ?? text).trim();
     if (!t || busy) return;
     setMsgs((m) => [...m, { role: "user", text: t }]);
     setText("");
@@ -1883,6 +1884,10 @@ export default function Workbench() {
     : 0;
   const fcTooWide = fcBandWidthYuan >= FC_WIDE_YUAN;
   const acct = accountTotals(projView);
+  /* 空账本（2026-10-20，A 档 ①）：示例 chips 与示例卡**只在这个状态出现**。
+     判据用两个源：界面加载的 events 与账本真实笔数 acct.count —— 任一个有数就不算空，
+     免得"加载了一窗但总量为 0"这种中间态把示例又弹出来。 */
+  const isEmptyLedger = events.length === 0 && acct.count === 0;
   const activeProjectName = activeProject
     ? (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject)
     : "未归项目（还没有项目）";
@@ -2444,6 +2449,36 @@ export default function Workbench() {
                 核对表内发票
               </label>
             </div>
+            {/* 空账本时的三个示例（2026-10-20，A 档 ①）：新用户打开面对空输入框，不知道该说什么。
+                规则：记账那句**只预填**（点了不发，免得替他记一笔假的）；两句查询点了直接发。
+                记下第一笔后整行消失 —— 它是脚手架，不是广告牌。 */}
+            {isEmptyLedger && (
+              <div className="start-chips" role="group" aria-label="示例：可以这样说">
+                <span className="sc-lead">不知道说什么？点一条试试：</span>
+                {[
+                  { text: "昨天买画材 200", fill: true },
+                  { text: "这个月花了多少", fill: false },
+                  { text: "上个月那个项目赚没赚", fill: false },
+                ].map((c) => (
+                  <button
+                    key={c.text}
+                    type="button"
+                    className="sc-chip"
+                    disabled={!apiOk || busy}
+                    onClick={() => {
+                      if (c.fill) {
+                        setText(c.text);
+                        inputRef.current?.focus();
+                      } else {
+                        void send(c.text);
+                      }
+                    }}
+                  >
+                    {c.text}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="inputrow">
               <div className="attach">
                 <span className="tip">
@@ -2501,7 +2536,7 @@ export default function Workbench() {
                   // 发送走右下角「发送」按钮，或用 Ctrl / Cmd + 回车。
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
-                    send();
+                    void send();
                   }
                 }}
                 placeholder='记账或问现金流，如「打车花了 28」（回车换行，Ctrl / Cmd + 回车发送）'
@@ -2644,7 +2679,7 @@ export default function Workbench() {
               <button
                 type="button"
                 className="btn btn-send"
-                onClick={send}
+                onClick={() => { void send(); }}
                 disabled={!apiOk || busy}
               >
                 {busy ? "处理中…" : "发送"}
@@ -2723,6 +2758,26 @@ export default function Workbench() {
                 ⚠️ 术语统一（2026-10-20 外部评审）：同一个东西原来有三个叫法 ——
                 「总账目」（这块标题）/「总账户」（项目选择器那一行）/「全部项目合计」（输入区提示）。
                 现在统一成**总账户**一个名字；「全部项目合计」只当解释用一次，不再当名字。 */}
+            {/* 示例卡（2026-10-20，A 档 ①）：空账本第一眼要看到"最后会得到什么"。
+                三条硬约束：① 明确标「示例，不是你的账」；② 纯静态、只读、不读任何租户数据；
+                ③ 记下第一笔真账就消失。数据是编的，但内部自洽（18,600 − 12,340 = 6,260）。 */}
+            {isEmptyLedger && (
+              <section className="sect demo-card" aria-label="示例：不是你的账">
+                <div className="demo-head">
+                  <span className="demo-tag">示例 · 不是你的账</span>
+                  <span className="demo-hint">记下第一笔后这里就换成你自己的账</span>
+                </div>
+                <div className="demo-title">秋季市集</div>
+                <div className="demo-nums">
+                  <span>收入 <b className="num amt-in">¥18,600</b></span>
+                  <span>支出 <b className="num amt-out">¥12,340</b></span>
+                  <span>净 <b className="num amt-in">+¥6,260</b></span>
+                </div>
+                <div className="demo-note">
+                  14 笔 · 其中 3 张发票同号，已只算一次 · 每一笔都能追到那张票
+                </div>
+              </section>
+            )}
             <section className="sect acct-hero">
               <div className="sect-head">
                 <h3>总账户</h3>

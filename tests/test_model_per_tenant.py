@@ -83,3 +83,25 @@ def test_lock_switch_defaults_off(data_dir, monkeypatch):
     assert model_config.locked() is False
     monkeypatch.setenv("CASH_LOCK_MODEL", "1")
     assert model_config.locked() is True, "运维仍需一个临时全站只读的开关"
+
+
+def test_unreadable_config_falls_back_to_defaults(tmp_path, monkeypatch):
+    """配置读不到（权限问题/坏文件）时按默认值走，不许把整站拖成 500。
+
+    2026-10-20 真机：用 root 建了一个租户，目录属主是 root、app 以 cashlens 跑，
+    连 `path.exists()` 都抛 PermissionError —— 而**每个接口**第一跳都读模型配置，
+    于是一个目录权限问题让所有 API 500、界面显示「后端未连接」。
+    """
+    monkeypatch.setenv("CASH_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_API_KEY", "server-key-123")
+    monkeypatch.setattr(model_config, "_tenant_slug", lambda: "aaaaaaaa")
+
+    class Boom(type(model_config.Path("x"))):
+        def exists(self, *a, **k):  # type: ignore[override]
+            raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(model_config, "config_path", lambda: Boom(str(tmp_path / "model_config.json")))
+    cfg = model_config.load()
+    assert cfg["tier"] == "cloud"
+    assert cfg["cloud"]["api_key"] == "server-key-123", "回落到环境变量里的默认档位"
+    assert model_config.public_view()["tiers"], "对外视图仍然能出来（不抛）"

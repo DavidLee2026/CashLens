@@ -660,3 +660,24 @@ button{font-family:inherit}
 
 /* 来源票据（2026-10-20）：一句小字，不能抢金额的视线；文件名可能很长，截断但悬停可看全名 */
 .ev-src{color:var(--text-2);overflow-wrap:anywhere}
+
+/* ── 空账本的两件脚手架（2026-10-20，A 档 ①）─────────────────────────────
+   示例卡：告诉新用户"最后会得到什么"；示例 chips：告诉他"第一句话说什么"。
+   两者都只在账本为空时出现，记下第一笔后自动消失 —— 是脚手架，不是广告牌。 */
+.demo-card{background:var(--white);border:1px dashed var(--gray-300);border-radius:10px;
+  padding:10px 12px;margin-bottom:10px}
+.demo-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.demo-tag{font-size:10px;font-weight:600;color:var(--warn);background:var(--warn-bg);
+  border:1px solid rgba(209,146,11,.35);border-radius:999px;padding:2px 7px}
+.demo-hint{font-size:11px;color:var(--text-2)}
+.demo-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px}
+.demo-nums{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+.demo-nums b{font-size:15px;margin-left:4px}
+.demo-note{font-size:11px;color:var(--text-2);margin-top:6px;line-height:1.6}
+
+.start-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 0 8px}
+.sc-lead{font-size:11px;color:var(--text-2)}
+.sc-chip{border:1px solid var(--border);background:var(--white);border-radius:999px;
+  padding:4px 10px;font-size:12px;color:var(--text);cursor:pointer;font-family:inherit}
+.sc-chip:hover{border-color:var(--brand);color:var(--brand)}
+.sc-chip:disabled{opacity:.5;cursor:not-allowed}
