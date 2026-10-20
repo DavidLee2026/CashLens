@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
-"""生成「账号台账」Excel：一行一个邀请码账号（2026-10-20 立）
+"""生成「账号台账」Excel：一行一个邀请码账号（2026-10-20 立，当天改过一版口径）
 
 ## 这是什么
 
-手工服务期的管理台账。三个账号（你 + 两个朋友）一人一行，把**能自动算的**从账本里
-算出来（笔数 / 收支 / 净额 / 最近使用），把**只能人来判断的**留空给你手填
-（反馈、是否付费、备注）。
+手工服务期的**反馈台账**。三个账号（你 + 两个朋友）一人一行，把**能自动算的**算出来
+（状态 / 创建日 / 最近登录 / 记账笔数 / 最近一笔），把**只能人来判断的**留空给你手填
+（反馈 / 卡在哪一步 / 他想要什么 / 我改了什么 / 是否付费 / 备注）。
+
+## 为什么不记金额（2026-10-20 David 拍板，当天就改了）
+
+原话：「这个台账里的金额和我其实没有什么关系，他们赚多赚少和我也没有关系，
+我只是把账号给他们用，然后听他们的反馈，对工具进行修改。」
+
+所以收入 / 支出 / 净额三列**整列去掉**，理由有三条：
+① 这几个数回答不了任何一个我要回答的问题 —— 我要知道的是「他用没用、卡在哪、他提了什么」；
+② 客户自己赚多少是**他的事**，不因为借了个账号就该被算一遍；
+③ 少存一份别人的经营数据，就少一份要解释的东西。
+
+留下的「记账笔数」不是金额，是**他有没有真的用**的唯一行为信号。
 
 ## 三条纪律
 
 1. **只读**。只读 `tenants.json` 与各租户的 `finance_events.jsonl`，不写、不建、不改
    任何数据文件 —— 台账是观察工具，不是操作工具。
-2. **口径与工作台一致**：支出侧同一租户内**同号发票只算一次**（重复行不计入合计），
-   与 `projects.summary()` 的规则相同；但这里不调用它，避免顺手在数据目录里建
-   `projects.json`。
-3. **不含邀请码**。码只在创建时显示一次，台账里只记账号名与状态，不记码。
+2. **口径与工作台一致**：作废的事件不算；同一租户内**同号发票只算一次**。
+3. **不含邀请码**（服务器上只存哈希）。码由 `--codes` 指定的本地文件填，那张表别整份发人。
 
 ## 用法
 
@@ -28,7 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import sys
@@ -42,7 +52,6 @@ from app.services.state_engine.ledger import EventLedger  # noqa: E402
 
 SHEET = "账号台账"
 NOTE = "说明"
-_MONEY = "#,##0.00"
 _HEAD_FILL = PatternFill("solid", fgColor="EEF1F6")
 _MANUAL_FILL = PatternFill("solid", fgColor="FFF8E6")   # 手填列：浅黄，一眼能分开
 
@@ -52,19 +61,19 @@ HEADERS = [
     ("邀请码", 22, "code"),
     ("状态", 8, "auto"),
     ("创建日", 12, "auto"),
-    ("最近使用", 12, "auto"),
-    ("账本笔数", 10, "auto"),
-    ("收入(元)", 13, "auto"),
-    ("支出(元)", 13, "auto"),
-    ("净额(元)", 13, "auto"),
-    ("近30天笔数", 11, "auto"),
+    ("最近登录", 12, "auto"),
+    ("记账笔数", 10, "auto"),
     ("最近一笔", 12, "auto"),
-    ("反馈 / 用得怎么样", 34, "manual"),
+    ("反馈 / 用得怎么样", 36, "manual"),
+    ("卡在哪一步", 24, "manual"),
+    ("他想要什么", 24, "manual"),
+    ("我改了什么", 24, "manual"),
     ("是否付费", 11, "manual"),
-    ("备注", 26, "manual"),
+    ("备注", 22, "manual"),
 ]
 
-COL = {h: i for i, (h, _, _) in enumerate(HEADERS)}   # 表头 → 列下标（0 基）
+COL = {h: i for i, (h, _, _) in enumerate(HEADERS)}          # 表头 → 列下标（0 基）
+MANUAL = [h for h, _, kind in HEADERS if kind == "manual"]
 
 
 def _load_tenants(data_dir: Path) -> list[dict]:
@@ -83,7 +92,7 @@ def _read_events(path: Path) -> list[dict]:
 
     ⚠️ 必须走 `EventLedger.load()`，不能自己逐行 json.loads —— 那个函数会
     ① 滤掉被 `type=void` 作废的事件、② 按 dedupe_key 只留先写者。
-    自己读会把**已作废的账算进合计**（2026-10-20 实测：一次 void + 重记会让支出虚高）。
+    自己读会把**已作废的账算进笔数**（2026-10-20 实测：一次 void + 重记就会多算一笔）。
     """
     if not path.exists():
         return []
@@ -95,47 +104,35 @@ def _invoice_no(ev: dict) -> str:
     return str(ev.get("invoice_no") or extra.get("invoice_no") or "").strip()
 
 
-def _stats(events: list[dict], as_of: datetime) -> dict:
-    """一个租户的概况。口径与工作台一致：同号发票在一个租户内只算一次支出。"""
-    income = expense = 0
+def _stats(events: list[dict]) -> dict:
+    """一个租户的用量概况。口径与工作台一致：作废的不算，同号发票只算一次。"""
     count = 0
-    seen: set[str] = set()
     latest = ""
-    recent_30 = 0
-    cutoff = as_of - timedelta(days=30)
+    seen: set[str] = set()
     for ev in events:
         typ = str(ev.get("type") or "")
         ts = str(ev.get("ts") or "")
-        amount = int(ev.get("amount_cents") or 0)
         if ts > latest:
             latest = ts
-        try:
-            when = datetime.fromisoformat(ts.replace("Z", "")) if ts else None
-        except ValueError:
-            when = None
-        if when and when.replace(tzinfo=None) >= cutoff.replace(tzinfo=None):
-            recent_30 += 1
         if typ in ("income", "refund"):
-            income += amount
             count += 1
         elif typ == "expense":
             no = _invoice_no(ev)
             if no and no in seen:
-                continue            # 同号重复票不计入合计（明细里仍留在账本）
+                continue            # 同号重复票不计入（明细里仍留在账本）
             if no:
                 seen.add(no)
-            expense += amount
             count += 1
-    return {
-        "income": income, "expense": expense, "net": income - expense,
-        "count": count, "recent_30": recent_30, "latest": latest[:10],
-    }
+    return {"count": count, "latest": latest[:10]}
 
 
-def _load_manual(out_path: Path) -> dict[str, tuple[str, str, str]]:
-    """读上一次生成的台账，把**手填列**按账号名带过来。
+def _load_manual(out_path: Path) -> dict[str, dict[str, str]]:
+    """读上一次生成的台账，把**手填列**按账号名 + 表头名带过来。
 
     不这么做的话，「重新生成」会把几周的反馈一次抹掉 —— 而台账的价值恰好在手填那几列。
+    按**文件里的表头**逐列找（不是按固定下标）：旧文件可能少一列或多一列，
+    用下标读老文件会越界（2026-10-20 真机：加列后重生成直接 IndexError）。
+    认得出的列名就带过来，认不出的（比如已删掉的金额列）直接跳过。
     """
     if not out_path.exists():
         return {}
@@ -146,19 +143,16 @@ def _load_manual(out_path: Path) -> dict[str, tuple[str, str, str]]:
         # ⚠️ 这条宽 except 曾把「未 import load_workbook」的 NameError 也吞掉，
         # 表现为「手填列莫名其妙没保留」——所以读取逻辑必须有测试兜着（见 tests）。
         return {}
-    # 按**文件里的表头**找列，不用模块里的 COL —— 旧文件可能少一列（比如还没有「邀请码」列），
-    # 用固定下标读老文件会越界（2026-10-20 真机：加列后重生成直接 IndexError）。
     head = [str(c.value or "") for c in ws[1]]
-    idx = [head.index(k) if k in head else -1
-           for k in ("反馈 / 用得怎么样", "是否付费", "备注")]
-    if any(i < 0 for i in idx):
+    idx = {k: head.index(k) for k in MANUAL if k in head}
+    if not idx:
         return {}
-    keep: dict[str, tuple[str, str, str]] = {}
+    keep: dict[str, dict[str, str]] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
         name = str(row[0] or "").strip()
         if not name or name == "合计":
             continue
-        keep[name] = tuple(str(row[i] or "") if i < len(row) else "" for i in idx)  # type: ignore[misc]
+        keep[name] = {k: (str(row[i] or "") if i < len(row) else "") for k, i in idx.items()}
     return keep
 
 
@@ -181,10 +175,11 @@ def build(data_dir: Path, out_path: Path, codes: dict[str, str] | None = None,
         cell.alignment = Alignment(vertical="center", wrap_text=True)
     ws.freeze_panes = "A2"
 
-    totals = {"count": 0, "income": 0, "expense": 0, "net": 0}
+    total = 0
     for r in sorted(tenants, key=lambda x: str(x.get("created_at") or "")):
-        st = _stats(_read_events(data_dir / "tenants" / str(r["slug"]) / "finance_events.jsonl"), as_of)
+        st = _stats(_read_events(data_dir / "tenants" / str(r["slug"]) / "finance_events.jsonl"))
         label = str(r.get("label") or "（未命名）")
+        filled = manual.get(label, {})
         ws.append([
             label,
             codes.get(label) or codes.get(str(r["slug"])) or "",
@@ -192,44 +187,38 @@ def build(data_dir: Path, out_path: Path, codes: dict[str, str] | None = None,
             str(r.get("created_at") or "")[:10],
             str(r.get("last_seen") or "—")[:10],
             st["count"],
-            st["income"] / 100,
-            st["expense"] / 100,
-            st["net"] / 100,
-            st["recent_30"],
             st["latest"] or "—",
-            *(manual.get(label, ("", "", ""))),
+            *[filled.get(k, "") for k in MANUAL],
         ])
-        for k in totals:
-            totals[k] += st[k]
+        total += st["count"]
 
     last = ws.max_row + 1
     ws.cell(row=last, column=COL["账号"] + 1, value="合计").font = Font(bold=True)
-    ws.cell(row=last, column=COL["账本笔数"] + 1, value=totals["count"]).font = Font(bold=True)
-    money_cols = (COL["收入(元)"] + 1, COL["支出(元)"] + 1, COL["净额(元)"] + 1)
-    for col, key in zip(money_cols, ("income", "expense", "net")):
-        c = ws.cell(row=last, column=col, value=totals[key] / 100)
-        c.font = Font(bold=True)
-    for row in range(2, last + 1):
-        for col in money_cols:
-            ws.cell(row=row, column=col).number_format = _MONEY
+    ws.cell(row=last, column=COL["记账笔数"] + 1, value=total).font = Font(bold=True)
 
     # ── 说明页：口径与「哪些列是自动的」写清楚，免得下次自己都分不清 ──
     ws2 = wb.create_sheet(NOTE)
     ws2.column_dimensions["A"].width = 22
-    ws2.column_dimensions["B"].width = 96
+    ws2.column_dimensions["B"].width = 100
     lines = [
         ("生成时间", f"{as_of:%Y-%m-%d %H:%M}"),
         ("数据来源", source_note or str(data_dir)),
         ("账号数", f"{len(tenants)} 个（在用 {sum(1 for r in tenants if r.get('active'))}）"),
         ("", ""),
-        ("自动列（灰）", "账号 / 状态 / 创建日 / 最近使用 / 账本笔数 / 收入 / 支出 / 净额 / 近30天笔数 / 最近一笔"),
-        ("手填列（黄）", "反馈 / 是否付费 / 备注 —— 重新生成时按账号名保留旧值（脚本只写自动列）"),
+        ("自动列（灰）", "账号 / 邀请码 / 状态 / 创建日 / 最近登录 / 记账笔数 / 最近一笔"),
+        ("手填列（黄）", "反馈 / 卡在哪一步 / 他想要什么 / 我改了什么 / 是否付费 / 备注"
+                        " —— 重新生成时按账号名 + 表头保留旧值（脚本只写自动列）"),
         ("", ""),
-        ("金额口径", "与工作台一致：收入含退款；支出侧同一账号内**同号发票只算一次**（重复票不进合计，账本里仍保留）"),
-        ("笔数口径", "只数真正计入合计的笔（同号重复票不重复计）；「近30天笔数」按发生时间算"),
+        ("「最近登录」口径", "打点在**用邀请码换会话**那一刻。⚠️ 建码后立刻自己换一次也会打点，"
+                            "所以「创建日」与「最近登录」是同一分钟、或同一秒 —— 那是我在试，不是他用过"
+                            "（2026-10-20 实际踩到：朋友A 建码 9 秒后有一次打点，差点被当成「他登进来过」）"),
+        ("「记账笔数」口径", "真正入账的笔数：作废的不算、同号重复票只算一次。"
+                            "**这是「他有没有真的用」的唯一行为信号** —— 肯交一张真票才算数，口头说好用不算"),
+        ("为什么不记金额", "2026-10-20 David 拍板：「他们赚多赚少和我没有关系，我只是把账号给他们用，"
+                          "然后听他们的反馈」。收入/支出/净额三列已整列去掉 —— "
+                          "它们回答不了「他用没用、卡在哪、提了什么」，还多存了一份别人的经营数据"),
         ("邀请码列", "来自 --codes 指定的本地文件（服务器上只存哈希，取不回来）。"
                     "⚠️ 本表因此含**有效凭据**：不要整份发人，只撕自己那行；别放同步盘/公开仓库"),
-        ("不含什么", "服务器上不含邀请码明文（码只在创建时显示一次，库里只存哈希）"),
         ("重生成", "python3 scripts/make_tenant_ledger.py --data-dir <含 tenants.json 的目录> --out <文件名>.xlsx"),
     ]
     for k, v in lines:

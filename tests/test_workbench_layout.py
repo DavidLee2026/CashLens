@@ -429,3 +429,23 @@ def test_money_colors_are_red_in_green_out():
     # 语义色不许被顺手改掉（确认入账仍是绿、⚠️ 仍是红）
     assert ".btn-mini.ok{background:var(--income-bg)" in css
     assert ".t-fragile{color:var(--risk)" in css
+
+
+def test_beta_badge_next_to_logo():
+    """测试版标志（2026-10-20 David：「在 logo 旁边放一个 beta 或者是测试的标志」）。
+
+    三处品牌行都要有（登录页 / 左栏顶部 / 窄屏对话栏顶部）—— 尤其**登录页**：
+    用户第一次点开链接看到的就是那一页，先看到「测试版」，后面认错票就不会觉得被骗。
+    标志挂在品牌行**末尾**（不许塞在 logo 与名字之间），并用 title 把代价写清。
+    """
+    src = _page_src()
+    assert src.count('className="brand-beta"') == 3, "登录页 / 左栏 / 窄屏三处品牌行都要有标志"
+    # 登录卡里那处必须紧跟 CashLens（这一页没有「本地工作台」副标题）
+    login = src[src.index('className="brand login-brand"'):]
+    login = login[:login.index("</div>")]
+    assert "brand-beta" in login and "测试版" in login
+    assert "还在测试中" in src and "每笔入账都要你确认" in src, "标志上要有一句说清代价的话"
+    css = _css()
+    assert ".brand-beta{" in css
+    assert "cursor:help" in css, "标志是可悬停的解释，不是按钮"
+    assert "--warn" in _rules(".brand-beta"), "用既有琥珀色，不新增色板"

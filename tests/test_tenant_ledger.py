@@ -1,18 +1,20 @@
-"""账号台账（xlsx）：一行一个邀请码账号（2026-10-20 立）
+"""账号台账（xlsx）：一行一个邀请码账号（2026-10-20 立，当天改口径）
 
-手工服务期用它看「三个账号各自用成什么样」。这组用例钉三条，任何一条回退都会让台账说谎：
+手工服务期用它看「三个账号各自用成什么样」。这组用例钉五条，任何一条回退都会让台账说谎：
 
 1. **作废的事件不算** —— 曾出现的错：自己逐行 json.loads 读账本，把 void 掉的账
-   也算进合计，支出立刻虚高；
+   也算成笔数；
 2. **同号发票只算一次** —— 与工作台同一口径；
-3. **重新生成不抹掉手填列** —— 反馈/是否付费是几周攒下来的，刷新一次就没了等于白记。
+3. **重新生成不抹掉手填列** —— 反馈/卡点/是否付费是几周攒下来的，刷新一次就没了等于白记；
+4. **金额列不许回来** —— 2026-10-20 David 拍板去掉收入/支出/净额（「他们赚多赚少和我没有关系」），
+   这条钉住它别复活；
+5. **老台账里带金额列也能读** —— 换口径之后重生成，旧表里已经填好的反馈必须带过来。
 """
-import io
 import json
 import sys
 from pathlib import Path
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -64,18 +66,16 @@ def test_voided_event_is_not_counted(tmp_path):
     root = _env(tmp_path)
     out = ledger.build(root, tmp_path / "ledger.xlsx")
     row = _row(out, "账号一")
-    # 收入 10,000；支出只有一笔 962（被 void 的那笔不算，重复发票也只算一次）
-    assert row["收入(元)"] == 10000
-    assert row["支出(元)"] == 962
-    assert row["净额(元)"] == 9038
-    assert row["账本笔数"] == 2
+    # 收入 1 笔 + 支出 1 笔（被 void 的那笔不算，重复发票也只算一次）
+    assert row["记账笔数"] == 2
+    assert row["最近一笔"] == "2026-10-20"
+    assert row["最近登录"] == "2026-10-20"
 
 
 def test_duplicate_invoice_counted_once(tmp_path):
     root = _env(tmp_path)
     out = ledger.build(root, tmp_path / "ledger.xlsx")
-    row = _row(out, "账号一")
-    assert row["支出(元)"] == 962        # 两笔同号票只算一次
+    assert _row(out, "账号一")["记账笔数"] == 2      # INV1 三笔只算一笔
 
 
 def test_inactive_account_is_marked_and_empty(tmp_path):
@@ -83,11 +83,24 @@ def test_inactive_account_is_marked_and_empty(tmp_path):
     out = ledger.build(root, tmp_path / "ledger.xlsx")
     row = _row(out, "账号二")
     assert row["状态"] == "停用"
-    assert row["收入(元)"] == 0 and row["支出(元)"] == 0
+    assert row["记账笔数"] == 0
+    assert row["最近登录"] == "—"                    # 从没换过码，别写成空
+    assert row["最近一笔"] == "—"
+
+
+def test_no_money_columns(tmp_path):
+    """金额列不许回来：David 2026-10-20 拍板「他们赚多赚少和我没有关系」。"""
+    heads = [h for h, _, _ in ledger.HEADERS]
+    for bad in ("收入(元)", "支出(元)", "净额(元)"):
+        assert bad not in heads, f"{bad} 应已整列去掉"
+    root = _env(tmp_path)
+    out = ledger.build(root, tmp_path / "ledger.xlsx")
+    ws = load_workbook(out)["账号台账"]
+    assert not any("元)" in str(c.value or "") for c in ws[1])
 
 
 def test_regenerate_keeps_manual_columns(tmp_path):
-    """重新生成时按账号名保留手填的反馈/是否付费/备注。"""
+    """重新生成时按账号名 + 表头保留手填的反馈/卡点/是否付费/备注。"""
     root = _env(tmp_path)
     out = tmp_path / "ledger.xlsx"
     ledger.build(root, out)
@@ -95,26 +108,49 @@ def test_regenerate_keeps_manual_columns(tmp_path):
     wb = load_workbook(out)
     ws = wb["账号台账"]
     head = [c.value for c in ws[1]]
+    fill = {"反馈 / 用得怎么样": "用了一周，说对账比原来快",
+            "卡在哪一步": "不知道草稿要不要点确认",
+            "他想要什么": "想直接导出给会计",
+            "我改了什么": "批量确认",
+            "是否付费": "已付 99", "备注": "下月回访"}
     for row in ws.iter_rows(min_row=2):
         if row[0].value == "账号一":
-            row[head.index("反馈 / 用得怎么样")].value = "用了一周，说对账比原来快"
-            row[head.index("是否付费")].value = "已付 99"
-            row[head.index("备注")].value = "下月回访"
+            for k, v in fill.items():
+                row[head.index(k)].value = v
     wb.save(out)
 
     ledger.build(root, out)          # 再生成一次
     row = _row(out, "账号一")
-    assert row["反馈 / 用得怎么样"] == "用了一周，说对账比原来快"
-    assert row["是否付费"] == "已付 99"
-    assert row["备注"] == "下月回访"
-    assert row["收入(元)"] == 10000   # 自动列仍然是最新的
+    for k, v in fill.items():
+        assert row[k] == v, f"手填列 {k} 被重新生成抹掉了"
+    assert row["记账笔数"] == 2       # 自动列仍然是最新的
+
+
+def test_old_ledger_with_money_columns_still_migrates(tmp_path):
+    """换口径（删掉金额列）之后重生成，旧表里已填好的反馈必须带过来、金额列直接忽略。"""
+    root = _env(tmp_path)
+    out = tmp_path / "ledger.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "账号台账"
+    ws.append(["账号", "邀请码", "状态", "创建日", "最近使用",
+               "账本笔数", "收入(元)", "支出(元)", "净额(元)", "近30天笔数", "最近一笔",
+               "反馈 / 用得怎么样", "是否付费", "备注"])
+    ws.append(["账号一", "CL-AAAA-BBBB-CCCC", "在用", "2026-10-19", "2026-10-20",
+               2, 10000, 962, 9038, 2, "2026-10-20",
+               "旧表里填过的反馈", "", ""])
+    wb.save(out)
+
+    ledger.build(root, out)
+    row = _row(out, "账号一")
+    assert row["反馈 / 用得怎么样"] == "旧表里填过的反馈"
+    assert row["最近登录"] == "2026-10-20"           # 新列名从 tenants.json 取，不抄旧表的值
+    assert row["邀请码"] in (None, "")               # 旧表的码不回填（新表由 --codes 给）
 
 
 def test_invite_code_column_comes_from_the_codes_file(tmp_path):
     """邀请码列：服务器上没有明文码，只能由 --codes 指定的本地文件填。"""
     root = _env(tmp_path)
-    codes_file = tmp_path / "codes.json"
-    codes_file.write_text(json.dumps({"账号一": "CL-AAAA-BBBB-CCCC"}, ensure_ascii=False), encoding="utf-8")
     out = tmp_path / "ledger.xlsx"
     ledger.build(root, out, codes={"账号一": "CL-AAAA-BBBB-CCCC"})
     assert _row(out, "账号一")["邀请码"] == "CL-AAAA-BBBB-CCCC"

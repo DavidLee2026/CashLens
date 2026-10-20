@@ -516,6 +516,9 @@ function LoginGate() {
             </svg>
           </span>
           CashLens
+          <span className="brand-beta" title="还在测试中：票据可能认错，每笔入账都要你确认过才进账">
+            测试版
+          </span>
         </div>
         <h1>输入邀请码</h1>
         <p className="login-sub">一个码对应一本账，各看各的。邀请码由 CashLens 提供。</p>
@@ -1780,6 +1783,7 @@ export default function Workbench() {
                   </svg>
                 </span>
                 CashLens <span className="brand-sub">本地工作台</span>
+                <span className="brand-beta" title="还在测试中：票据可能认错，每笔入账都要你确认过才进账">测试版</span>
               </span>
               <span className="convo-title">对话记账</span>
               <span className="convo-head-right">
@@ -2493,6 +2497,7 @@ export default function Workbench() {
                   </svg>
                 </span>
                 CashLens <span className="brand-sub">本地工作台</span>
+                <span className="brand-beta" title="还在测试中：票据可能认错，每笔入账都要你确认过才进账">测试版</span>
               </span>
             </div>
             <div className="side-body">
