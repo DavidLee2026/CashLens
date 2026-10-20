@@ -124,6 +124,31 @@ def test_pdf_text_layer_falls_back_to_pymupdf(tmp_path, monkeypatch):
     assert parsed["_cloud_uploaded"] is False
 
 
+def test_pdf_total_is_tax_inclusive_even_when_text_order_differs():
+    """价税合计要读含税总价，不能读「合计」栏里的未税金额。
+
+    2026-10-20 真机：同一张数电票，macOS Quartz 读到 962.00，
+    服务器 PyMuPDF 的文本流把 907.55 / 54.45 排到了价税合计标签后面，
+    旧实现取第一个 ¥ 就读成了 907.55（少 54.45 税）。
+    """
+    import receipt_mcp  # noqa: PLC0415
+
+    # PyMuPDF 的实际顺序：标签在前，金额在后，且未税金额/税额先出现
+    pymupdf_order = (
+        "合\n计\n价税合计（大写）\n（小写）\n备\n注\n"
+        "国家税务总局\n全\n国\n统\n一\n发\n票\n监\n制\n章\n云\n南\n省\n税\n务\n局\n"
+        "¥907.55\n¥54.45\n玖佰陆拾贰圆整\n¥ 962.00\n"
+        "2026年09月20日\n"
+    )
+    parsed = receipt_mcp.parse_from_text_layer(pymupdf_order, "synthetic.pdf")
+    assert parsed["amount"] == 962.0
+
+    # Quartz 的顺序：标签与总价在同一行
+    quartz_order = "价税合计（大写） 玖佰陆拾贰圆整 ¥ 962.00\n2026年09月20日\n"
+    parsed2 = receipt_mcp.parse_from_text_layer(quartz_order, "synthetic.pdf")
+    assert parsed2["amount"] == 962.0
+
+
 # ─── 4. 前端登录页与 401 兜底 ──────────────────────────
 def test_login_page_and_401_guard_exist():
     src = (ROOT / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")

@@ -219,6 +219,23 @@ def _twenty_digit_candidates(text: str) -> list[str]:
     return out
 
 
+def _total_amount_from_text(text: str) -> float:
+    """读「价税合计」（含税总价），不是「合计」栏里的未税金额。
+
+    2026-10-20 实测（一张住宿数电票）：Quartz 与 PyMuPDF 的文本流顺序不同 ——
+      Quartz  : 价税合计（大写） 玖佰陆拾贰圆整 ¥ 962.00
+      PyMuPDF : 价税合计（大写）（小写）备 注 … ¥907.55 ¥54.45 玖佰… ¥ 962.00
+    旧实现取「价税合计」后**第一个** ¥，在 PyMuPDF 下读到 907.55（未税金额），
+    少了 54.45 的 6% 税额，整批合计因此从 1,775.45 变成 1,721.00。
+    价税合计 = 金额 + 税额，是标签窗口里最大的金额，所以取 max 而不是第一个。
+    """
+    m = re.search(r"价税合计[\s\S]{0,200}", text or "")
+    if not m:
+        return 0.0
+    vals = [float(x.replace(",", "")) for x in re.findall(r"¥\s*([\d,]+\.\d{2})", m.group(0))]
+    return max(vals) if vals else 0.0
+
+
 def _structurally_plausible(nums: list[str], date: str = "") -> list[str]:
     """从 20 位候选里筛出结构上像发票号码的（区划代码在册、年份与开票日期一致）。
 
@@ -360,10 +377,7 @@ def parse_from_text_layer(text: str, source_path: str) -> dict:
     if m:
         date = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
-    amount = 0.0
-    m = re.search(r"价税合计[\s\S]{0,120}?¥\s*([\d,]+\.\d{2})", text)
-    if m:
-        amount = float(m.group(1).replace(",", ""))
+    amount = _total_amount_from_text(text)
 
     # 20 位数字串不止一个（销方银行账号也是 20 位），先按票号结构筛，再要求唯一
     plausible = _structurally_plausible(nums, date)
