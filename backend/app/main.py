@@ -23,7 +23,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import (amount_guard, categories, data_reset, expense_list, export_xlsx, intake,
+from .services import (amount_guard, categories, data_reset, evidence_files, expense_list,
+                       export_xlsx, intake,
                        invoice_tax, llm_skill, model_config, parser_rule, pending, projects,
                        query_tools, session_mem, tenancy, timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
@@ -341,13 +342,16 @@ def export_ledger_xlsx(project: str = ""):
 def list_events(limit: int = 50):
     """最近事件（倒序展示用）。"""
     events = EventLedger(ledger_path()).load()
+    evidence_files.attach(events, evidence_files.load_map(data_dir()))
     return {"total": len(events), "events": list(reversed(events[-limit:]))}
 
 
 @app.get("/api/state")
 def get_state():
     """当前财务状态（真计算：asOf 重放）。"""
-    return run_state(ledger_path(), db_path())
+    out = run_state(ledger_path(), db_path())
+    evidence_files.attach(out.get("events") or [], evidence_files.load_map(data_dir()))
+    return out
 
 
 @app.get("/api/forecast")

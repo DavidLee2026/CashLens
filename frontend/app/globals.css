@@ -657,3 +657,6 @@ button{font-family:inherit}
 /* 模型菜单里的一句实话（2026-10-20）：线上不跑本地模型，别让「本地」被读成「省 key」 */
 .model-note{font-size:11px;line-height:1.6;color:var(--text-2);padding:6px 8px;margin-top:4px;
   background:var(--gray-50);border:1px dashed var(--border);border-radius:8px}
+
+/* 来源票据（2026-10-20）：一句小字，不能抢金额的视线；文件名可能很长，截断但悬停可看全名 */
+.ev-src{color:var(--text-2);overflow-wrap:anywhere}

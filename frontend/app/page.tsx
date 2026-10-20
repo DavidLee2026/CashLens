@@ -126,7 +126,9 @@ type Fc = {
   need_weeks?: number;
   days_with_records?: number;
 };
-type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string };
+type Ev = { event_id: string; ts: string; type: string; amount_cents: number; category: string; channel: string; note: string;
+  /** 这笔来自哪张票（2026-10-20）：由后端对照表贴上；老事件没有这个字段＝来源未记录 */
+  evidence_file?: string };
 /** 项目维度：账本只存稳定 id，显示名来自后端映射表，改名不会动账本。 */
 type ProjectRow = {
   id: string;
@@ -3154,6 +3156,12 @@ export default function Workbench() {
                                 真分类，和"根本没分类"不是一回事。后端 projects.summary()
                                 也是这么归的，两处口径一致。 */}
                             {ev.category || "未分类"} · {CHANNEL_CN[ev.channel] ?? ev.channel} · {ev.ts.slice(0, 10)}
+                            {/* 来源票据（2026-10-20）：有就点名是哪张文件，没有就不写 ——
+                                对外承诺是「每一笔都能追到那张票」，那就得让人真的看见文件名。 */}
+                            {ev.evidence_file && (
+                              <> · <span className="ev-src" title="这笔账来自这个文件（在原始票据目录里）">
+                                来源：{ev.evidence_file}</span></>
+                            )}
                           </span>
                         </div>
                       </div>

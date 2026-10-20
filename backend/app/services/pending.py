@@ -144,6 +144,14 @@ def accept(data_dir: str | Path, pid: str, append_fn,
             if appended:
                 del drafts[i]
                 _save(data_dir, drafts)
+                # 记下「这笔来自哪张票」（2026-10-20）：单独一张对照表，不改账本历史。
+                if d.get("image"):
+                    try:
+                        from . import evidence_files          # 运行时导入，避免循环
+                        evidence_files.record(data_dir, str((ev or {}).get("event_id") or ""),
+                                              str(d.get("image")))
+                    except Exception:                     # noqa: BLE001 记不上不影响入账
+                        pass
             return {"draft": d, "event": ev, "appended": appended}
     return None
 
