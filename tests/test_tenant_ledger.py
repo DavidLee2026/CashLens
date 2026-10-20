@@ -49,11 +49,14 @@ def _env(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _row(path: Path, name: str) -> tuple:
+def _row(path: Path, name: str) -> dict:
+    """按表头取一行的字典 —— 列序会变（后来加入了「邀请码」列），用下标会脆。"""
     wb = load_workbook(path)
-    for row in wb["账号台账"].iter_rows(min_row=2, values_only=True):
+    ws = wb["账号台账"]
+    head = [c.value for c in ws[1]]
+    for row in ws.iter_rows(min_row=2, values_only=True):
         if row[0] == name:
-            return row
+            return dict(zip(head, row))
     raise AssertionError(f"台账里没有 {name}")
 
 
@@ -62,25 +65,25 @@ def test_voided_event_is_not_counted(tmp_path):
     out = ledger.build(root, tmp_path / "ledger.xlsx")
     row = _row(out, "账号一")
     # 收入 10,000；支出只有一笔 962（被 void 的那笔不算，重复发票也只算一次）
-    assert row[5] == 10000
-    assert row[6] == 962
-    assert row[7] == 9038
-    assert row[4] == 2
+    assert row["收入(元)"] == 10000
+    assert row["支出(元)"] == 962
+    assert row["净额(元)"] == 9038
+    assert row["账本笔数"] == 2
 
 
 def test_duplicate_invoice_counted_once(tmp_path):
     root = _env(tmp_path)
     out = ledger.build(root, tmp_path / "ledger.xlsx")
     row = _row(out, "账号一")
-    assert row[6] == 962        # 两笔同号票只算一次
+    assert row["支出(元)"] == 962        # 两笔同号票只算一次
 
 
 def test_inactive_account_is_marked_and_empty(tmp_path):
     root = _env(tmp_path)
     out = ledger.build(root, tmp_path / "ledger.xlsx")
     row = _row(out, "账号二")
-    assert row[1] == "停用"
-    assert row[5] == 0 and row[6] == 0
+    assert row["状态"] == "停用"
+    assert row["收入(元)"] == 0 and row["支出(元)"] == 0
 
 
 def test_regenerate_keeps_manual_columns(tmp_path):
@@ -91,16 +94,28 @@ def test_regenerate_keeps_manual_columns(tmp_path):
 
     wb = load_workbook(out)
     ws = wb["账号台账"]
+    head = [c.value for c in ws[1]]
     for row in ws.iter_rows(min_row=2):
         if row[0].value == "账号一":
-            row[10].value = "用了一周，说对账比原来快"
-            row[11].value = "已付 99"
-            row[12].value = "下月回访"
+            row[head.index("反馈 / 用得怎么样")].value = "用了一周，说对账比原来快"
+            row[head.index("是否付费")].value = "已付 99"
+            row[head.index("备注")].value = "下月回访"
     wb.save(out)
 
     ledger.build(root, out)          # 再生成一次
     row = _row(out, "账号一")
-    assert row[10] == "用了一周，说对账比原来快"
-    assert row[11] == "已付 99"
-    assert row[12] == "下月回访"
-    assert row[5] == 10000           # 自动列仍然是最新的
+    assert row["反馈 / 用得怎么样"] == "用了一周，说对账比原来快"
+    assert row["是否付费"] == "已付 99"
+    assert row["备注"] == "下月回访"
+    assert row["收入(元)"] == 10000   # 自动列仍然是最新的
+
+
+def test_invite_code_column_comes_from_the_codes_file(tmp_path):
+    """邀请码列：服务器上没有明文码，只能由 --codes 指定的本地文件填。"""
+    root = _env(tmp_path)
+    codes_file = tmp_path / "codes.json"
+    codes_file.write_text(json.dumps({"账号一": "CL-AAAA-BBBB-CCCC"}, ensure_ascii=False), encoding="utf-8")
+    out = tmp_path / "ledger.xlsx"
+    ledger.build(root, out, codes={"账号一": "CL-AAAA-BBBB-CCCC"})
+    assert _row(out, "账号一")["邀请码"] == "CL-AAAA-BBBB-CCCC"
+    assert _row(out, "账号二")["邀请码"] in (None, "")   # 没给的留空，不编（空串读回来是 None）

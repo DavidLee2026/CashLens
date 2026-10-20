@@ -46,8 +46,10 @@ _MONEY = "#,##0.00"
 _HEAD_FILL = PatternFill("solid", fgColor="EEF1F6")
 _MANUAL_FILL = PatternFill("solid", fgColor="FFF8E6")   # 手填列：浅黄，一眼能分开
 
+# (表头, 宽度, auto|manual|code) —— code 列由 --codes 文件填（服务器上没有明文码）
 HEADERS = [
     ("账号", 16, "auto"),
+    ("邀请码", 22, "code"),
     ("状态", 8, "auto"),
     ("创建日", 12, "auto"),
     ("最近使用", 12, "auto"),
@@ -61,6 +63,8 @@ HEADERS = [
     ("是否付费", 11, "manual"),
     ("备注", 26, "manual"),
 ]
+
+COL = {h: i for i, (h, _, _) in enumerate(HEADERS)}   # 表头 → 列下标（0 基）
 
 
 def _load_tenants(data_dir: Path) -> list[dict]:
@@ -142,19 +146,28 @@ def _load_manual(out_path: Path) -> dict[str, tuple[str, str, str]]:
         # ⚠️ 这条宽 except 曾把「未 import load_workbook」的 NameError 也吞掉，
         # 表现为「手填列莫名其妙没保留」——所以读取逻辑必须有测试兜着（见 tests）。
         return {}
+    # 按**文件里的表头**找列，不用模块里的 COL —— 旧文件可能少一列（比如还没有「邀请码」列），
+    # 用固定下标读老文件会越界（2026-10-20 真机：加列后重生成直接 IndexError）。
+    head = [str(c.value or "") for c in ws[1]]
+    idx = [head.index(k) if k in head else -1
+           for k in ("反馈 / 用得怎么样", "是否付费", "备注")]
+    if any(i < 0 for i in idx):
+        return {}
     keep: dict[str, tuple[str, str, str]] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
         name = str(row[0] or "").strip()
         if not name or name == "合计":
             continue
-        keep[name] = (str(row[10] or ""), str(row[11] or ""), str(row[12] or ""))
+        keep[name] = tuple(str(row[i] or "") if i < len(row) else "" for i in idx)  # type: ignore[misc]
     return keep
 
 
-def build(data_dir: Path, out_path: Path) -> Path:
+def build(data_dir: Path, out_path: Path, codes: dict[str, str] | None = None,
+          source_note: str = "") -> Path:
     as_of = datetime.now()
     tenants = _load_tenants(data_dir)
     manual = _load_manual(out_path)
+    codes = codes or {}
     wb = Workbook()
     ws = wb.active
     ws.title = SHEET
@@ -171,8 +184,10 @@ def build(data_dir: Path, out_path: Path) -> Path:
     totals = {"count": 0, "income": 0, "expense": 0, "net": 0}
     for r in sorted(tenants, key=lambda x: str(x.get("created_at") or "")):
         st = _stats(_read_events(data_dir / "tenants" / str(r["slug"]) / "finance_events.jsonl"), as_of)
+        label = str(r.get("label") or "（未命名）")
         ws.append([
-            str(r.get("label") or "（未命名）"),
+            label,
+            codes.get(label) or codes.get(str(r["slug"])) or "",
             "在用" if r.get("active") else "停用",
             str(r.get("created_at") or "")[:10],
             str(r.get("last_seen") or "—")[:10],
@@ -182,19 +197,20 @@ def build(data_dir: Path, out_path: Path) -> Path:
             st["net"] / 100,
             st["recent_30"],
             st["latest"] or "—",
-            *(manual.get(str(r.get("label") or "（未命名）"), ("", "", ""))),
+            *(manual.get(label, ("", "", ""))),
         ])
         for k in totals:
             totals[k] += st[k]
 
     last = ws.max_row + 1
-    ws.cell(row=last, column=1, value="合计").font = Font(bold=True)
-    ws.cell(row=last, column=5, value=totals["count"]).font = Font(bold=True)
-    for col, key in ((6, "income"), (7, "expense"), (8, "net")):
+    ws.cell(row=last, column=COL["账号"] + 1, value="合计").font = Font(bold=True)
+    ws.cell(row=last, column=COL["账本笔数"] + 1, value=totals["count"]).font = Font(bold=True)
+    money_cols = (COL["收入(元)"] + 1, COL["支出(元)"] + 1, COL["净额(元)"] + 1)
+    for col, key in zip(money_cols, ("income", "expense", "net")):
         c = ws.cell(row=last, column=col, value=totals[key] / 100)
         c.font = Font(bold=True)
     for row in range(2, last + 1):
-        for col in (6, 7, 8):
+        for col in money_cols:
             ws.cell(row=row, column=col).number_format = _MONEY
 
     # ── 说明页：口径与「哪些列是自动的」写清楚，免得下次自己都分不清 ──
@@ -203,7 +219,7 @@ def build(data_dir: Path, out_path: Path) -> Path:
     ws2.column_dimensions["B"].width = 96
     lines = [
         ("生成时间", f"{as_of:%Y-%m-%d %H:%M}"),
-        ("数据来源", str(data_dir)),
+        ("数据来源", source_note or str(data_dir)),
         ("账号数", f"{len(tenants)} 个（在用 {sum(1 for r in tenants if r.get('active'))}）"),
         ("", ""),
         ("自动列（灰）", "账号 / 状态 / 创建日 / 最近使用 / 账本笔数 / 收入 / 支出 / 净额 / 近30天笔数 / 最近一笔"),
@@ -211,7 +227,9 @@ def build(data_dir: Path, out_path: Path) -> Path:
         ("", ""),
         ("金额口径", "与工作台一致：收入含退款；支出侧同一账号内**同号发票只算一次**（重复票不进合计，账本里仍保留）"),
         ("笔数口径", "只数真正计入合计的笔（同号重复票不重复计）；「近30天笔数」按发生时间算"),
-        ("不含什么", "不含邀请码明文（码只在创建时显示一次，库里只存哈希）"),
+        ("邀请码列", "来自 --codes 指定的本地文件（服务器上只存哈希，取不回来）。"
+                    "⚠️ 本表因此含**有效凭据**：不要整份发人，只撕自己那行；别放同步盘/公开仓库"),
+        ("不含什么", "服务器上不含邀请码明文（码只在创建时显示一次，库里只存哈希）"),
         ("重生成", "python3 scripts/make_tenant_ledger.py --data-dir <含 tenants.json 的目录> --out <文件名>.xlsx"),
     ]
     for k, v in lines:
@@ -229,6 +247,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="生成邀请码账号台账（xlsx）")
     ap.add_argument("--data-dir", default="", help="含 tenants.json 的目录（默认取 CASH_DATA_DIR 或仓库 data/）")
     ap.add_argument("--out", default="", help="输出文件名（默认 账号台账-YYYYMMDD.xlsx）")
+    ap.add_argument("--codes", default="", help='邀请码表（JSON：{"账号名": "CL-XXXX-XXXX-XXXX"}）')
+    ap.add_argument("--source-note", default="", help="写在「说明」页的数据来源（默认用目录路径）")
     args = ap.parse_args()
 
     if args.data_dir:
@@ -241,7 +261,16 @@ def main() -> int:
     out = Path(args.out).expanduser() if args.out else \
         Path.cwd() / f"账号台账-{datetime.now():%Y%m%d}.xlsx"
 
-    path = build(data_dir, out)
+    codes: dict[str, str] = {}
+    if args.codes:
+        cp = Path(args.codes).expanduser()
+        if cp.exists():
+            codes = json.loads(cp.read_text(encoding="utf-8"))
+            print(f"✓ 邀请码：读入 {len(codes)} 条（{cp.name}）")
+        else:
+            print(f"⚠ 找不到邀请码文件 {cp}，邀请码列留空")
+
+    path = build(data_dir, out, codes=codes, source_note=args.source_note)
     print(f"✓ 已生成：{path}")
     return 0
 
