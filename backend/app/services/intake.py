@@ -499,7 +499,9 @@ def _ingest_images(data_dir, pid: str, files: list[dict], work_dir: Path) -> dic
             str((o or {}).get("at") or "").strip() or str((o or {}).get("status") or "").strip()
             for o in orders_raw if isinstance(o, dict)
         )
-        if listing["is_list"] and not order_has_state:
+        # ⚠️ `cents <= 0` 是硬前提：真发票（票面有金额）的文本层里也会有「金额 / 税额 /
+        # 价税合计」好几行数字，不拦的话一张住宿发票会被当成"清单"拆成三笔。
+        if cents <= 0 and listing["is_list"] and not order_has_state:
             made = []
             for it in listing["items"]:
                 d = _draft(data_dir, pid, direction=it["direction"],

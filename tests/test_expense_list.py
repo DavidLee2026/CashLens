@@ -84,11 +84,22 @@ def test_formula_lines_are_not_a_list():
     assert out["is_list"] is False
 
 
-def test_one_or_two_amounts_are_not_a_list():
-    """一句话里顺带一个数、或两句记账，不许被清单解析抢走。"""
+def test_one_amount_line_is_not_a_list():
+    """一句话里顺带一个数，不许被清单解析抢走（单行照旧走模型/规则层）。"""
     assert expense_list.parse("打车 28")["is_list"] is False
-    assert expense_list.parse("打车 28\n午饭 45")["is_list"] is False
     assert expense_list.parse("阿明今天 8 小时，时薪 50")["is_list"] is False
+
+
+def test_two_lines_each_with_an_amount_is_a_list():
+    """两行各带一笔金额＝两笔账，按清单走（金额与合计由代码给）。
+
+    2026-10-20 放宽：客户给的「逗号 / 冒号」例子就是两行两条，旧门槛（≥3 笔）
+    会把这种小清单判成"不是清单"，又退回让模型自己拆。
+    """
+    out = expense_list.parse("打车 28\n午饭 45")
+    assert out["is_list"] is True
+    assert [i["amount_cents"] for i in out["items"]] == [2800, 4500]
+    assert out["total_cents"] == 7300
 
 
 def test_total_line_is_not_an_item():
@@ -206,3 +217,103 @@ def test_image_stage_copy_says_it_is_a_list():
     assert "费用清单" in st["recognized"] and "12" in st["recognized"]
     assert "9980.00" in st["processed"]
     assert "3 行没标金额" in st["how"]
+
+
+# ─── 真人书写习惯（2026-10-20 客户口述的三种格式 + 口语金额）──────────
+
+def test_name_and_price_on_separate_lines():
+    """格式一：名称一行、金额一行（复制粘贴与截图 OCR 最常见的换行）。
+
+    客户原话：「还会比如说会有换行的格式」。他的例子（第 3 行是粘贴时把两行粘在一起的）：
+        3个n6三脚架 / 100 / 大监180Fx3+16-35一套配背夹 / 250
+    """
+    out = expense_list.parse("""3个n6三脚架
+100
+大监180Fx3+16-35一套配背夹
+250""")
+    assert out["is_list"] is True
+    assert [(i["label"], i["amount_cents"]) for i in out["items"]] == [
+        ("3个n6三脚架", 10000), ("大监180Fx3+16-35一套配背夹", 25000)]
+    assert out["pair_lines"] == 2, "这两条是靠换行配出来的，要能在结果里看出来"
+
+
+def test_comma_between_name_and_price():
+    """格式二：中英文逗号都行（「一套调音台配4手持话筒 ， 500」）。"""
+    out = expense_list.parse("""一套调音台配4手持话筒 ， 500
+1台电视机和移动支架配1个电小二，150""")
+    assert out["is_list"] is True
+    assert [(i["label"], i["amount_cents"]) for i in out["items"]] == [
+        ("一套调音台配4手持话筒", 50000), ("1台电视机和移动支架配1个电小二", 15000)]
+
+
+def test_colon_between_name_and_price():
+    """格式三：冒号后面是价格（半角 / 全角都要认）。"""
+    out = expense_list.parse("""4个摄像: 4000
+2个摄像助理：1000""")
+    assert out["is_list"] is True
+    assert [(i["label"], i["amount_cents"]) for i in out["items"]] == [
+        ("4个摄像", 400000), ("2个摄像助理", 100000)]
+
+
+def test_spoken_amounts_k_wan_qian():
+    """不带单位、用口语写金额：「1K」「1K5」「1.5k」「3千」「1万5」「2w」。"""
+    out = expense_list.parse("""三脚架 1K
+灯光 1K5
+人工 3千
+场地 1.5k
+物料 2w
+合计 6万""")
+    assert [(i["label"], i["amount_cents"]) for i in out["items"]] == [
+        ("三脚架", 100000), ("灯光", 150000), ("人工", 300000),
+        ("场地", 150000), ("物料", 2000000)]
+    assert out["total_cents"] == 2700000, "合计行不进条目（重复记账），金额由代码加"
+
+
+def test_wattage_is_not_wan():
+    """「灯光1200w 四套 1000」里的 1200w 是瓦数，不是 1200 万。"""
+    out = expense_list.parse("""灯光1200w 四套 1000
+3个n6三脚架 100
+4个摄像 4000""")
+    assert [(i["label"], i["amount_cents"]) for i in out["items"]] == [
+        ("灯光1200w 四套", 100000), ("3个n6三脚架", 10000), ("4个摄像", 400000)]
+    assert expense_list._amount_cents("1200", "w", "") == 0, "瓦数不给金额"
+
+
+def test_amount_line_does_not_steal_the_next_name():
+    """金额行只能配给**上一行**的名称；配不上就丢掉，别把下一行的名称吃掉。"""
+    out = expense_list.parse("""3个n6三脚架
+100
+4个摄像""")
+    assert out["is_list"] is False, "只有一对、且有一行没金额 → 不当清单"
+    assert out["items"] == [{"label": "3个n6三脚架", "amount_cents": 10000,
+                             "direction": "expense"}]
+    assert any("4个摄像" in s for s in out["skipped"]), "没等到金额的名称行要如实列出来"
+
+
+def test_merged_name_ending_with_separator_is_not_an_item():
+    """「Fx3+16-35」这种半截名称（以 + 或 - 结尾）不当条目，交给换行配对。"""
+    out = expense_list.parse("""Fx3+16-35
+250
+3个n6三脚架
+100""")
+    labels = [i["label"] for i in out["items"]]
+    assert labels == ["Fx3+16-35", "3个n6三脚架"], "名称是整行，不该被切掉尾巴当金额"
+    assert [i["amount_cents"] for i in out["items"]] == [25000, 10000]
+
+
+def test_screenshot_with_name_and_price_on_separate_lines(tmp_path, monkeypatch, monkeypatch_recognize):
+    """截图 OCR 常把「名称」「价格」拆成两行：图片路径也必须按换行配对，不能一条不建。"""
+    from app.services import intake
+
+    monkeypatch_recognize({
+        "doc_kind": "list", "amount": 0,
+        "text_lines": ["3个n6三脚架", "100", "大监1", "80",
+                       "4个摄像", "4000", "2个摄像助理", "1000"],
+        "orders": [{"at": "", "status": "", "amount": 100.0, "name": "3个n6三脚架"}],
+        "items": [], "note": "不是票据，是清单截图",
+    })
+    intake.ingest(tmp_path, [{"name": "清单.png", "rel_path": "清单.png", "content": b"x"}])
+    drafts = pending.list_all(tmp_path)
+    assert len(drafts) == 4
+    assert sum(d["amount_cents"] for d in drafts) == 518000
+    assert all(d["note"].startswith("清单行：") for d in drafts)

@@ -183,11 +183,11 @@ def resolve_incoming(data_dir: str | Path, ref: str | None = None) -> tuple[str,
     ⚠️ 2026-09-26 改（欠账 E 组 18）：原先"没说项目"会落到**表里第一个项目**。后果是账会
     悄悄进到随便某个项目里（真实数据里是随手建的 `121213`），而且草稿生成时项目就写死了、
     确认时改不了、入账后也改不了 —— 用户看不见、也纠正不了。空 id 在界面上是明确可见的
-    「未归项目」（总账户），且确认环节可以挑项目。
+    「未归项目」，且确认环节可以挑项目。
     """
     s = str(ref or "").strip()
     if not s:
-        return "", "这笔先放在「未归项目」（总账户），确认时可以选具体项目。"
+        return "", "这笔先放在「未归项目」，确认时可以选具体项目。"
     pid = resolve(data_dir, s)
     if pid is None:
         row = create(data_dir, s)

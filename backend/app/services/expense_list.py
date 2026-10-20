@@ -32,33 +32,85 @@ import re
 
 from . import categories
 
-# 行尾金额：`名称 …… 100` / `名称 …… 100 元` / `名称 …… 1,000.00 块`
+# 行尾金额：`名称 …… 100` / `名称，100` / `名称: 1K` / `名称 1万5`
+# 金额的写法（真人怎么写就怎么认，见 2026-10-20 客户口述）：
+#   100 / 1,000.00 / 100元 / 100块 / 1k / 1K5 / 1.5k / 3千 / 1万 / 1万5 / 2w
+_NUM = r"\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"
+# 单位必须**紧跟在数字后面**：`1k` / `1k5` / `1万5` / `100元`；裸数字没有尾数这一说
+# （否则「大监1  80」会被拆成 1 + 尾数 80 —— 实测踩到过）
+_AMOUNT_TAIL = (r"(?:(?P<unit>亿元|万元|万|千|k|K|w|W)(?P<tail>\d{1,2})?"
+                r"|(?P<unit_simple>元|块钱|块))?")
 _TAIL_AMOUNT_RE = re.compile(
-    r"^(?P<label>.*?)[\s:：\-—–、,，=]*"
-    r"(?P<num>\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"
-    r"\s*(?P<unit>亿元|万元|万|元|块钱|块)?\s*$"
+    rf"^(?P<label>.*?)(?P<sep>[\s:：\-—–、,，=]*)(?P<num>{_NUM})\s*{_AMOUNT_TAIL}\s*$"
 )
+# 「金额」前面有没有一个真正的分隔（空格 / 逗号 / 冒号）——「Fx3+16-35」这种型号里的
+# 「-35」不是金额，只是编号；没有分隔且名称以字母数字结尾时按名称行处理。
+_SEP_RE = re.compile(r"[\s,，:：、]")
+# 整行就是一个金额（「100」/「1K5」/「¥500」）：配给**上一行**的名称 —— 真人复制粘贴时
+# 常常「名称一行、价格一行」（客户原话：「还会比如说会有换行的格式」）
+_AMOUNT_ONLY_RE = re.compile(rf"^[¥￥]?\s*(?P<num>{_NUM})\s*{_AMOUNT_TAIL}$")
+
+
+def _unit_of(m) -> tuple[str, str]:
+    """取出 (单位, 尾数)：`unit` 是 k/万 那一档，`unit_simple` 是元/块。"""
+    return (m.groupdict().get("unit") or m.groupdict().get("unit_simple") or "",
+            m.groupdict().get("tail") or "")
 # 只是一串数字/日期的行（「2026-10-20」「12:30」「3」）：不是条目，别当金额
 _BARE_RE = re.compile(r"^[\d\s\-/.:：年月日]+$")
 # 用户写在清单里的「要求」句（不是条目，也别进"没标金额"的统计）
 _INSTRUCTION_RE = re.compile(r"(帮我|帮忙|请|合计|总计|一共|总共|多少|算一|算个|报价|核对|谢谢|看看)")
 # 「合计 9980」「小计：3000」这类行是**合计行**，不是条目 —— 收进去就是重复记账
 _TOTAL_LABEL_RE = re.compile(r"^(合计|小计|总计|共计|一共|总共|总额|合计金额|总价)\s*[:：]?$")
+# 名称没收干净（以连接符/加号结尾）→ 它其实是"半截名称"，交给换行配对，别当条目
+_LABEL_TAIL_JUNK = "+-—–/／:：、,，"
 # 收入方向（清单也可能是"客户回款清单"）：只在**条目名**里出现这些词才改方向，不猜
 _INCOME_HINTS = ("收到", "收款", "回款", "进账", "尾款", "付给我们", "付款给我", "到账")
 _MAX_CENTS = 1_000_000_00  # 单条上限 ¥100 万：超过基本是把日期/编号读成了金额
 
 
-def _to_cents(num: str, unit: str = "") -> int:
+def _amount_cents(num: str, unit: str = "", tail: str = "") -> int:
+    """把「金额写法」换算成分。
+
+    支持真人习惯：`1k`=1000、`1K5`=1500、`1.5k`=1500、`3千`=3000、`1万`=10000、
+    `1万5`=15000、`2w`=20000（w 只认 1–2 位整数，`1200w` 是**瓦数**不是 2 亿）。
+    `tail` 是「1k5 / 1万5」里那个尾数：按位数缩小后加到主数上（1k5 = 1000 + 5×100）。
+    """
+    raw = (num or "").replace(",", "").strip()
+    if not raw:
+        return 0
     try:
-        value = float(num.replace(",", ""))
+        value = float(raw)
     except (TypeError, ValueError):
         return 0
-    if unit.startswith("万"):
-        value *= 10000
-    elif unit.startswith("亿"):
-        value *= 100000000
+    u = (unit or "").strip()
+    low = u.lower()
+    if low == "w" and len(raw.split(".")[0]) > 2:
+        return 0          # 「1200w 四套」是灯光瓦数，不是钱
+    scale = {
+        "亿": 100_000_000, "亿元": 100_000_000,
+        "万": 10_000, "万元": 10_000, "w": 10_000,
+        "千": 1_000, "k": 1_000,
+    }.get(low) or {
+        "亿": 100_000_000, "亿元": 100_000_000,
+        "万": 10_000, "万元": 10_000,
+        "千": 1_000,
+    }.get(u, 0)
+    if tail and not scale:
+        return 0          # 「100元5」这种不是金额
+    if scale:
+        value *= scale
+        if tail:
+            value += int(tail) * scale / (10 ** len(tail))
     return int(round(value * 100))
+
+
+def _valid_label(label: str) -> bool:
+    """名称得像个人写的条目：「3个n6三脚架」是，「2026-10-」不是。"""
+    if not label:
+        return False
+    if _BARE_RE.match(label) or _TOTAL_LABEL_RE.match(label):
+        return False
+    return label[-1] not in _LABEL_TAIL_JUNK
 
 
 def _direction(label: str) -> str:
@@ -68,9 +120,14 @@ def _direction(label: str) -> str:
 def parse(text_lines) -> dict:
     """把「清单文本」拆成 [{label, amount_cents, direction}] + 没标金额的行。
 
+    三种真人写法都认（客户 2026-10-20 口述的真实格式）：
+        ① 一行一笔：`名称 + 分隔 + 金额`（空格 / 逗号 / 冒号 / 制表符都行）
+        ② 名称一行、金额一行（复制粘贴与截图 OCR 常见的换行格式）→ 配对
+        ③ 金额用口语写：`1k` / `1K5` / `1.5k` / `3千` / `1万5` / `2w`
+
     返回：
         {"items": [...], "skipped": [...], "is_list": bool, "total_cents": int,
-         "expense_cents": int, "income_cents": int}
+         "expense_cents": int, "income_cents": int, "pair_lines": int}
     `skipped` 只放**看起来像条目但没标金额**的行（要求句、空行不算）。
     """
     if isinstance(text_lines, str):
@@ -81,7 +138,13 @@ def parse(text_lines) -> dict:
     items: list[dict] = []
     skipped: list[str] = []
     lines = 0
-    formula = False  # 出现「=」的算式行 → 这一整段归 v3.8 的算式逻辑，不按清单拆
+    pairs = 0         # 通过「名称一行 / 金额一行」配对出来的条数
+    formula = False   # 出现「=」的算式行 → 这一整段归 v3.8 的算式逻辑，不按清单拆
+    pending = ""      # 上一行的名称：等着下一行的纯金额
+
+    def push(label: str, cents: int) -> None:
+        items.append({"label": label, "amount_cents": cents, "direction": _direction(label)})
+
     for raw in raw_lines:
         line = str(raw or "").strip()
         if not line:
@@ -89,30 +152,76 @@ def parse(text_lines) -> dict:
         lines += 1
         if "=" in line or "＝" in line:
             formula = True
+            pending = ""
             continue
+
+        # ② 整行就是一个金额：配给上一行的名称（名称已经被前面某行拿走了就不配）
+        only = _AMOUNT_ONLY_RE.match(line)
+        if only:
+            _u, _t = _unit_of(only)
+            cents = _amount_cents(only.group("num"), _u, _t)
+            if pending and 0 < cents <= _MAX_CENTS:
+                # 名称行可能以冒号/逗号收尾（「2个摄像助理：」）—— 存成标签时切掉
+                push(pending.strip(" \t:：-—–、,，=") or pending, cents)
+                pairs += 1
+                pending = ""
+                continue
+            if pending:            # 上一行没等到金额（这行是坏数字），把它记成"没标金额"
+                skipped.append(pending)
+                pending = ""
+            continue               # 孤零零的金额行：可能是合计/无关数字，不当条目
+
         m = _TAIL_AMOUNT_RE.match(line)
         if m:
             label = (m.group("label") or "").strip(" \t:：-—–、,，=")
-            cents = _to_cents(m.group("num"), m.group("unit") or "")
-            if (label and not _BARE_RE.match(label) and not _TOTAL_LABEL_RE.match(label)
-                    and 0 < cents <= _MAX_CENTS):
-                items.append({"label": label, "amount_cents": cents,
-                              "direction": _direction(label)})
+            _u, _t = _unit_of(m)
+            cents = _amount_cents(m.group("num"), _u, _t)
+            sep = m.group("sep") or ""
+            # 「大监1」「Fx3+16-35」这种以数字收尾的名称：**中间没有空格/逗号/冒号**、
+            # 又没有单位、数字还很短时，末尾那位是名称的一部分（1 号机 / 型号 35），不是金额。
+            # 判据保守到只影响「粘连 + 短数字 + 无单位」这一种写法；带分隔或带单位的照旧算钱。
+            num_digits = m.group("num").replace(",", "").split(".")[0]
+            no_sep = not _SEP_RE.search(sep)
+            no_unit = not (_unit_of(m)[0] or "")
+            glued_model = bool(label) and no_sep and no_unit and (
+                label[-1].isdigit() or len(num_digits) <= 2)
+            if _valid_label(label) and 0 < cents <= _MAX_CENTS and not glued_model:
+                push(label, cents)
+                if pending:
+                    skipped.append(pending)
+                pending = ""
                 continue
             # 形如「2026-10-20」「12:30」「合计 3000」：不是条目，也不算"没标金额"
             if not label or _BARE_RE.match(label) or _TOTAL_LABEL_RE.match(label):
+                pending = ""
                 continue
-        if not _INSTRUCTION_RE.search(line):
-            skipped.append(line)
 
-    is_list = (not formula) and len(items) >= 3 and len(items) * 2 >= max(lines, 1)
+        # ③ 名称行（这一行没有金额）：先记住，下一行如果是纯金额就配成一条
+        if _INSTRUCTION_RE.search(line):
+            continue
+        if pending:
+            skipped.append(pending)
+        pending = line
+
+    if pending:
+        skipped.append(pending)
+
+    is_list = (not formula) and (
+        # ① 常见清单：≥3 笔，且金额行占非空行一半以上
+        (len(items) >= 3 and len(items) * 2 >= max(lines, 1))
+        # ② 每一行都是一笔（2 行起）：「打车 28 / 午饭 45」这种也按清单走，
+        #    结果与模型路径一样是"一行一条待确认"，但金额与合计由代码给
+        or (len(items) >= 2 and lines == len(items))
+        # ③ 「名称一行 / 金额一行」交替到底（客户的换行格式）：2 组起
+        or (len(items) >= 2 and pairs == len(items) and lines == 2 * len(items))
+    )
     if is_list:
         _assign_categories(items)
     expense = sum(i["amount_cents"] for i in items if i["direction"] == "expense")
     income = sum(i["amount_cents"] for i in items if i["direction"] == "income")
     return {"items": items, "skipped": skipped, "is_list": is_list,
             "total_cents": expense + income, "expense_cents": expense,
-            "income_cents": income,
+            "income_cents": income, "pair_lines": pairs,
             "context_filled": sum(1 for i in items if i.get("category_from") == "context")}
 
 
