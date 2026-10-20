@@ -1924,10 +1924,7 @@ export default function Workbench() {
     : 0;
   const fcTooWide = fcBandWidthYuan >= FC_WIDE_YUAN;
   const acct = accountTotals(projView);
-  /* 空账本（2026-10-20，A 档 ①）：示例 chips 与示例卡**只在这个状态出现**。
-     判据用两个源：界面加载的 events 与账本真实笔数 acct.count —— 任一个有数就不算空，
-     免得"加载了一窗但总量为 0"这种中间态把示例又弹出来。 */
-  const isEmptyLedger = events.length === 0 && acct.count === 0;
+
   const activeProjectName = activeProject
     ? (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject)
     : "未归项目（还没有项目）";
@@ -2489,35 +2486,6 @@ export default function Workbench() {
                 核对表内发票
               </label>
             </div>
-            {/* 空账本时的三个示例（2026-10-20，A 档 ①）：新用户打开面对空输入框，不知道该说什么。
-                规则：记账那句**只预填**（点了不发，免得替他记一笔假的）；两句查询点了直接发。
-                记下第一笔后整行消失 —— 它是脚手架，不是广告牌。 */}
-            {isEmptyLedger && (
-              <div className="start-chips" role="group" aria-label="示例：可以这样说">
-                {[
-                  { text: "昨天买画材 200", fill: true },
-                  { text: "这个月花了多少", fill: false },
-                  { text: "上个月那个项目赚没赚", fill: false },
-                ].map((c) => (
-                  <button
-                    key={c.text}
-                    type="button"
-                    className="sc-chip"
-                    disabled={!apiOk || busy}
-                    onClick={() => {
-                      if (c.fill) {
-                        setText(c.text);
-                        inputRef.current?.focus();
-                      } else {
-                        void send(c.text);
-                      }
-                    }}
-                  >
-                    {c.text}
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="inputrow">
               <div className="attach">
                 <span className="tip">

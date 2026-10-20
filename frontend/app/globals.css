@@ -661,13 +661,6 @@ button{font-family:inherit}
 /* 来源票据（2026-10-20）：一句小字，不能抢金额的视线；文件名可能很长，截断但悬停可看全名 */
 .ev-src{color:var(--text-2);overflow-wrap:anywhere}
 
-/* 空账本的示例句（2026-10-20）：只在账本为空时出现，记下第一笔就消失。
-   刻意做成三个安静的小胶囊 —— 不要引导语、不要卡片、不要第二段说明文字。 */
-.start-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 0 8px}
-.sc-chip{border:1px solid var(--border);background:var(--white);border-radius:999px;
-  padding:4px 10px;font-size:12px;color:var(--text);cursor:pointer;font-family:inherit}
-.sc-chip:hover{border-color:var(--brand);color:var(--brand)}
-.sc-chip:disabled{opacity:.5;cursor:not-allowed}
 
 /* 关账对账（2026-10-20，A 档 ②）：三栏 + 缺票提示；数字与工作台同口径 */
 .rc{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:12px 0}
