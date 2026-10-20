@@ -186,6 +186,27 @@ def create_code(label: str) -> tuple[str, str]:
     return code, slug
 
 
+def rename(slug: str, label: str) -> str | None:
+    """改租户显示名（只改 tenants.json 的 label）。
+
+    账本、目录、slug、会话签名都不动 —— 改名只影响界面上怎么称呼这本账。
+    空名或超长返回 None（由 API 层报 422）。
+    """
+    label = (label or "").strip()
+    if not label or len(label) > 20:
+        return None
+    rows = _load()
+    hit = False
+    for r in rows:
+        if r["slug"] == slug:
+            r["label"] = label
+            hit = True
+    if not hit:
+        return None
+    _save(rows)
+    return label
+
+
 def list_tenants() -> list[dict]:
     """对外视图：绝不含 salt 与 hash。"""
     return [{"slug": r["slug"], "label": r.get("label", ""),

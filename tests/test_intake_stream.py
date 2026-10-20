@@ -611,3 +611,18 @@ def test_workbench_intake_request_carries_the_reconcile_switch():
         "跳过核对时要在结果里如实说明，并把它与「核对了但一张都没对」区分开"
     )
     assert "b.reconcile.checked > 0" in src, "只有真核对过（checked > 0）才显示「双源核对 X/Y」"
+
+
+def test_stream_start_carries_project_before_first_file_is_processed(tmp_path):
+    """文件夹导入时，project 必须在 start 事件里就出现（左栏先出项目名）。"""
+    gen = _intake_stream_events(
+        [{"name": "x.jpg", "rel_path": "示例项目A/x.jpg", "content": b""}],
+        data_dir=tmp_path,
+    )
+    try:
+        first = json.loads(next(gen))
+    finally:
+        gen.close()  # 只验 start，不真的跑识别
+    assert first["stage"] == "start"
+    assert first["project_name"] == "示例项目A"
+    assert first["project_id"]

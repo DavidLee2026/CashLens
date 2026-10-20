@@ -194,3 +194,23 @@ def test_local_mode_data_stays_in_root(monkeypatch, tmp_path):
         assert _one_expense(c).status_code == 200
     assert (tmp_path / "finance_events.jsonl").exists()      # 还是老位置
     assert not (tmp_path / "tenants").exists()
+
+
+def test_rename_updates_label_without_touching_ledger(client):
+    """登录后改名：只改称呼，账本/目录/slug/会话都不动。"""
+    code, slug = tenancy.create_code("旧称呼")
+    assert _login(client, code).status_code == 200
+    assert _one_expense(client).status_code == 200
+    before = (client.get("/api/events").json().get("events") or [])
+
+    r = client.post("/api/session/rename", json={"label": "新称呼"})
+    assert r.status_code == 200 and r.json()["label"] == "新称呼"
+    assert client.get("/api/session/me").json()["label"] == "新称呼"
+    assert tenancy.get_tenant(slug)["label"] == "新称呼"
+    # 账本还在、slug 没变、会话仍然有效
+    assert client.get("/api/events").status_code == 200
+    assert len(client.get("/api/events").json().get("events") or []) == len(before)
+    assert tenancy.get_tenant(slug)["slug"] == slug
+
+    assert client.post("/api/session/rename", json={"label": "   "}).status_code == 422
+    assert client.post("/api/session/rename", json={"label": "x" * 21}).status_code == 422

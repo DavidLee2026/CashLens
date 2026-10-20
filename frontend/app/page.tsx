@@ -296,7 +296,8 @@ const STAGE_LABELS: [keyof IntakeStages, string][] = [
 
 /** 流式导入的进度事件（NDJSON 一行一个，对应后端 POST /api/intake/stream）。 */
 type IntakeEvent =
-  | { stage: "start"; index: number; total: number; file: string; rel_path: string }
+  | { stage: "start"; index: number; total: number; file: string; rel_path: string;
+      project_id?: string; project_name?: string }
   | { stage: "tick"; index: number; total: number; file: string; elapsed: number; note: string }
   | { stage: "file_done"; index: number; total: number; file: string; project_name: string;
       draft_count: number; identified_total_cents: number; stages?: IntakeStages; errors?: string[] }
@@ -546,6 +547,10 @@ export default function Workbench() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  /* 显示名：登录后可改（只改 tenants.json 的 label，不动账本）。 */
+  const [displayName, setDisplayName] = useState("");
+  const [displayNameBusy, setDisplayNameBusy] = useState(false);
+  const [displayNameMsg, setDisplayNameMsg] = useState("");
   /* 历史消息是否已从 localStorage 读完：没读完不许写回，否则会用首屏的
      默认开场白把真实历史覆盖掉（读写两个 effect 的时序问题）。 */
   const [msgsReady, setMsgsReady] = useState(false);
@@ -832,6 +837,23 @@ export default function Workbench() {
     };
     window.addEventListener("cl-auth-required", onAuthRequired);
     return () => window.removeEventListener("cl-auth-required", onAuthRequired);
+  }, []);
+
+  /* 点空白处收起下拉/浮层（2026-10-20 用户要求）。
+     用 data-pop / data-pop-trigger 标记，而不是逐个 ref：
+     新增一个菜单时只要打上标记，就自动获得"点外面关闭"。 */
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t || t.closest("[data-pop]") || t.closest("[data-pop-trigger]")) return;
+      setPickOpen(false);
+      setAttachOpen(false);
+      setProjMenuId("");
+      setDeletingId("");
+      setLoginOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
   useEffect(() => {
@@ -1217,11 +1239,41 @@ export default function Workbench() {
     window.location.reload();
   }
 
+  /** 登录后改显示名：只改 tenants.json 的 label，账本/项目/目录都不动。 */
+  async function saveDisplayName() {
+    const label = displayName.trim();
+    if (!label || label === session?.label) return;
+    setDisplayNameBusy(true);
+    setDisplayNameMsg("");
+    try {
+      const r = await fetch("/api/session/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => null) as { detail?: string } | null;
+        setDisplayNameMsg(body?.detail || `保存失败（HTTP ${r.status}）`);
+        return;
+      }
+      const d = await r.json() as { label: string };
+      setSession((s) => (s ? { ...s, label: d.label } : s));
+      setDisplayName(d.label);
+      setDisplayNameMsg("已保存。右上角的称呼已更新。");
+    } catch {
+      setDisplayNameMsg("保存失败：请确认后端在运行后重试。");
+    } finally {
+      setDisplayNameBusy(false);
+    }
+  }
+
   /** 打开设置弹窗（每次都从第 0 步开始，不记住上次停在哪一步）。 */
   function openSettings() {
     setResetStep(0);
     setResetSeed(false);
     setResetMsg("");
+    setDisplayName(session?.label ?? "");
+    setDisplayNameMsg("");
     setSettingsOpen(true);
   }
 
@@ -1435,6 +1487,9 @@ export default function Workbench() {
        于是每刷一次进度就**新建一个导入框**，他看到的是一模一样的导入框反复出现、
        而且把对话挤得乱七八糟。改成按 id 找到自己那一条、原地替换，位置永远不动。 */
     const importId = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    /* 左栏项目名要**先出现**：后端在 start 之前已把文件夹对应的项目建好，
+       收到第一个 start 就刷一次项目列表，而不是等整批跑完（2026-10-20 用户要求）。 */
+    let projectRefreshed = false;
     /* 取消句柄：点「取消」= abort 这条流。后端那个事件流是**拉驱动**的，断连之后
        后面的文件一个都不会开始（后端有测试钉住这条）；正在读的那个会跑完。 */
     const ac = new AbortController();
@@ -1491,6 +1546,10 @@ export default function Workbench() {
             blocks = blocks.slice(0, ev.index - 1);
             blocks.push({ file: ev.file, done: false, stages: blank() });
             paint(`正在读第 ${ev.index}/${ev.total} 个：${ev.file}`);
+            if (!projectRefreshed && ev.project_name) {
+              projectRefreshed = true;
+              void refresh();
+            }
           } else if (ev.stage === "tick") {
             /* 心跳：后端还在跑这个文件（真机实测一张报销表要 239 秒）。
                显示**真实已等秒数**与正在做的动作，不显示假百分比；
@@ -1730,7 +1789,7 @@ export default function Workbench() {
                     </button>
                   </>
                 ) : loginOpen ? (
-                  <span className="login-edit">
+                  <span className="login-edit" data-pop="1">
                     <input
                       value={nameText}
                       onChange={(e) => setNameText(e.target.value)}
@@ -1748,6 +1807,7 @@ export default function Workbench() {
                 ) : (
                   <button
                     className="btn-mini"
+                    data-pop-trigger="1"
                     onClick={() => { setNameText(user); setLoginOpen(true); }}
                     title={user ? "点击修改用户名；清空后保存即退出" : "输入一个用户名，只存在这台电脑上"}
                   >
@@ -1916,7 +1976,10 @@ export default function Workbench() {
                       )}
                     </div>
                   )}
-                  {m.pending && m.pending.length > 0 && (
+                  {/* 2026-10-20：确认信息统一收到输入区上方的「待确认」卡里，
+                      对话气泡不再重复挂一份（用户：不要左边一个、对话里又一个）。
+                      只有全局卡还没加载到草稿时，才用气泡里这份兜底。 */}
+                  {m.pending && m.pending.length > 0 && pendingList.length === 0 && (
                     <div className="acts">
                       {m.pending.map((p) => (
                         <div className="act-row" key={p.id}>
@@ -1994,6 +2057,144 @@ export default function Workbench() {
                 </div>
               ))}
             </div>
+            {/* 待确认草稿：「识别 → 确认 → 入账」里的确认环节。
+                导入（拍票 / 拖表）产生的草稿不会出现在对话气泡里，这里是它们唯一的常驻入口；
+                归属可以在确认那一刻改（沿用 2026-09-26 定的规则）。2026-09-28 补。 */}
+            {pendingList.length > 0 && (
+              <section className="pending-inbox">
+                <div className="sect-head">
+                  <h3>待确认（{pendingList.length}）</h3>
+                  {batchAsk ? (
+                    <span className="sect-note">你点了才算记上</span>
+                  ) : (
+                    <span className="sect-acts">
+                      <button
+                        className="btn-mini"
+                        disabled={batchBusy || actingIds.size > 0}
+                        title="一次确认多笔：仍然由你点，机器不会自动入账；会先把总笔数、总额与带「需核对」提示的笔数摆出来"
+                        onClick={() => setBatchAsk("accept")}
+                      >
+                        {batchBusy ? "处理中…" : "全部记上"}
+                      </button>
+                      <button
+                        className="btn-mini"
+                        disabled={batchBusy || actingIds.size > 0}
+                        title="一次丢弃多笔（拖错文件夹时用）：只删待确认草稿，账本不受影响，需要时把文件重新拖进来即可"
+                        onClick={() => setBatchAsk("decline")}
+                      >
+                        全部不要
+                      </button>
+                    </span>
+                  )}
+                </div>
+                {batchAsk === "accept" && (
+                  <div className="pd-confirm">
+                    <p>
+                      将 <b>{pendingList.length}</b> 笔入账：支出 <b>{yuan(batchExpense)}</b>
+                      {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
+                    </p>
+                    <div className="pd-confirm-acts">
+                      <button className="btn-mini ok" disabled={batchBusy}
+                              onClick={() => actBatch(pendingList.map((x) => x.id))}>
+                        确认入账
+                      </button>
+                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {batchAsk === "decline" && (
+                  <div className="pd-confirm">
+                    <p>
+                      将丢弃 <b>{pendingList.length}</b> 笔待确认草稿：支出 <b>{yuan(batchExpense)}</b>
+                      {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
+                      <b>账本不受影响</b>——这些本来就还没入账；需要时把文件重新拖进来即可。
+                    </p>
+                    <div className="pd-confirm-acts">
+                      <button className="btn-mini danger" disabled={batchBusy}
+                              onClick={() => actBatchDecline(pendingList.map((x) => x.id))}>
+                        确认全部不要
+                      </button>
+                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
+                        返回
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {(pendingOpen ? pendingList : pendingList.slice(0, 4)).map((p) => (
+                  <div className="pd-row" key={p.id}>
+                    <div className="pd-main">
+                      <span className={`pd-amt num ${p.direction === "income" ? "in" : ""}`}>
+                        {p.direction === "income" ? "+" : "−"}{yuan(p.amount_cents)}
+                      </span>
+                      <span
+                        className="pd-meta"
+                        title={[
+                          p.source ? `通道：${p.source}` : "",
+                          p.date ? "" : `导入于 ${p.created ? p.created.slice(0, 10) : "未知"}`,
+                          p.note || "",
+                        ].filter(Boolean).join(" · ")}
+                      >
+                        {/* 分类是「待确认」时不当分类显示 —— 它只是"机器没判出来"，
+                            要不要给它一个分类由用户在下面那行下拉里定。 */}
+                        {isUnconfirmed(p.category) ? "分类待定" : p.category}
+                        {` · ${p.date || "日期待补"}`}
+                        {/* 第四段必须标出它到底是什么：报销表那一列装的是归属（部门/模块），
+                            不是商户。此前不标注，界面上会显示成「−¥17.88 餐饮 · 09-28 · 后端」，
+                            看起来像商户叫「后端」（2026-09-28 用户当场问这是啥）。 */}
+                        {p.counterparty
+                          ? ` · ${p.source === "报销表" ? "表内归属" : "商户"} ${p.counterparty}`
+                          : ""}
+                        {needsReview(p) && <span className="pd-warn">需核对</span>}
+                      </span>
+                    </div>
+                    <div className="pd-acts">
+                      {/* 「待确认」的行：给一个分类下拉。机器没判出来的分类只有人能补 ——
+                          选了就按选的入账；不选就如实落「未分类」，绝不把占位符当分类写进账本。 */}
+                      {isUnconfirmed(p.category) && cats && (
+                        <select
+                          className="proj-pick"
+                          value={draftCategory[p.id] ?? ""}
+                          onChange={(e) => setDraftCategory((s) => ({ ...s, [p.id]: e.target.value }))}
+                          aria-label={`给「${yuan(p.amount_cents)}」这笔选一个分类`}
+                          disabled={actingIds.has(p.id)}
+                        >
+                          <option value="">选择分类…</option>
+                          {cats.expense.filter((x) => x !== cats.unconfirmed).map((x) => (
+                            <option key={x} value={x}>{x}</option>
+                          ))}
+                        </select>
+                      )}
+                      <select
+                        className="proj-pick"
+                        value={draftProject[p.id] ?? p.project ?? ""}
+                        onChange={(e) => setDraftProject((s) => ({ ...s, [p.id]: e.target.value }))}
+                        aria-label={`「${p.category} ${yuan(p.amount_cents)}」归入哪个项目`}
+                        disabled={actingIds.has(p.id)}
+                      >
+                        <option value="">未归项目（总账户）</option>
+                        {(projView?.projects ?? []).map((x) => (
+                          <option key={x.id} value={x.id}>{x.name}</option>
+                        ))}
+                      </select>
+                      <button className="btn-mini ok" disabled={actingIds.has(p.id)} onClick={() => act(p, true)}>
+                        {actingIds.has(p.id) ? "处理中…" : "确认入账"}
+                      </button>
+                      <button className="btn-mini" disabled={actingIds.has(p.id)} onClick={() => act(p, false)}>
+                        {actingIds.has(p.id) ? "处理中…" : "不要"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {pendingList.length > 4 && (
+                  <button className="btn-mini pd-more" onClick={() => setPendingOpen((v) => !v)}>
+                    {pendingOpen ? "收起" : `展开其余 ${pendingList.length - 4} 笔`}
+                  </button>
+                )}
+              </section>
+            )}
+
             {/* 输入区整组（口径条 + 输入框 + 底部说明）包一层：整页只有一个滚动条之后，
                 这一组用 sticky 钉在视口底部，滚动长对话时输入框不会跑掉。 */}
             <div className="composer">
@@ -2019,6 +2220,7 @@ export default function Workbench() {
                   <button
                     type="button"
                     className="btn-plus"
+                    data-pop-trigger="1"
                     onClick={() => setAttachOpen((v) => !v)}
                     disabled={!apiOk || intakeBusy}
                     aria-haspopup="menu"
@@ -2030,7 +2232,7 @@ export default function Workbench() {
                   <span className="tip-text">添加图片、票据文件，或整个文件夹</span>
                 </span>
                 {attachOpen && (
-                  <div className="attach-menu" role="menu">
+                  <div className="attach-menu" data-pop="1" role="menu">
                     <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); imageRef.current?.click(); }}>
                       图片或截图
                       <span className="am-sub">发票、小票、微信与支付宝截图</span>
@@ -2080,6 +2282,7 @@ export default function Workbench() {
                 <span className="tip">
                   <button
                     className="model-pick"
+                    data-pop-trigger="1"
                     onClick={() => setPickOpen((v) => !v)}
                     disabled={!apiOk || modelBusy || !!models?.locked}
                     aria-haspopup="listbox"
@@ -2105,7 +2308,7 @@ export default function Workbench() {
                   </span>
                 </span>
                 {pickOpen && models && !models.locked && (
-                  <div className="model-menu" role="group" aria-label="选择模型档位">
+                  <div className="model-menu" data-pop="1" role="group" aria-label="选择模型档位">
                     {models.tiers.map((t) => (
                       <div key={t.id}>
                         <button
@@ -2365,6 +2568,7 @@ export default function Workbench() {
                           <button
                             type="button"
                             className="btn-dots"
+                            data-pop-trigger="1"
                             title="改名 / 详情"
                             aria-label={`「${p.name}」的操作：改名、详情`}
                             aria-haspopup="menu"
@@ -2380,7 +2584,7 @@ export default function Workbench() {
                             ⋯
                           </button>
                           {projMenuId === p.id && (
-                            <div className="proj-menu" role="menu">
+                            <div className="proj-menu" data-pop="1" role="menu">
                               <button
                                 type="button"
                                 role="menuitem"
@@ -2406,12 +2610,13 @@ export default function Workbench() {
                                 onClick={() => { setProjMenuId(""); exportXlsx(p.id); }}
                                 title="只导出这个项目的明细与汇总"
                               >
-                                导出
+                                导出 Excel
                               </button>
                             </div>
                           )}
                           <button
                             className="btn-x"
+                            data-pop-trigger="1"
                             title="删除项目"
                             aria-label={`删除项目「${p.name}」`}
                             aria-expanded={deletingId === p.id}
@@ -2428,7 +2633,7 @@ export default function Workbench() {
                       </div>
                       {deletingId === p.id && (
                         /* 浮层：删除选择块不占文档流（原先会把左栏顶高一大截） */
-                        <div className="proj-pop row">
+                        <div className="proj-pop row" data-pop="1">
                           <div className="proj-del">
                             <div className="pd-title">
                               删除「{p.name}」？
@@ -2462,7 +2667,7 @@ export default function Workbench() {
                       )}
                       {renamingId === p.id && (
                         /* 浮层：改名表单不占文档流，位置就贴着这一行 */
-                        <div className="proj-pop row">
+                        <div className="proj-pop row" data-pop="1">
                           <div className="proj-edit">
                             <input
                               value={renameText}
@@ -2521,7 +2726,7 @@ export default function Workbench() {
                         </div>
                       </div>
                       {deletingId === "unassigned" && (
-                        <div className="proj-pop row">
+                        <div className="proj-pop row" data-pop="1">
                           <div className="proj-del">
                             <div className="pd-title">
                               清理「未归项目」名下的账？
@@ -2550,143 +2755,6 @@ export default function Workbench() {
               {projMsg && <div className="fc-note">{projMsg}</div>}
             </section>
 
-            {/* 待确认草稿：「识别 → 确认 → 入账」里的确认环节。
-                导入（拍票 / 拖表）产生的草稿不会出现在对话气泡里，这里是它们唯一的常驻入口；
-                归属可以在确认那一刻改（沿用 2026-09-26 定的规则）。2026-09-28 补。 */}
-            {pendingList.length > 0 && (
-              <section className="sect">
-                <div className="sect-head">
-                  <h3>待确认（{pendingList.length}）</h3>
-                  {batchAsk ? (
-                    <span className="sect-note">你点了才算记上</span>
-                  ) : (
-                    <span className="sect-acts">
-                      <button
-                        className="btn-mini"
-                        disabled={batchBusy || actingIds.size > 0}
-                        title="一次确认多笔：仍然由你点，机器不会自动入账；会先把总笔数、总额与带「需核对」提示的笔数摆出来"
-                        onClick={() => setBatchAsk("accept")}
-                      >
-                        {batchBusy ? "处理中…" : "全部记上"}
-                      </button>
-                      <button
-                        className="btn-mini"
-                        disabled={batchBusy || actingIds.size > 0}
-                        title="一次丢弃多笔（拖错文件夹时用）：只删待确认草稿，账本不受影响，需要时把文件重新拖进来即可"
-                        onClick={() => setBatchAsk("decline")}
-                      >
-                        全部不要
-                      </button>
-                    </span>
-                  )}
-                </div>
-                {batchAsk === "accept" && (
-                  <div className="pd-confirm">
-                    <p>
-                      将 <b>{pendingList.length}</b> 笔入账：支出 <b>{yuan(batchExpense)}</b>
-                      {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
-                    </p>
-                    <div className="pd-confirm-acts">
-                      <button className="btn-mini ok" disabled={batchBusy}
-                              onClick={() => actBatch(pendingList.map((x) => x.id))}>
-                        确认入账
-                      </button>
-                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {batchAsk === "decline" && (
-                  <div className="pd-confirm">
-                    <p>
-                      将丢弃 <b>{pendingList.length}</b> 笔待确认草稿：支出 <b>{yuan(batchExpense)}</b>
-                      {batchIncome > 0 && <> · 收入 <b>{yuan(batchIncome)}</b></>}。
-                      <b>账本不受影响</b>——这些本来就还没入账；需要时把文件重新拖进来即可。
-                    </p>
-                    <div className="pd-confirm-acts">
-                      <button className="btn-mini danger" disabled={batchBusy}
-                              onClick={() => actBatchDecline(pendingList.map((x) => x.id))}>
-                        确认全部不要
-                      </button>
-                      <button className="btn-mini" disabled={batchBusy} onClick={() => setBatchAsk(null)}>
-                        返回
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {(pendingOpen ? pendingList : pendingList.slice(0, 4)).map((p) => (
-                  <div className="pd-row" key={p.id}>
-                    <div className="pd-main">
-                      <span className={`pd-amt num ${p.direction === "income" ? "in" : ""}`}>
-                        {p.direction === "income" ? "+" : "−"}{yuan(p.amount_cents)}
-                      </span>
-                      <span
-                        className="pd-meta"
-                        title={[
-                          p.source ? `通道：${p.source}` : "",
-                          p.date ? "" : `导入于 ${p.created ? p.created.slice(0, 10) : "未知"}`,
-                          p.note || "",
-                        ].filter(Boolean).join(" · ")}
-                      >
-                        {/* 分类是「待确认」时不当分类显示 —— 它只是"机器没判出来"，
-                            要不要给它一个分类由用户在下面那行下拉里定。 */}
-                        {isUnconfirmed(p.category) ? "分类待定" : p.category}
-                        {` · ${p.date || "日期待补"}`}
-                        {/* 第四段必须标出它到底是什么：报销表那一列装的是归属（部门/模块），
-                            不是商户。此前不标注，界面上会显示成「−¥17.88 餐饮 · 09-28 · 后端」，
-                            看起来像商户叫「后端」（2026-09-28 用户当场问这是啥）。 */}
-                        {p.counterparty
-                          ? ` · ${p.source === "报销表" ? "表内归属" : "商户"} ${p.counterparty}`
-                          : ""}
-                        {needsReview(p) && <span className="pd-warn">需核对</span>}
-                      </span>
-                    </div>
-                    <div className="pd-acts">
-                      {/* 「待确认」的行：给一个分类下拉。机器没判出来的分类只有人能补 ——
-                          选了就按选的入账；不选就如实落「未分类」，绝不把占位符当分类写进账本。 */}
-                      {isUnconfirmed(p.category) && cats && (
-                        <select
-                          className="proj-pick"
-                          value={draftCategory[p.id] ?? ""}
-                          onChange={(e) => setDraftCategory((s) => ({ ...s, [p.id]: e.target.value }))}
-                          aria-label={`给「${yuan(p.amount_cents)}」这笔选一个分类`}
-                          disabled={actingIds.has(p.id)}
-                        >
-                          <option value="">选择分类…</option>
-                          {cats.expense.filter((x) => x !== cats.unconfirmed).map((x) => (
-                            <option key={x} value={x}>{x}</option>
-                          ))}
-                        </select>
-                      )}
-                      <select
-                        className="proj-pick"
-                        value={draftProject[p.id] ?? p.project ?? ""}
-                        onChange={(e) => setDraftProject((s) => ({ ...s, [p.id]: e.target.value }))}
-                        aria-label={`「${p.category} ${yuan(p.amount_cents)}」归入哪个项目`}
-                        disabled={actingIds.has(p.id)}
-                      >
-                        <option value="">未归项目（总账户）</option>
-                        {(projView?.projects ?? []).map((x) => (
-                          <option key={x.id} value={x.id}>{x.name}</option>
-                        ))}
-                      </select>
-                      <button className="btn-mini ok" disabled={actingIds.has(p.id)} onClick={() => act(p, true)}>
-                        {actingIds.has(p.id) ? "处理中…" : "确认入账"}
-                      </button>
-                      <button className="btn-mini" disabled={actingIds.has(p.id)} onClick={() => act(p, false)}>
-                        {actingIds.has(p.id) ? "处理中…" : "不要"}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {pendingList.length > 4 && (
-                  <button className="btn-mini pd-more" onClick={() => setPendingOpen((v) => !v)}>
-                    {pendingOpen ? "收起" : `展开其余 ${pendingList.length - 4} 笔`}
-                  </button>
-                )}
-              </section>
-            )}
 
             <section className="sect">
               {/* 2026-10-19 合并：原来「你的账现在什么样」和「还推不出 30 天后」是两块，
@@ -2909,6 +2977,32 @@ export default function Workbench() {
 
             {resetStep === 0 && (
               <>
+                {session?.multi_tenant && (
+                  <div className="name-edit">
+                    <div className="name-edit-head">
+                      <span>显示名</span>
+                      <b>{session.label || "—"}</b>
+                    </div>
+                    <div className="name-edit-row">
+                      <input
+                        value={displayName}
+                        maxLength={20}
+                        onChange={(e) => { setDisplayName(e.target.value); if (displayNameMsg) setDisplayNameMsg(""); }}
+                        placeholder="你的名字或公司名，最多 20 字"
+                        aria-label="显示名"
+                      />
+                      <button
+                        className="btn-mini ok"
+                        disabled={displayNameBusy || !displayName.trim() || displayName.trim() === session.label}
+                        onClick={() => { void saveDisplayName(); }}
+                      >
+                        {displayNameBusy ? "保存中…" : "保存"}
+                      </button>
+                    </div>
+                    <p className="reset-hint">只改右上角怎么称呼你这本账；账本、项目、数据都不动。</p>
+                    {displayNameMsg && <p className="reset-hint">{displayNameMsg}</p>}
+                  </div>
+                )}
                 <dl className="about-list">
                   <div>
                     <dt>重置</dt>

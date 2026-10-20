@@ -213,6 +213,35 @@ def session_me():
             "tenant": slug or "", "active": bool(row.get("active"))}
 
 
+class RenameIn(BaseModel):
+    """改当前邀请码的显示名（只改称呼，不动账本）。"""
+
+    label: str = ""
+
+
+@app.post("/api/session/rename")
+def session_rename(body: RenameIn):
+    """用户登录后改自己的显示名。
+
+    只改 `tenants.json` 里的 label —— 账本、租户目录、slug、会话签名都不动。
+    名字同时用于右上角与「这本账」的称呼；不想暴露真名也可以填公司名/代号。
+    """
+    if not tenancy.enabled():
+        raise HTTPException(status_code=400, detail="单用户模式不需要改显示名")
+    slug = tenancy.current_slug()
+    if not slug:
+        raise HTTPException(status_code=401, detail="需要邀请码")
+    label = (body.label or "").strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="名字不能为空")
+    if len(label) > 20:
+        raise HTTPException(status_code=422, detail="名字最多 20 个字")
+    new = tenancy.rename(slug, label)
+    if not new:
+        raise HTTPException(status_code=404, detail="找不到当前账本")
+    return {"ok": True, "label": new}
+
+
 @app.post("/api/session/logout")
 def session_logout(response: Response):
     """退出：清掉会话 cookie（账本一根手指都不动）。"""
@@ -1454,8 +1483,25 @@ def _intake_stream_events(files: list[dict], project: str | None = None,
     total = len(files)
     batches: list[dict] = []
     for i, f in enumerate(files, 1):
+        # 先把项目建出来、再把 start 发出去：用户不用等整批跑完才在左栏看到项目名。
+        # 归属规则与 ingest 完全一致（显式项目 > 第一层文件夹名 > 不建项目）；
+        # ingest 里还会再 resolve 一次，resolve_incoming 对同名是幂等的。
+        hint_pid, hint_name = "", ""
+        try:
+            if project:
+                hint_pid, _ = projects.resolve_incoming(root, project)
+            else:
+                rel = str(f.get("rel_path") or f["name"]).replace("\\", "/").strip("/")
+                parts = [p for p in rel.split("/") if p]
+                if len(parts) > 1:
+                    hint_pid, _ = projects.resolve_incoming(root, parts[0])
+            if hint_pid:
+                hint_name = projects.display_name(projects._load(root), hint_pid)
+        except Exception:  # noqa: BLE001 项目预建失败不能拖垮导入
+            hint_pid, hint_name = "", ""
         yield json.dumps({"stage": "start", "index": i, "total": total,
-                          "file": f["name"], "rel_path": f["rel_path"]},
+                          "file": f["name"], "rel_path": f["rel_path"],
+                          "project_id": hint_pid, "project_name": hint_name},
                          ensure_ascii=False) + "\n"
         t0 = time.monotonic()
         try:
