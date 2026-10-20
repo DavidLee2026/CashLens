@@ -161,3 +161,13 @@ def test_login_page_and_401_guard_exist():
     # 登录页要分别说清「码不对 / 试太多次 / 服务器问题」，不能一律报成网络错误
     assert "邀请码不对，或者已经停用" in src
     assert "尝试次数太多" in src
+
+
+def test_ui_interaction_guards_exist():
+    """2026-10-20 五条交互：确认统一到对话区 / 点空白收起 / 项目导出 / 改名入口。"""
+    src = (ROOT / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+    assert 'className="pending-inbox"' in src          # 待确认卡在对话区
+    assert 'data-pop="1"' in src                       # 下拉/浮层标记
+    assert 'data-pop-trigger="1"' in src               # 触发按钮标记
+    assert "导出 Excel" in src                          # 项目级导出
+    assert "/api/session/rename" in src                # 设置里的显示名
