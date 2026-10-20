@@ -2444,6 +2444,15 @@ export default function Workbench() {
                         )}
                       </div>
                     ))}
+                    {/* 线上这台机器跑不了本地视觉模型（2C1.7G）——「本机未安装」在服务器上
+                        读起来像「你的电脑没装」，其实是「这台服务器不是你的电脑」。
+                        一句话说清，免得用户以为选「本地」就能省下 key。 */}
+                    {session?.multi_tenant && (
+                      <div className="model-note">
+                        线上这台服务器不跑本地模型：选「本地」要填你自己的电脑或内网地址（需公网可达）。
+                        填的 key / 端点只存在你这个账号下。
+                      </div>
+                    )}
                     {models.warnings.length > 0 && (
                       <div className="model-note">{models.warnings[0]}</div>
                     )}

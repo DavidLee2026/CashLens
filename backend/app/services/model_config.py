@@ -185,18 +185,56 @@ def local_presets_view() -> list[dict]:
 
 # ─── 读写 ───────────────────────────────────────────────
 def locked() -> bool:
-    """服务器是否锁死模型档位（多租户部署时用）。
+    """是否禁止从界面改模型档位（运维用的总开关，默认关）。
 
-    为什么需要：`model_config.json` 放在数据根目录，是**设备级**配置 ——
-    但 `/api/models/select` 对所有租户开放，任何一个拿了邀请码的人都能把
-    全局档位切走（甚至让识别改走一个不存在的本地端点），所有人一起坏。
-    服务器上用 `CASH_LOCK_MODEL=1` 打开后，只读展示、写操作直接 403。
+    历史：`model_config.json` 原先放在数据根目录、是**设备级**配置 —— 任何一个拿了邀请码的
+    人改一次，所有人一起坏，所以线上用 `CASH_LOCK_MODEL=1` 一刀锁死。
+
+    2026-10-20 改成**按租户各自存一份**（`tenants/<slug>/model_config.json`），
+    互不影响，锁就没必要默认开着；但仍保留这个开关，给运维留一个「临时全站只读」的手段。
     """
     return os.environ.get("CASH_LOCK_MODEL", "").strip() in ("1", "true", "yes", "on")
 
 
+# 服务器自带的密钥不落进租户文件：存这个哨兵，读的时候再换回环境变量里的真值。
+# 好处有两条：① 客户备份/导出里不会夹带我们的 key；② 运维换 key 时所有租户立刻跟上。
+_ENV_KEY_SENTINEL = "__from_server_env__"
+
+
+def _multi_tenant() -> bool:
+    """这套服务是不是多租户（线上）。用于对外文案按部署形态分支。"""
+    try:
+        from app.services import tenancy          # noqa: PLC0415 - 运行时导入，避免循环
+        return bool(tenancy.enabled())
+    except Exception:                            # noqa: BLE001
+        return False
+
+
+def _tenant_slug() -> str:
+    """当前请求属于哪个租户（单用户部署返回空串）。
+
+    为什么要运行时 import tenancy：model_config 被很多模块在导入期引用，
+    模块顶部再 import tenancy 容易绕成循环。这里只在真正读写配置时查一次。
+    """
+    try:
+        from app.services import tenancy          # noqa: PLC0415 - 运行时导入，见上
+        if not tenancy.enabled():
+            return ""
+        return tenancy.current_slug() or ""
+    except Exception:                            # noqa: BLE001 取不到就当单用户
+        return ""
+
+
 def config_path() -> Path:
+    """模型配置放在哪。
+
+    多租户 → `tenants/<slug>/model_config.json`（一个账号一份，各改各的）；
+    单用户 / 本机安装版 → 数据根目录的 `model_config.json`（原行为不变）。
+    """
     data_dir = Path(os.environ.get("CASH_DATA_DIR") or (REPO_ROOT / "data"))
+    slug = _tenant_slug()
+    if slug:
+        return data_dir / "tenants" / slug / "model_config.json"
     return data_dir / "model_config.json"
 
 
@@ -261,12 +299,35 @@ def load() -> dict:
                 if v is not None:
                     cfg[tier][k] = v
     cfg["updated_at"] = str(saved.get("updated_at") or "")
+    _expand_env_key(cfg)
+    return cfg
+
+
+def _server_key() -> str:
+    return os.environ.get("LLM_API_KEY") or ""
+
+
+def _shrink_env_key(cfg: dict) -> dict:
+    """落盘前：把「就是服务器那把 key」换成哨兵，别把我们的密钥抄进客户目录。"""
+    cloud = cfg.get("cloud")
+    key = _server_key()
+    if isinstance(cloud, dict) and key and str(cloud.get("api_key") or "") == key:
+        cloud["api_key"] = _ENV_KEY_SENTINEL
+    return cfg
+
+
+def _expand_env_key(cfg: dict) -> dict:
+    """读取后：哨兵换回当前环境里的 key（这样运维换 key，所有租户自动跟上）。"""
+    cloud = cfg.get("cloud")
+    if isinstance(cloud, dict) and str(cloud.get("api_key") or "") == _ENV_KEY_SENTINEL:
+        cloud["api_key"] = _server_key()
     return cfg
 
 
 def save(cfg: dict) -> dict:
     p = config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
+    cfg = _shrink_env_key(dict(cfg))
     p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         p.chmod(0o600)  # 内含 api_key，权限与环境文件一致
@@ -388,7 +449,13 @@ def public_view() -> dict:
         "api_key_configured": bool(cfg["cloud"].get("api_key")),
         "updated_at": cfg["updated_at"],
         "warnings": warnings_for(act),
-        "privacy_note": "无论选哪一档，账本、状态计算与现金流预测都在本机完成，不经任何模型。",
+        # 口径按部署形态走（2026-10-20）：本机安装版确实是「都在本机」；
+        # 线上多租户是「账本在服务端」，照抄前一句就是半真的话。
+        "privacy_note": (
+            "无论选哪一档，账本与状态计算都由引擎算，不经模型（账本存在服务端，按码隔离）。"
+            if _multi_tenant() else
+            "无论选哪一档，账本、状态计算与现金流预测都在本机完成，不经任何模型。"
+        ),
     }
 
 

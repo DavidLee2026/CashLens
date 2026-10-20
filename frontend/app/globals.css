@@ -648,3 +648,7 @@ button{font-family:inherit}
 .name-edit-row input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
 .name-edit-row .btn-mini{flex:0 0 auto}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* 模型菜单里的一句实话（2026-10-20）：线上不跑本地模型，别让「本地」被读成「省 key」 */
+.model-note{font-size:11px;line-height:1.6;color:var(--text-2);padding:6px 8px;margin-top:4px;
+  background:var(--gray-50);border:1px dashed var(--border);border-radius:8px}
