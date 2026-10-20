@@ -169,9 +169,21 @@ type DetailCat = { category: string; amount_cents: number; count: number };
 type DetailRow = { event_id: string; date: string; type: string; amount_cents: number;
                    category: string; counterparty: string; note: string; evidence: string };
 type DetailInvoice = { invoice_no: string; amount_cents: number; date: string };
+/** 项目对账（GET /api/projects/{id}/reconcile）：账面 / 有账单凭证的收入 / 票据 + 差额，只读。 */
+type ReconcileView = {
+  ok: boolean;
+  project: { id: string; name: string; closed_at: string };
+  book: { income_cents: number; expense_cents: number; net_cents: number; count: number };
+  bill: { available: boolean; income_cents: number; count: number; channels: string[] };
+  docs: { total: number; with_doc: number; missing: number;
+          missing_items: { event_id: string; ts: string; amount_cents: number; category: string }[] };
+  diff: { book_vs_bill_cents: number | null; missing_docs: number };
+  notes: string[];
+  disclaimer: string;
+};
 type ProjectDetail = {
   ok: boolean;
-  project: { id: string; name: string; named: boolean; created: string };
+  project: { id: string; name: string; named: boolean; created: string; closed_at?: string };
   totals: { income_cents: number; expense_cents: number; net_cents: number;
             income_count: number; expense_count: number; count: number };
   expense_by_category: DetailCat[];
@@ -644,6 +656,9 @@ export default function Workbench() {
   const [detailId, setDetailId] = useState("");
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  /* 对账（2026-10-20，A 档 ②）：与详情一起拉，只读；关账只写一个时间戳。 */
+  const [recon, setRecon] = useState<ReconcileView | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
   /* 详情读取失败也要说清楚：错误提示必须显示在弹窗内——写进左栏 projMsg 会被遮罩挡着，用户只看到空白卡片 */
   const [detailErr, setDetailErr] = useState("");
   /* 当前项目（2026-10-20 David 定稿）：**默认就是列表最上面那个项目**，而且不再有"取消选中"。
@@ -954,15 +969,40 @@ export default function Workbench() {
   async function openDetail(pid: string) {
     setDetailId(pid);
     setDetail(null);
+    setRecon(null);
     setDetailErr("");
     setDetailBusy(true);
     setProjMenuId("");
     try {
       setDetail(await j<ProjectDetail>(`/api/projects/${encodeURIComponent(pid)}/detail`));
+      // 对账单独拉：它只读、失败也不该把详情弹窗一起打掉
+      try {
+        setRecon(await j<ReconcileView>(`/api/projects/${encodeURIComponent(pid)}/reconcile`));
+      } catch { setRecon(null); }
     } catch {
       setDetailErr("详情读取失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
     } finally {
       setDetailBusy(false);
+    }
+  }
+
+  /** 关账 / 取消关账（2026-10-20，A 档 ②）：只写一个时间戳，不动账本。
+   *  关账的口径是"这个活我算完了"——它同时是「项目关账率」这个指标的计数来源。 */
+  async function toggleClose() {
+    if (!detailId || !recon || closeBusy) return;
+    setCloseBusy(true);
+    try {
+      const target = !recon.project.closed_at;
+      await j(`/api/projects/${encodeURIComponent(detailId)}/close`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ closed: target }),
+      });
+      setRecon(await j<ReconcileView>(`/api/projects/${encodeURIComponent(detailId)}/reconcile`));
+      refresh();
+    } catch {
+      setDetailErr("关账失败：请确认后端在运行后重试。");
+    } finally {
+      setCloseBusy(false);
     }
   }
 
@@ -3270,6 +3310,64 @@ export default function Workbench() {
                     : " · 还没有账本记录"}
                 </div>
 
+                {/* 关账对账（2026-10-20，A 档 ②）：三栏里**有几栏出几栏**。
+                    没导入过账单就不摆"到账 0 元"——那是假数；差额同理，null 就不显示。 */}
+                {recon && (
+                  <div className="rc">
+                    <div className="rc-head">
+                      <h4 className="dt-h">关账对账</h4>
+                      <button className="btn-mini" disabled={closeBusy} onClick={() => { void toggleClose(); }}>
+                        {closeBusy ? "处理中…"
+                          : recon.project.closed_at ? "已关账 · 取消关账" : "这个活算完了，关账"}
+                      </button>
+                    </div>
+                    <div className="rc-row">
+                      <span className="rc-k">账面</span>
+                      <span className="rc-v">
+                        收 <b className="num amt-in">{yuan(recon.book.income_cents)}</b>
+                        {" · "}支 <b className="num amt-out">{yuan(recon.book.expense_cents)}</b>
+                        {" · "}净 <b className={`num ${recon.book.net_cents < 0 ? "amt-out" : "amt-in"}`}>
+                          {yuan(recon.book.net_cents)}</b>
+                        <span className="rc-sub">共 {recon.book.count} 笔</span>
+                      </span>
+                    </div>
+                    {recon.bill.available && (
+                      <div className="rc-row">
+                        <span className="rc-k">有账单凭证的收入</span>
+                        <span className="rc-v">
+                          <b className="num amt-in">{yuan(recon.bill.income_cents)}</b>
+                          <span className="rc-sub">{recon.bill.channels.join(" / ")} · {recon.bill.count} 笔</span>
+                        </span>
+                      </div>
+                    )}
+                    <div className="rc-row">
+                      <span className="rc-k">票据</span>
+                      <span className="rc-v">
+                        <b className="num">{recon.docs.with_doc}</b> / {recon.docs.total} 笔有票
+                        {recon.docs.missing > 0
+                          ? <span className="rc-sub warn">还差 {recon.docs.missing} 笔追不到票</span>
+                          : <span className="rc-sub">齐了</span>}
+                      </span>
+                    </div>
+                    {recon.diff.book_vs_bill_cents !== null && recon.diff.book_vs_bill_cents !== 0 && (
+                      <div className="rc-row">
+                        <span className="rc-k">账面 vs 账单</span>
+                        <span className="rc-v">
+                          <b className={`num ${recon.diff.book_vs_bill_cents > 0 ? "amt-in" : "amt-out"}`}>
+                            {yuan(Math.abs(recon.diff.book_vs_bill_cents))}
+                          </b>
+                          <span className="rc-sub">账面{recon.diff.book_vs_bill_cents > 0 ? "多" : "少"}的部分</span>
+                        </span>
+                      </div>
+                    )}
+                    {recon.notes.length > 0 && (
+                      <ul className="rc-notes">
+                        {recon.notes.map((n, i) => <li key={i}>{n}</li>)}
+                      </ul>
+                    )}
+                    <div className="rc-fine">{recon.disclaimer}</div>
+                  </div>
+                )}
                 <h4 className="dt-h">钱花在哪了（按分类）</h4>
                 {detail.expense_by_category.length === 0
                   ? <div className="dt-empty">还没有支出记录</div>

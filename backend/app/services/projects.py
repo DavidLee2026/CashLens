@@ -432,6 +432,8 @@ def detail(data_dir: str | Path, events: list[dict] | None, ref: str) -> dict:
             "name": (g or {}).get("name") or display_name(rows, pid),
             "named": bool(row.get("named")),
             "created": str(row.get("created") or ""),
+            # 关账时间（2026-10-20）：空串＝没关账。关账只记一个时间戳，不动账本。
+            "closed_at": str(row.get("closed_at") or ""),
         },
         "totals": {
             "income_cents": income,
@@ -484,6 +486,7 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
             "named": bool(r.get("named", False)),
             "created": r.get("created", ""),
             "renamed_at": r.get("renamed_at", ""),
+            "closed_at": r.get("closed_at", ""),
             "income_cents": s.get("income_cents", 0),
             "expense_cents": s.get("expense_cents", 0),
             "count": s.get("income_count", 0) + s.get("expense_count", 0),
@@ -512,3 +515,24 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
                         if unnamed else ""),
         "disclaimer": "项目清单由映射表与账本事件聚合得出，仅为事实陈述。",
     }
+
+
+def close_project(data_dir: str | Path, ref: str, closed: bool = True) -> dict | None:
+    """关账 / 取消关账（2026-10-20）：只在项目行上记一个 `closed_at` 时间戳。
+
+    **不动账本、不动任何金额**：关账是"这个活我算完了"的宣告，不是数据操作。
+    它同时是北极星指标的计数器（项目关账率 = 关账项目数 / 有账的项目数）。
+    """
+    pid = resolve(data_dir, ref)
+    if pid is None:
+        return None
+    rows = _load(data_dir)
+    hit: dict | None = None
+    for r in rows:
+        if str(r.get("id")) == pid:
+            r["closed_at"] = _now() if closed else ""
+            hit = r
+    if hit is None:
+        return None
+    _save(data_dir, rows)
+    return {"id": pid, "name": display_name(rows, pid), "closed_at": str(hit.get("closed_at") or "")}

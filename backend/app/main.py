@@ -26,7 +26,8 @@ from pydantic import BaseModel, Field
 from .services import (amount_guard, categories, data_reset, evidence_files, expense_list,
                        export_xlsx, intake,
                        invoice_tax, llm_skill, model_config, parser_rule, pending, projects,
-                       query_tools, session_mem, tenancy, timesheet, timesheet_records)
+                       query_tools, reconcile as reconcile_svc, session_mem, tenancy,
+                       timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
                                     make_event, run_state)
 
@@ -1316,6 +1317,37 @@ def projects_detail(pid: str):
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
     return out
+
+
+class ProjectCloseIn(BaseModel):
+    """关账 / 取消关账。只改一个时间戳，不动账本。"""
+    closed: bool = True
+
+
+@app.get("/api/projects/{pid}/reconcile")
+def projects_reconcile(pid: str):
+    """项目对账（只读）：「账面 / 有账单凭证的收入 / 票据」三栏 + 差额。
+
+    有几栏出几栏：没导入过账单时 `bill.available=false`，**不拿 0 冒充「到账 0 元」**。
+    口径复用 `projects.detail`（同号发票只算一次），所以对账表里的数=工作台里的数。
+    """
+    out = reconcile_svc.reconcile(data_dir(), _events(), pid,
+                                  evidence_files.load_map(data_dir()))
+    if not out.get("ok"):
+        raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
+    return out
+
+
+@app.post("/api/projects/{pid}/close")
+def projects_close(pid: str, body: ProjectCloseIn | None = None):
+    """关账：在这个项目上记一个 `closed_at`。**不动账本、不动金额**。
+
+    关账是「这个活我算完了」的宣告，也是「项目关账率」这个指标的分母来源。
+    """
+    row = projects.close_project(data_dir(), pid, closed=True if body is None else body.closed)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"找不到项目：{pid}")
+    return {"ok": True, **row}
 
 
 @app.get("/api/categories")

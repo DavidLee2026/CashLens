@@ -681,3 +681,16 @@ button{font-family:inherit}
   padding:4px 10px;font-size:12px;color:var(--text);cursor:pointer;font-family:inherit}
 .sc-chip:hover{border-color:var(--brand);color:var(--brand)}
 .sc-chip:disabled{opacity:.5;cursor:not-allowed}
+
+/* 关账对账（2026-10-20，A 档 ②）：三栏 + 缺票提示；数字与工作台同口径 */
+.rc{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:12px 0}
+.rc-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rc-head .dt-h{margin:0}
+.rc-row{display:flex;gap:10px;align-items:baseline;padding:4px 0;font-size:13px}
+.rc-k{flex:0 0 110px;color:var(--text-2);font-size:12px}
+.rc-v{flex:1}
+.rc-sub{margin-left:8px;font-size:11px;color:var(--text-2)}
+.rc-sub.warn{color:var(--warn)}
+.rc-notes{margin:6px 0 0 12px;padding:0;font-size:11px;color:var(--text-2);line-height:1.7}
+.rc-fine{margin-top:8px;padding-top:6px;border-top:1px dashed var(--gray-200);
+  font-size:11px;color:var(--text-3)}
