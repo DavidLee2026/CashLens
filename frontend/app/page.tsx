@@ -2494,7 +2494,6 @@ export default function Workbench() {
                 记下第一笔后整行消失 —— 它是脚手架，不是广告牌。 */}
             {isEmptyLedger && (
               <div className="start-chips" role="group" aria-label="示例：可以这样说">
-                <span className="sc-lead">试一句：</span>
                 {[
                   { text: "昨天买画材 200", fill: true },
                   { text: "这个月花了多少", fill: false },
@@ -2798,23 +2797,6 @@ export default function Workbench() {
                 ⚠️ 术语统一（2026-10-20 外部评审）：同一个东西原来有三个叫法 ——
                 「总账目」（这块标题）/「总账户」（项目选择器那一行）/「全部项目合计」（输入区提示）。
                 现在统一成**总账户**一个名字；「全部项目合计」只当解释用一次，不再当名字。 */}
-            {/* 示例卡（2026-10-20，A 档 ①）：空账本第一眼要看到"最后会得到什么"。
-                三条硬约束：① 明确标「示例，不是你的账」；② 纯静态、只读、不读任何租户数据；
-                ③ 记下第一笔真账就消失。数据是编的，但内部自洽（18,600 − 12,340 = 6,260）。 */}
-            {isEmptyLedger && (
-              <section className="sect demo-card" aria-label="示例：不是你的账">
-                <div className="demo-head">
-                  <span className="demo-tag">示例 · 不是你的账</span>
-                  <span className="demo-hint">记下第一笔后这里就换成你自己的账</span>
-                </div>
-                <div className="demo-title">秋季市集</div>
-                <div className="demo-nums">
-                  <span>花 <b className="num amt-out">¥12,340</b></span>
-                  <span>收 <b className="num amt-in">¥18,600</b></span>
-                  <span>赚 <b className="num amt-in">+¥6,260</b></span>
-                </div>
-              </section>
-            )}
             <section className="sect acct-hero">
               <div className="sect-head">
                 <h3>总账户</h3>
@@ -3157,10 +3139,6 @@ export default function Workbench() {
             </section>
 
 
-            {/* ⚠️ 空账本时这一块整个不渲染（2026-10-20 David 反馈首屏"有点乱、文字信息很多"）：
-                账本为空时它只会连说三句废话 ——「还说不准」「近 90 天只有 0 天有记录」「还推不出 30 天后」。
-                首屏只该有一个动作；等真的有数据了它才重新出现（那时它说的每句都是结论）。 */}
-            {!isEmptyLedger && (
             <section className="sect">
               {/* 2026-10-19 合并：原来「你的账现在什么样」和「还推不出 30 天后」是两块，
                   各说一遍「再记 4 天」—— 其实是一条链：**状态 → 能不能预测 → 预测结果**。
@@ -3222,10 +3200,7 @@ export default function Workbench() {
                 </>
               )}
             </section>
-            )}
 
-            {/* 最近记的账：空账本时也不占位（示例卡已经交代了"账本为空"） */}
-            {!isEmptyLedger && (
             <section className="sect">
               <div className="sect-head">
                 <h3>最近记的账</h3>
@@ -3274,7 +3249,6 @@ export default function Workbench() {
                 </>
               )}
             </section>
-            )}
             </div>
           </aside>
         </div>
