@@ -606,3 +606,19 @@ def test_batch_buttons_sit_next_to_the_totals_line():
     assert 'setBatchAsk("accept")' not in head, "标题栏里不该再留这两个按钮（会被甩到最右边）"
     css = _css()
     assert ".pd-summary-acts{" in css
+
+
+def test_project_delete_offers_three_ways_including_keep_project():
+    """项目 × 弹层要有**三种**清场方式：只删项目 / 连账一起删 / **只删账保留项目**。
+
+    2026-10-20 David 要求补第三种：「这个项目还要继续记，但之前那些账不算了」——
+    否则只能删了重建，项目名与归属一起丢。
+    """
+    src = _page_src()
+    block = src[src.index("删除「{p.name}」？"):]
+    block = block[: block.index("renamingId === p.id && (")]
+    assert 'deleteProject(p.id, "project_only"' in block
+    assert 'deleteProject(p.id, "project_and_bills"' in block
+    assert 'deleteProject(p.id, "bills_only"' in block
+    assert "只删账，保留项目" in block
+    assert "项目本身留着" in block, "要说清这个选项和「连账一起删」的区别"

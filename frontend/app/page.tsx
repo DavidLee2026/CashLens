@@ -1266,25 +1266,39 @@ export default function Workbench() {
 
   /** 删除项目：两种口径由用户自己选（只删项目 / 连同账单一起删）。
    *  账本是追加式的，所以「一起删」在后端是追加一条作废记录，不是重写历史。 */
-  async function deleteProject(id: string, withData: boolean, name: string) {
+  /** 项目的三种"清场"方式（2026-10-20 起第三种的入口在删除弹层里）：
+   *  - project_only：只删项目，账回落到「未归项目」（账本一字不动）
+   *  - project_and_bills：项目与账一起作废
+   *  - bills_only：**只作废账，项目留着**（"这个项目还要继续记，但之前那些账不算了"）
+   */
+  async function deleteProject(id: string, mode: "project_only" | "project_and_bills" | "bills_only",
+                              name: string) {
+    const qs = mode === "bills_only"
+      ? "bills_only=true"
+      : `with_data=${mode === "project_and_bills" ? "true" : "false"}`;
     try {
       const res = await j<{ ok: boolean; voided_count: number; bill_count: number }>(
-        `/api/projects/${encodeURIComponent(id)}?with_data=${withData ? "true" : "false"}`,
+        `/api/projects/${encodeURIComponent(id)}?${qs}`,
         { method: "DELETE" },
       );
       // 提示语按**实际结果**写：用后端返回的 bill_count，别说"账单还在账本里"却发现它本来就没有账单。
       // 「一起删」也说"作废"而不是"抹掉"—— 账本是追加式的，记录留痕、可追溯（措辞别夸大也别说谎）。
-      setProjMsg(withData
-        ? (res.bill_count > 0
-            ? `「${name}」与它名下的 ${res.bill_count} 笔账单已一起作废（账本里留痕，可追溯）。`
-            : `「${name}」已删除（它名下本来就没有账单）。`)
-        : (res.bill_count > 0
-            ? `「${name}」已删除；它名下的 ${res.bill_count} 笔账单还在账本里，回到「未归项目」。`
-            : `「${name}」已删除（它名下本来就没有账单）。`));
+      setProjMsg(
+        mode === "bills_only"
+          ? (res.voided_count > 0
+              ? `「${name}」名下的 ${res.voided_count} 笔已作废，项目留着，之后还能继续往里记账。`
+              : `「${name}」名下本来就没有账，什么都没动。`)
+          : mode === "project_and_bills"
+            ? (res.bill_count > 0
+                ? `「${name}」与它名下的 ${res.bill_count} 笔账单已一起作废（账本里留痕，可追溯）。`
+                : `「${name}」已删除（它名下本来就没有账单）。`)
+            : (res.bill_count > 0
+                ? `「${name}」已删除；它名下的 ${res.bill_count} 笔账单还在账本里，回到「未归项目」。`
+                : `「${name}」已删除（它名下本来就没有账单）。`));
       setDeletingId("");
       refresh();
     } catch {
-      setProjMsg("删除失败：请确认后端在运行。");
+      setProjMsg(mode === "bills_only" ? "清空失败：请确认后端在运行。" : "删除失败：请确认后端在运行。");
     }
   }
 
@@ -2765,7 +2779,7 @@ export default function Workbench() {
                                 : "它名下还没有账单。"}
                             </div>
                             <div className="pd-opt">
-                              <button className="btn-mini" onClick={() => deleteProject(p.id, false, p.name)}>
+                              <button className="btn-mini" onClick={() => deleteProject(p.id, "project_only", p.name)}>
                                 {p.count > 0 ? "只删项目" : "删除项目"}
                               </button>
                               <span>
@@ -2776,10 +2790,21 @@ export default function Workbench() {
                             </div>
                             {p.count > 0 && (
                               <div className="pd-opt">
-                                <button className="btn-mini danger" onClick={() => deleteProject(p.id, true, p.name)}>
+                                <button className="btn-mini danger" onClick={() => deleteProject(p.id, "project_and_bills", p.name)}>
                                   连账单一起删
                                 </button>
                                 <span>这 {p.count} 笔（{projAmountText(p) || "—"}）同时作废，界面与统计都不再计入。</span>
+                              </div>
+                            )}
+                            {p.count > 0 && (
+                              <div className="pd-opt">
+                                <button className="btn-mini" onClick={() => deleteProject(p.id, "bills_only", p.name)}>
+                                  只删账，保留项目
+                                </button>
+                                <span>
+                                  这 {p.count} 笔（{projAmountText(p) || "—"}）作废，**项目本身留着** ——
+                                  适合「这个项目还要继续记，但之前那些账不算了」。
+                                </span>
                               </div>
                             )}
                             <div className="pd-opt">

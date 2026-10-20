@@ -1176,7 +1176,7 @@ def projects_absorb_unassigned(body: AbsorbUnassignedIn):
 
 
 @app.delete("/api/projects/{pid}")
-def projects_delete(pid: str, with_data: bool = False):
+def projects_delete(pid: str, with_data: bool = False, bills_only: bool = False):
     """删除项目。两种口径由用户在界面上自己选：
 
     - `with_data=false`（只删项目）：映射表标记删除，**账本一字不动**；
@@ -1186,6 +1186,10 @@ def projects_delete(pid: str, with_data: bool = False):
       因此误删仍可从账本里查回。
 
     已删除的项目不再出现在清单里，也不再参与入账归属（避免新账记进已删项目）。
+
+    **`bills_only=true`（2026-10-20 新增）**：**只作废名下的账、项目本身留着** ——
+    「这个项目还要继续记，但之前那些账不算了」这种需求，原来只能"连项目一起删掉再新建"，
+    等于把项目名与归属也一起丢了。
     """
     # 「未归项目」是**兜底账户**（project 为空）而不是一个项目行 ——
     # 它没有可"删除"的东西：`mark_deleted` 无从下手，而且就算硬把它从清单里去掉，
@@ -1224,6 +1228,28 @@ def projects_delete(pid: str, with_data: bool = False):
         raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
     row = projects.get(data_dir(), target) or {}
     label = str(row.get("name") or target)
+
+    # ③ 只删账、保留项目（2026-10-20 David 要求）：作废名下账单，项目行留在清单里
+    if bills_only:
+        bids = projects.event_ids_of(_events(), target)
+        bvoided = 0
+        if bids:
+            bvoided = EventLedger(ledger_path()).append_void(
+                bids, reason=f"清空项目「{label}」名下的账（项目保留）", project=target)["voided"]
+            bproj = Projection(db_path())
+            bproj.rebuild(EventLedger(ledger_path()).load())
+            bproj.close()
+        return {
+            "ok": True,
+            "action": "voided_bills",
+            "project": row,
+            "bill_count": len(bids),
+            "voided_count": bvoided,
+            "note": (f"「{label}」名下的 {bvoided} 笔已作废，项目本身留着"
+                     f"（账本里留痕，可追溯）。以后还能继续往这个项目里记账。"
+                     if bvoided else
+                     f"「{label}」名下本来就没有账，什么都没动。"),
+        }
 
     ids = projects.event_ids_of(_events(), target)
     voided = 0

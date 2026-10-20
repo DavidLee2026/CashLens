@@ -123,3 +123,49 @@ def test_reassign_unknown_event_is_reported_not_faked(app_env):
     res = client.post("/api/events/reassign", json={"ids": ["deadbeef"], "project": ""})
     assert res.status_code == 404
     assert client.post("/api/events/reassign", json={"ids": [], "project": ""}).status_code == 400
+
+
+# ─── 只删账、保留项目（2026-10-20 David 要求）──────────────────────
+
+def test_bills_only_voids_the_ledger_but_keeps_the_project(app_env):
+    """「只认账不认项目」的第三种清场：作废名下账单，项目行留在清单里还能继续记账。
+
+    起因：原来只有「只删项目（账回落未归）」与「连账单一起删」，想"项目继续用、旧账不算了"
+    只能删了重建 —— 项目名与归属一起丢。
+    """
+    main, client, tmp = app_env
+    pid = projects.create(tmp, "示例项目 A")["id"]
+    for amount, note in ((400000, "4个摄像"), (100000, "2个摄像助理")):
+        main._append_event("expense", amount, "经营", "manual", note, project=pid,
+                           strict_dedupe=False)
+
+    res = client.delete(f"/api/projects/{pid}?bills_only=true").json()
+    assert res["action"] == "voided_bills"
+    assert res["bill_count"] == 2 and res["voided_count"] == 2
+    assert "项目本身留着" in res["note"]
+
+    # 项目还在，账归零；账本是一串追加记录（2 原 + 1 void），有效事件 0
+    rows = client.get("/api/projects").json()["projects"]
+    assert [(r["name"], r["count"], r["expense_cents"]) for r in rows] == [("示例项目 A", 0, 0)]
+    assert EventLedger(main.ledger_path()).load() == []
+    raw = [l for l in Path(main.ledger_path()).read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(raw) == 3
+    assert any('"type": "void"' in l and "项目保留" in l for l in raw)
+
+    # 幂等：再点一次什么都不动，也不报错
+    again = client.delete(f"/api/projects/{pid}?bills_only=true").json()
+    assert again["bill_count"] == 0 and again["voided_count"] == 0
+    assert "本来就" in again["note"]
+
+
+def test_bills_only_still_supports_record_into_that_project(app_env):
+    """清空之后还能继续往这个项目里记账（这是它区别于"删项目"的意义）。"""
+    main, client, tmp = app_env
+    pid = projects.create(tmp, "示例项目 A")["id"]
+    main._append_event("expense", 100000, "经营", "manual", "旧账", project=pid,
+                       strict_dedupe=False)
+    client.delete(f"/api/projects/{pid}?bills_only=true")
+    main._append_event("expense", 200000, "经营", "manual", "新账", project=pid,
+                       strict_dedupe=False)
+    rows = client.get("/api/projects").json()["projects"]
+    assert rows[0]["count"] == 1 and rows[0]["expense_cents"] == 200000
