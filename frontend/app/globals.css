@@ -328,6 +328,10 @@ button{font-family:inherit}
   /* 窄屏左栏被排到对话下面：品牌回到右栏头部（左上角那个品牌藏起来，免得页面中间又冒一个），
      左栏内部的滚动也撤掉，改由整页滚。 */
   .brandbar{display:inline-flex;align-items:center;gap:10px}
+  /* 手机宽度放不下「名字 + 本地工作台 + 测试版」：副标题一窄就竖着断成「本地/工作/台」三行
+     （2026-10-20 实测 390px 就是这样，还把右上角「设置」「退出」挤成竖排）。
+     窄屏只留名字与测试版标志 —— 副标题是装饰，标志是信息。 */
+  .brandbar .brand-sub{display:none}
   .convo-title{display:none}
   .side-head .brand{display:none}
   .side-head{min-height:0;padding:10px 16px}

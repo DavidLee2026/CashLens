@@ -449,3 +449,16 @@ def test_beta_badge_next_to_logo():
     assert ".brand-beta{" in css
     assert "cursor:help" in css, "标志是可悬停的解释，不是按钮"
     assert "--warn" in _rules(".brand-beta"), "用既有琥珀色，不新增色板"
+
+def test_beta_badge_survives_phone_width():
+    """窄屏（≤980px）品牌行只留名字 + 测试版标志。
+
+    2026-10-20 实测 390px：「本地工作台」被挤成竖排三行（本地/工作/台），
+    右上角「设置」「退出」跟着竖排 —— 手机上是真丑，而两位试用的人都可能用手机点开。
+    副标题是装饰、标志是信息，所以窄屏藏副标题、不藏标志。
+    """
+    css = _css()
+    assert ".brandbar .brand-sub{display:none}" in css, "窄屏要藏副标题，否则品牌行挤成竖排"
+    # 顺序：藏副标题那条必须写在 @media (max-width:980px) 之后（写在前面会被基础规则盖掉）
+    assert css.index(".brandbar .brand-sub{display:none}") > css.index("@media (max-width:980px)")
+    assert ".brand-beta" in _rules(".brand-beta") and "white-space:nowrap" in _rules(".brand-beta")
