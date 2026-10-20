@@ -2160,10 +2160,18 @@ export default function Workbench() {
               <section className="pending-inbox">
                 <div className="sect-head">
                   <h3>待确认（{pendingList.length}）</h3>
-                  {batchAsk ? (
-                    <span className="sect-note">你点了才算记上</span>
-                  ) : (
-                    <span className="sect-acts">
+                  {batchAsk && <span className="sect-note">你点了才算记上</span>}
+                </div>
+                {/* 合计与批量按钮**放在同一行**（2026-10-20 David：「全部记上和确认入账的按钮也太远了」）：
+                    按钮原来在卡片标题栏最右边，宽屏上离下面的条目有一千多像素。现在紧贴"共几笔 / 多少钱"，
+                    点完就在正下方的确认条里确认，视线不用横跳。 */}
+                <div className="pd-summary">
+                  <span>共 <b>{pendingList.length}</b> 笔</span>
+                  {batchExpense > 0 && <span>支出 <b className="num amt-out">{yuan(batchExpense)}</b></span>}
+                  {batchIncome > 0 && <span>收入 <b className="num amt-in">{yuan(batchIncome)}</b></span>}
+                  <span className="pd-summary-note">还没入账</span>
+                  {!batchAsk && (
+                    <span className="pd-summary-acts">
                       <button
                         className="btn-mini"
                         disabled={batchBusy || actingIds.size > 0}
@@ -2182,12 +2190,6 @@ export default function Workbench() {
                       </button>
                     </span>
                   )}
-                </div>
-                <div className="pd-summary">
-                  <span>共 <b>{pendingList.length}</b> 笔</span>
-                  {batchExpense > 0 && <span>支出 <b className="num amt-out">{yuan(batchExpense)}</b></span>}
-                  {batchIncome > 0 && <span>收入 <b className="num amt-in">{yuan(batchIncome)}</b></span>}
-                  <span className="pd-summary-note">还没入账</span>
                 </div>
                 {batchAsk === "accept" && (
                   <div className="pd-confirm">

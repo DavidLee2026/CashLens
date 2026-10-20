@@ -588,3 +588,21 @@ def test_unassigned_row_offers_batch_absorb():
     assert "projView.unassigned.count" in block and "expense_cents" in block, \
         "要把笔数和合计摆出来再说下一步"
     assert "作废" in block and "重记" in block, "要说清账本会留两条记录，别让人以为是无痕改"
+
+
+def test_batch_buttons_sit_next_to_the_totals_line():
+    """「全部记上 / 全部不要」要跟合计同一行，不许甩到卡片标题栏最右边。
+
+    起因（2026-10-20 David 截图指出）：「全部记上和确认入账的按钮也太远了」——
+    宽屏上按钮在卡片右上角，离下面的条目一千多像素，点之前要横着找。
+    """
+    src = _page_src()
+    summary = src[src.index('className="pd-summary"'):]
+    summary = summary[: summary.index("</div>", summary.index("pd-summary-acts"))]
+    # 按**按钮的行为**断言（注释里提这件事是允许的）
+    assert 'setBatchAsk("accept")' in summary and 'setBatchAsk("decline")' in summary, \
+        "两个批量按钮要在合计那一行里"
+    head = src[src.index("待确认（{pendingList.length}）"): src.index('className="pd-summary"')]
+    assert 'setBatchAsk("accept")' not in head, "标题栏里不该再留这两个按钮（会被甩到最右边）"
+    css = _css()
+    assert ".pd-summary-acts{" in css

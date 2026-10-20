@@ -491,6 +491,10 @@ button{font-family:inherit}
 .pd-summary .amt-out{color:var(--money-out)}
 .pd-summary .amt-in{color:var(--money-in)}
 .pd-summary-note{margin-left:auto;font-size:10.5px;color:var(--text-3)}
+/* 批量按钮跟在合计后面（不是甩到卡片最右边）：窄屏会自然换行，不挤成一条 */
+.pd-summary-acts{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+.pd-summary-acts + .pd-summary-note{margin-left:0}
+@media (max-width:980px){.pd-summary-acts,.pd-summary-acts + .pd-summary-note{margin-left:0}}
 @media (max-width:980px){.pending-inbox{margin:0 12px 10px;max-height:40vh}}
 /* 批量确认条：先把「共几笔 / 多少钱 / 几笔带核对提示」摆出来，再让用户点确认 */
 .pd-confirm{margin:6px 0 2px;padding:9px 10px;border:1px solid var(--border);
