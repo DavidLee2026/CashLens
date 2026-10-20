@@ -103,3 +103,24 @@ def test_ui_has_two_entry_points():
     assert "exportXlsx(p.id)" in page                # 项目 ⋯ 菜单里的单项导出
     # 走 fetch + blob（后端出错能提示），不是直接跳转下载
     assert "URL.createObjectURL(blob)" in page
+
+
+def test_session_expiry_is_not_reported_as_backend_down():
+    """401 要退回邀请码页，不能报成「后端没在运行」（2026-10-20 真机）。
+
+    现场：换码后旧会话立即失效，点「重置」看到「需要邀请码才能使用」——
+    看着像"重置要邀请码"。根因是重置/工时表/导入三条路用的是裸 fetch，
+    绕过了 j() 的 401 处理，还把后端 detail 原样丢给用户。
+    """
+    page = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+    # 三条裸 fetch 必须走同一个带会话的包装
+    for call in ('authedFetch("/api/reset"', 'authedFetch("/api/timesheet/summary"',
+                 'authedFetch("/api/intake/stream"'):
+        assert call in page, f"{call} 还在用裸 fetch"
+    # 401 的处理：退到邀请码页，而不是照搬 detail
+    assert "async function authedFetch(" in page
+    assert "if (r.status === 401)" in page
+    assert "function onSessionExpired()" in page
+    assert "setSession({ multi_tenant: true, label: \"\" })" in page
+    # 重置那条要区分「会话过期」与「后端没在跑」
+    assert "why === SESSION_EXPIRED_TEXT" in page

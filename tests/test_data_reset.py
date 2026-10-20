@@ -289,7 +289,9 @@ def test_reset_request_sends_the_seed_flag():
 def test_reset_ui_surfaces_the_backend_reason_not_a_generic_error():
     """后端写清的具体原因要显示出来 —— 共用 `j()` 只抛 `HTTP 409`，会把原因丢掉。"""
     src = _page_src()
-    assert 'fetch("/api/reset"' in src, "重置要走原始 fetch，才能读到响应体里的 detail"
+    # 2026-10-20：改成 authedFetch（同一条原始 fetch，只是先统一处理 401 会话失效），
+    # 仍然能读到响应体里的 detail
+    assert 'authedFetch("/api/reset"' in src, "重置要能读到响应体里的 detail"
     assert "errBody?.detail" in src, "后端给的原因要取出来显示，不能丢成 HTTP 409"
     assert "连不上本地后端" in src, "真正的网络失败仍要有单独一句（与 409 区分开）"
 

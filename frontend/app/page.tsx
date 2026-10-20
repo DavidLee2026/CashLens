@@ -371,6 +371,11 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
 const CHANNEL_CN: Record<string, string> = { wechat: "微信", alipay: "支付宝", cash: "现金", bank: "银行卡", manual: "手动", voice: "语音", receipt: "票据" };
 /** 「最近事件」默认露几条（其余点「展开其余 N 笔」看，不在该区域里二次滚动）。 */
 const EV_WINDOW = 5;
+/** 会话失效时给用户看的一句人话（2026-10-20）。
+    起因：换码后旧会话立即失效，点「重置」却看到「需要邀请码才能使用」——
+    看着像"重置要邀请码"，其实是整页该重新登录了。 */
+const SESSION_EXPIRED_TEXT = "会话已过期（换过邀请码或太久没登录）——请重新输入邀请码后再试";
+
 const LABEL_CN: Record<string, string> = {
   unknown: "还说不准",
   learning: "还在攒数据", // 原为「学习中」：放顶栏时看不明白，语义是引擎还在积累你的经营节奏
@@ -1121,6 +1126,23 @@ export default function Workbench() {
     return parts.join(" · ");
   }
 
+  /** 401 = 会话失效：退回邀请码页，而不是把后端 detail 原样丢给用户。 */
+  function onSessionExpired() {
+    setSession({ multi_tenant: true, label: "" });
+    setSessionChecked(true);
+  }
+
+  /** 带会话的 fetch：任何 401 都当「该重新登录」，并抛一句人话。
+      裸 fetch 绕过了 j() 的 401 处理，重置 / 工时表 / 导入三条路都走过这个坑。 */
+  async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
+    const r = await fetch(input, init);
+    if (r.status === 401) {
+      onSessionExpired();
+      throw new Error(SESSION_EXPIRED_TEXT);
+    }
+    return r;
+  }
+
   /** 导出 Excel（2026-10-19）：走 fetch + blob，而不是直接 location.href ——
       这样后端出错（比如项目名解析不到 404）时能如实提示，而不是把浏览器带到一页 JSON 上。 */
   async function exportXlsx(projectId: string) {
@@ -1290,7 +1312,7 @@ export default function Workbench() {
     try {
       // 这里刻意**不用**共用的 `j()`：它只抛 `HTTP 409`，把后端写在 detail 里的具体原因丢了。
       // 「演示样本不存在」和「后端没在运行」是两件事，不能都报成后者（那是假汇报）。
-      const resp = await fetch("/api/reset", {
+      const resp = await authedFetch("/api/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seed_demo: resetSeed }),
@@ -1340,8 +1362,11 @@ export default function Workbench() {
         + (r.kept?.length ? `模型档位配置（${r.kept.join("、")}）保留未动。` : ""),
       );
       refresh();
-    } catch {
-      setResetMsg("重置失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
+    } catch (e) {
+      const why = e instanceof Error ? e.message : "";
+      setResetMsg(why === SESSION_EXPIRED_TEXT
+        ? `重置失败：${why}`
+        : "重置失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
     } finally {
       setResetBusy(false);
     }
@@ -1446,7 +1471,7 @@ export default function Workbench() {
     setAttachOpen(false);
     setIntakeBusy(true);
     try {
-      const res = await fetch("/api/timesheet/summary", {
+      const res = await authedFetch("/api/timesheet/summary", {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: f,
@@ -1464,7 +1489,9 @@ export default function Workbench() {
       }]);
     } catch (err) {
       setMsgs((m) => [...m, { role: "ai", text:
-        `工时/工分表没读成：${err instanceof Error ? err.message : String(err)}。请确认后端在运行后重试。` }]);
+        (err instanceof Error && err.message === SESSION_EXPIRED_TEXT
+          ? `工时/工分表没读成：${SESSION_EXPIRED_TEXT}。`
+          : `工时/工分表没读成：${err instanceof Error ? err.message : String(err)}。请确认后端在运行后重试。`) }]);
     } finally {
       setIntakeBusy(false);
     }
@@ -1518,7 +1545,7 @@ export default function Workbench() {
         content_b64: await fileToB64(it.file),
       })));
 
-      const res = await fetch("/api/intake/stream", {
+      const res = await authedFetch("/api/intake/stream", {
         method: "POST",
         signal: ac.signal,
         headers: { "Content-Type": "application/json" },

@@ -561,7 +561,7 @@ def test_workbench_intake_request_carries_current_project():
     """
     page = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
     # 用 fetch 调用点定位：字符串 "/api/intake/stream" 在文件里出现多次（文件头的注释里也有）
-    idx = page.find('fetch("/api/intake/stream"')
+    idx = page.find('authedFetch("/api/intake/stream"')
     assert idx != -1, "找不到导入端点的调用点"
     # 取调用点后面一小段（请求体就在紧邻的几行里），确认带了 project
     window = page[idx: idx + 700]
