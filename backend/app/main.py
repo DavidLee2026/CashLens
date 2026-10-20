@@ -23,8 +23,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .services import (categories, data_reset, export_xlsx, intake, invoice_tax, llm_skill,
-                       model_config, parser_rule, pending, projects, query_tools,
+from .services import (amount_guard, categories, data_reset, export_xlsx, intake, invoice_tax,
+                       llm_skill, model_config, parser_rule, pending, projects, query_tools,
                        session_mem, tenancy, timesheet, timesheet_records)
 from .services.state_engine import (EventLedger, Projection, calc, decision as decision_engine,
                                     make_event, run_state)
@@ -561,6 +561,49 @@ def _project_line(d: dict) -> str:
     return str(d.get("project_hint") or f"归入项目「{_project_label(d.get('project', ''))}」。")
 
 
+def _draft_label(d: dict, limit: int = 22) -> str:
+    """逐条列草稿时的名字：用原话第一行（「3个n6三脚架」），太长就截断。"""
+    text = str(d.get("note") or "").strip().splitlines()
+    label = (text[0] if text else "").strip() or str(d.get("counterparty") or "").strip()
+    if not label:
+        return ""
+    return (label[:limit] + "…") if len(label) > limit else label
+
+
+def _draft_block(drafts: list[dict]) -> tuple[list[str], dict]:
+    """一批草稿的**确定性**文案，合计在这里算（2026-10-20 立）。
+
+    起因（第一个真人客户的真机）：12 行清单让他「帮我合计」，12 条草稿每一笔都对，
+    前端相加是 ¥9,980.00，可那句话里的合计是模型自己加的（8980，少了一个 1000）。
+    同一屏两个数，用户不知道信哪个。**合计从此只由这里算**，模型不复述。
+
+    单笔：沿用原来的一句话（识别到支出 ¥X（分类 · 渠道）——请确认后入账。归入…）。
+    多笔：先报「几笔 + 合计」，再逐条列名字与金额，最后一句落到归属。
+    """
+    n = len(drafts)
+    exp = sum(int(d.get("amount_cents") or 0) for d in drafts if d.get("direction") == "expense")
+    inc = sum(int(d.get("amount_cents") or 0) for d in drafts if d.get("direction") == "income")
+    totals = {"count": n, "expense_cents": exp, "income_cents": inc}
+    if n == 1:
+        d = drafts[0]
+        dir_cn = "收入" if d["direction"] == "income" else "支出"
+        return ([f"识别到{dir_cn} {_yuan(d['amount_cents'])}（{d['category']} · {d['channel']}）"
+                 f"——请确认后入账。{_project_line(d)}"], totals)
+    kind_cn = "支出" if not inc else ("收入" if not exp else "")
+    head = f"识别到 {n} 笔{kind_cn}"
+    lines = [f"{head} —— 都还没入账，逐笔确认后才进账本："]
+    for d in drafts:
+        label = _draft_label(d)
+        lines.append(f"· {label}{_yuan(d['amount_cents'])}（{d['category']}）")
+    bits = []
+    if exp:
+        bits.append(f"支出 {_yuan(exp)}")
+    if inc:
+        bits.append(f"收入 {_yuan(inc)}")
+    lines.append(f"合计 {' / '.join(bits)}（{n} 笔）。{_project_line(drafts[0])}")
+    return lines, totals
+
+
 # 「我是谁」这类问题的触发词（规则兜底用；有 LLM 时由提示词里的规则负责）
 _IDENTITY_HINTS = ("我是谁", "我叫什么", "我的名字", "你认识我", "你知道我是谁", "认得我", "知道我叫")
 # 打招呼（只在**没配 LLM** 的兜底路上用，且必须很短、不含金额，免得把「你好，打车 28」截走）
@@ -721,6 +764,28 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
         parts, summary = _record_timesheet(entries, current_project, text)
         return {"text": "\n".join(parts), "payload": {"timesheet": summary}}
 
+    def h_pending_total(evs, act):
+        """「待确认」合计：**只数草稿，不碰账本**，也不是预测（2026-10-20 立）。
+
+        起因：戚老师问「帮我算个总价 / 每一行空格之后的数字需要合计」——这种问题以前只能
+        让模型自己加，于是出现了 8980 与 9980 两个数。合计从此走这里，金额由代码加。
+        """
+        items = pending.list_all(data_dir())
+        exp = sum(int(d.get("amount_cents") or 0) for d in items if d.get("direction") == "expense")
+        inc = sum(int(d.get("amount_cents") or 0) for d in items if d.get("direction") == "income")
+        if not items:
+            text = "「待确认」里现在一笔都没有，没有可合计的金额。"
+        else:
+            bits = [f"共 {len(items)} 笔"]
+            if exp:
+                bits.append(f"支出合计 {_yuan(exp)}")
+            if inc:
+                bits.append(f"收入合计 {_yuan(inc)}")
+            text = ("「待确认」里" + "，".join(bits)
+                    + " —— 都还没入账，逐笔确认后才进账本。")
+        return {"text": text, "payload": {"count": len(items), "expense_cents": exp,
+                                          "income_cents": inc}}
+
     handlers = {
         "ask_cashflow": h_cashflow,
         "record_timesheet": h_record_timesheet,
@@ -729,10 +794,12 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
         "ask_spending": h_spending,
         "ask_recent": h_recent,
         "ask_decision": h_decision,
+        "ask_pending_total": h_pending_total,
     }
     parts: list[str] = []
     results: list[dict] = []
     drafts: list[dict] = []
+    draft_slot: int | None = None
     executed = False
     for a in parsed.get("actions", []):
         kind = a.get("kind")
@@ -749,9 +816,9 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
                            a.get("note") or text, a.get("counterparty", ""),
                            _project_from_text(text, _known_project_names())
                            or a.get("project") or current_project or None)
+            if draft_slot is None:
+                draft_slot = len(parts)  # 草稿文案按「这一批」整体插回原位置（保持与查询交错的顺序）
             drafts.append(d)
-            dir_cn = "收入" if direction == "income" else "支出"
-            parts.append(f"识别到{dir_cn} {_yuan(amount)}（{d['category']} · {d['channel']}）——请确认后入账。{_project_line(d)}")
             results.append({"action": "record_draft", "status": "pending_confirm", "id": d["id"],
                             "direction": direction, "amount_cents": amount,
                             "category": d["category"], "channel": d["channel"],
@@ -762,6 +829,14 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
             out = handlers[kind](events, a)
             parts.append(out["text"])
             results.append({"action": kind, "data": out["payload"]})
+    totals: dict = {}
+    if drafts:
+        block, totals = _draft_block(drafts)
+        pos = draft_slot if draft_slot is not None else len(parts)
+        parts[pos:pos] = block
+        # 把「代码算的合计」也交给模型：它要提合计就照抄，不许自己加（`amount_guard` 会核对）
+        results.append({"action": "record_total", **totals,
+                        "note": "合计由系统计算：要提合计就照抄 expense_cents/income_cents，不要自己加减"})
     # 决策类结果单独拎出来给前端渲染决策卡（其余查询结果不额外透出）
     decision_payload = next(
         (r["data"]["decision"] for r in results
@@ -776,7 +851,30 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
         None,
     )
     return {"parts": parts, "executed": executed, "results": results, "drafts": drafts,
-            "decision": decision_payload, "timesheet": timesheet_payload}
+            "totals": totals, "decision": decision_payload, "timesheet": timesheet_payload}
+
+
+def _guard_reply(reply: str, run: dict, user_text: str) -> str:
+    """模型写的这句话，金额与合计必须出自本地引擎；不过闸就整条作废。
+
+    2026-10-20 立（第一个真人客户 · 戚老师）：12 行清单让「帮我合计」，草稿 12 笔全对
+    （前端相加 ¥9,980.00），但模型自己在话里加成了 8980 —— 少了一个 1000，两个数同屏。
+    闸门规则见 `services/amount_guard.py`：带货币标记的数必须在系统给过的数里；
+    说了合计就必须等于代码算出的合计。
+
+    **为什么不是"改提示词让它别算"**：提示词已经写了「金额只来自真数据」，它还是算了 ——
+    这类错只能靠确定性闸门兜，不能靠嘱咐。
+    """
+    allowed = amount_guard.allowed_sets(
+        "\n".join(run.get("parts") or []),
+        drafts=run.get("drafts") or (),
+        totals=run.get("totals") or {},
+        user_text=user_text,
+    )
+    verdict = amount_guard.check(reply, allowed["cents"], allowed["totals"], allowed["counts"])
+    if verdict["ok"]:
+        return reply
+    return "\n".join(run.get("parts") or []) or reply
 
 
 class DecisionIn(BaseModel):
@@ -1740,6 +1838,12 @@ def chat(body: ChatIn):
                         final = ""
                     if not final or len(final) < 8:
                         final = "\n".join(run["parts"])
+                    else:
+                        # 数字闸（2026-10-20）：模型写的话里，金额与合计必须是引擎算过的数。
+                        # 起因：12 行清单那句合计被模型自己加成了 8980（真值 9980），
+                        # 同一屏上「文字 8980」与「确认框 9980」对着干。不过闸就整条作废、
+                        # 改用确定性文案 —— 与决策那条路同一个纪律。
+                        final = _guard_reply(final, run, body.text)
                 # 查询答复要如实标注口径范围（查询始终是全账本，不跟随选中项目）
                 if any(str(x.get("action", "")).startswith("ask_") for x in run["results"]):
                     note = _scope_note(body.project)

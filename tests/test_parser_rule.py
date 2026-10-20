@@ -38,3 +38,15 @@ def test_analyze_kinds():
     assert analyze("会不会缺钱？")["kind"] == "ask_cashflow"
     assert analyze("记录一下")["kind"] == "fallback"
     assert analyze("今天天气不错")["kind"] == "fallback"
+
+
+def test_block_as_measure_word_is_not_money():
+    """「10块v口电池」里的「块」是量词，不是 10 元（2026-10-20 真机：那张成本清单里的
+    配置行被读成了 ¥10.00 的一笔支出，用户当场点了「不要」）。"""
+    assert extract_amount("10块v口电池") == 0
+    assert extract_amount("准备6根40米的sdi信号线、8根短信号线和10块v口电池") == 0
+    assert extract_amount("买硬盘 5块硬盘") == 0
+    # 但真说钱的时候还是要认
+    assert extract_amount("打车 10块") == 10
+    assert extract_amount("午饭 10块钱") == 10
+    assert extract_amount("这个 10块5") == 10

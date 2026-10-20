@@ -98,8 +98,16 @@ def _is_money(text: str, start: int, end: int) -> bool:
     if prev in ("周", "期", "拜", "第"):
         return False
     after = re.sub(r"^[\s,，。.．、!！?？:：;；'\"”’「」『』()（）]*", "", text[end:])
-    if re.match(r"^(?:元|块|块钱|万元|人民币)", after):
+    if re.match(r"^(?:元|万元|人民币)", after):
         return True
+    # 「块」两种用法要分开（2026-10-20 真机）：`10块` / `10块钱` / `10块5` 是钱，
+    # 而「10块v口电池」「5块硬盘」里的「块」是量词 —— 那张清单里的配置行就被读成了
+    # ¥10.00 的一笔支出（用户当场点了「不要」）。判据：块后面紧跟的量词/名词就不算钱。
+    if after.startswith("块"):
+        rest = after[1:]
+        if rest == "" or rest[0].isdigit() or rest.startswith("钱") or not re.match(r"[0-9A-Za-z\u4e00-\u9fa5]", rest):
+            return True
+        return False
     if after == "":
         return True
     if after.startswith(("客户", "朋友", "小时", "分钟")):
