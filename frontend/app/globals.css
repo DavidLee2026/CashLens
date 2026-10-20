@@ -483,6 +483,12 @@ button{font-family:inherit}
   border:1px solid var(--border);border-radius:var(--radius);max-height:36vh;overflow-y:auto}
 .pending-inbox .sect-head{margin-bottom:6px}
 .pending-inbox .sect-head h3{font-size:13px;color:var(--text);letter-spacing:.04em}
+/* 导入前「归哪个项目」的问询卡：用的是待确认卡的壳，内容自己排（2026-10-20） */
+.intake-ask .ia-lead{margin:0 0 8px;font-size:11.5px;line-height:1.6;color:var(--text-2)}
+.intake-ask .proj-edit{margin:0 0 6px}
+.intake-ask .proj-edit input{flex:1;min-width:0}
+.intake-ask .proj-edit{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.intake-ask .ia-msg{margin:4px 0 0;font-size:11px;color:var(--money-out)}
 /* 待确认合计：笔数 + 支出/收入，放在卡片顶部，不用点批量确认才看得到 */
 .pd-summary{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 8px;
   padding:8px 10px;border-radius:8px;background:var(--gray-50)}

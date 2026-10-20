@@ -550,29 +550,32 @@ def test_tick_note_says_what_is_really_happening():
 # ─── 前端调用链护栏（2026-09-28 真机 bug 后补）────────────────────
 
 def test_workbench_intake_request_carries_current_project():
-    """工作台调 /api/intake/stream 时必须带上当前选中项目。
+    """导入请求的归属：**散文件跟随当前项目；带文件夹的让文件夹名说话**。
 
     这条护栏为什么存在：2026-09-28 David 在真机上选中「示例项目 A」后拖文件夹，
     系统却又按文件夹名新建了一个项目，草稿全落到了新项目上。根因**不在后端**——
-    `intake.ingest` 早就实现了「显式指定 > 文件夹名 > 未归」并且有单测
-    （见 test_intake.py::test_ingest_uses_explicit_project_over_folder），
+    `intake.ingest` 早就实现了「显式指定 > 文件夹名 > 未归」并且有单测，
     是**前端请求体里从来没传 project 这个字段**，于是那条正确路径根本没被走到。
     服务层测试全绿而用户路径是坏的 —— 所以这里对调用点本身下一道护栏。
+
+    2026-10-20 起入口多了一层：一个项目都没有时会先弹「归哪个项目」的问询卡
+    （`intakeAsk`），用户选完再 `runImport(items, 选中的项目)`；带文件夹的批次
+    仍然传空串（否则会把"按文件夹名建项目"整条规则盖掉）。
     """
     page = (Path(__file__).resolve().parents[1] / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
-    # 用 fetch 调用点定位：字符串 "/api/intake/stream" 在文件里出现多次（文件头的注释里也有）
+    # ① 入口的归属决定
+    assert 'const hasFolder = items.some((it) => String(it.rel_path || "").includes("/"));' in page
+    assert 'await runImport(items, hasFolder ? "" : activeProject);' in page, \
+        "散文件要跟随当前项目，带文件夹的要让文件夹名说话"
+    # ② 真的把 project 发出去（传参，不再在发送处重新算一遍）
     idx = page.find('authedFetch("/api/intake/stream"')
     assert idx != -1, "找不到导入端点的调用点"
-    # 取调用点前面一小段（判断 + 请求体就在紧邻的几行里），确认两个事实：
-    #   ① 单文件导入带**当前选中项目**（用户选了项目就该落到那里）；
-    #   ② **带文件夹的批次不传**（后端口径「显式指定 > 文件夹名」——现在当前项目总有默认值，
-    #      照旧传就会把"按文件夹名建项目"整条规则盖掉，2026-10-20 因此绊了一次）。
-    window = page[max(0, idx - 900): idx + 700]
+    window = page[idx: idx + 700]
     assert "JSON.stringify" in window, "导入请求体不是 JSON.stringify？"
-    assert "project: hasFolder ? \"\" : activeProject" in window, (
-        "导入请求的归属口径不对：单文件要跟随当前项目，带文件夹的要让文件夹名说话"
-    )
-    assert "hasFolder" in window and "rel_path" in window, "要按 rel_path 里有没有 / 判断带不带文件夹"
+    assert "project," in window or "project: project" in window, "请求体里没有 project"
+    # ③ 没有项目时先问，不闷头记进未归
+    assert "if (!hasFolder && !activeProject)" in page
+    assert "setIntakeAsk(items)" in page
 
 
 def test_workbench_chat_request_carries_the_local_user_name():

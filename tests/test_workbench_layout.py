@@ -622,3 +622,25 @@ def test_project_delete_offers_three_ways_including_keep_project():
     assert 'deleteProject(p.id, "bills_only"' in block
     assert "只删账，保留项目" in block
     assert "项目本身留着" in block, "要说清这个选项和「连账一起删」的区别"
+
+
+def test_import_asks_for_a_project_before_landing_in_unassigned():
+    """导入手边没有项目时，**先问一句**，并给"替我建个默认项目"的出路（2026-10-20 David）。
+
+    起因：新账号一个项目都没有，拖进来就闷头记进「未归项目」——之后按项目算成本分不出来。
+    要求：先提示新建；用户不建，就替他建一个默认项目再导入。
+    """
+    src = _page_src()
+    assert "这批文件还没有归属项目" in src, "要有那句话"
+    assert "if (!hasFolder && !activeProject)" in src, "没有项目 + 散文件时才拦"
+    assert "setIntakeAsk(items)" in src
+    # 三个出口：建一个 / 用默认项目 / 就先放未归
+    for word in ("建好并导入", "用默认项目", "就先放「未归项目」"):
+        assert word in src, f"缺少出口：{word}"
+    # 默认项目名按日期生成，且同名复用（一天导两批不该出现两个同名项目）
+    assert "默认项目 ${mm}-${dd}" in src
+    assert 'find((x) => x.name === wanted)' in src, "同名项目要复用"
+    # 用户没建就替他建：默认项目这条路会真的 POST /api/projects
+    block = src[src.index("async function resolveIntakeAsk"):]
+    block = block[: block.index("async function uploadFiles")]
+    assert '"/api/projects"' in block and "setActiveProject(pid)" in block

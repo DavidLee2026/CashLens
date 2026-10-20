@@ -169,3 +169,22 @@ def test_bills_only_still_supports_record_into_that_project(app_env):
                        strict_dedupe=False)
     rows = client.get("/api/projects").json()["projects"]
     assert rows[0]["count"] == 1 and rows[0]["expense_cents"] == 200000
+
+
+# ─── 默认项目「同名复用」（2026-10-20：导入前替他建默认项目）────────────
+
+def test_default_project_creation_can_reuse_by_name(app_env):
+    """`reuse=true`：同名项目已存在就返回那一个 —— 同一天导两批不该出现两个「默认项目 10-20」。
+
+    默认（reuse=false）仍然是"新建就是新建"：用户明确要两个同名项目时不该被拦。
+    """
+    main, client, tmp = app_env
+    a = client.post("/api/projects", json={"name": "默认项目 10-20", "reuse": True}).json()
+    b = client.post("/api/projects", json={"name": "默认项目 10-20", "reuse": True}).json()
+    assert a["action"] == "created" and b["action"] == "reused"
+    assert a["project"]["id"] == b["project"]["id"]
+    assert len(client.get("/api/projects").json()["projects"]) == 1
+
+    # 不带 reuse 还是照旧新建（两个同名项目是允许的）
+    client.post("/api/projects", json={"name": "默认项目 10-20"})
+    assert len(client.get("/api/projects").json()["projects"]) == 2

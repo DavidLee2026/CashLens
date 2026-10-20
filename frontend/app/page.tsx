@@ -1574,11 +1574,82 @@ export default function Workbench() {
     }
   }
 
+  /* 导入前先问一句「这批账归哪个项目」（2026-10-20 David 要求）：
+     一个项目都没有时，导入会**闷头记进「未归项目」**，之后按项目算成本就分不出来了。
+     所以先摆一张卡：建一个 / 用默认项目 / 就先放未归 —— 用户不建，就替他建一个默认项目。 */
+  const [intakeAsk, setIntakeAsk] = useState<FileItem[] | null>(null);
+  const [intakeAskName, setIntakeAskName] = useState("");
+  const [intakeAskMsg, setIntakeAskMsg] = useState("");
+  const [intakeAskBusy, setIntakeAskBusy] = useState(false);
+
+  /** 默认项目名：一天一个，同一天再导第二批就复用同一个（别再建第二个"默认项目 10-20"）。 */
+  const defaultProjectName = () => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `默认项目 ${mm}-${dd}`;
+  };
+
+  /** 决定这批文件归哪之后就往下走：建新项目 / 复用默认项目 / 就放未归。 */
+  async function resolveIntakeAsk(mode: "new" | "default" | "unassigned") {
+    const items = intakeAsk;
+    if (!items || !items.length || intakeAskBusy) return;
+    if (mode === "unassigned") {
+      setIntakeAsk(null);
+      await runImport(items, "");
+      return;
+    }
+    const wanted = mode === "new" ? intakeAskName.trim() : defaultProjectName();
+    if (mode === "new" && !wanted) {
+      setIntakeAskMsg("给它起个名字，比如「示例项目 A」—— 之后按项目算成本就靠它。");
+      return;
+    }
+    setIntakeAskBusy(true);
+    setIntakeAskMsg("");
+    try {
+      // 同名项目已存在就复用（默认项目尤其要这样：一天里导两批不该出现两个同名项目）
+      const existing = (projView?.projects ?? []).find((x) => x.name === wanted);
+      let pid = existing?.id ?? "";
+      if (!pid) {
+        const res = await j<{ ok: boolean; project?: { id: string; name: string } }>(
+          "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: wanted, reuse: true }) });
+        pid = res.project?.id ?? "";
+      }
+      if (!pid) {
+        setIntakeAskMsg("建项目失败：请确认后端在运行后重试。");
+        return;
+      }
+      setActiveProject(pid);
+      setIntakeAsk(null);
+      setIntakeAskName("");
+      await runImport(items, pid);
+    } catch {
+      setIntakeAskMsg("建项目失败：请确认后端在运行后重试。");
+    } finally {
+      setIntakeAskBusy(false);
+    }
+  }
+
+  /** 导入入口：没有项目又拖的是散文件 → 先问；有项目 / 带文件夹 → 直接进。 */
+  async function uploadFiles(items: FileItem[]) {
+    if (!items.length || intakeBusy) return;
+    const hasFolder = items.some((it) => String(it.rel_path || "").includes("/"));
+    if (!hasFolder && !activeProject) {
+      setIntakeAsk(items);
+      setIntakeAskName("");
+      setIntakeAskMsg("");
+      return;
+    }
+    await runImport(items, hasFolder ? "" : activeProject);
+  }
+
   /** 导入：上传 → 把整次导入写进**同一个框** → 刷新面板。
    *  一次导入只占一条消息：标题（导入几个文件）+ 逐文件进度 + 最终汇总都在里面，
    *  不再另发「（导入 N 个文件）」用户气泡，也不再让进度和结果各占一个框。
-   *  进度全部来自后端真实处理结果，不做假进度条。 */
-  async function uploadFiles(items: FileItem[]) {
+   *  进度全部来自后端真实处理结果，不做假进度条。
+   *  `project` 由调用方决定（空串＝未归项目；带文件夹的批次由后端按文件夹名建项目）。 */
+  async function runImport(items: FileItem[], project: string) {
     if (!items.length || intakeBusy) return;
     setIntakeBusy(true);
     setDragActive(false);
@@ -1621,12 +1692,6 @@ export default function Workbench() {
         rel_path: it.rel_path,
         content_b64: await fileToB64(it.file),
       })));
-      /* 传不传当前项目：**带文件夹的不传**。后端口径是「显式指定 > 文件夹名 > 当前默认」，
-         而现在当前项目总有一个默认值（最上面那个）—— 照旧传就会把"按文件夹名建项目"
-         这条规则整个盖掉（真机：拖「示例项目A发票」文件夹，全进了另一个项目）。
-         单张图片 / 单个文件照旧跟随当前项目。 */
-      const hasFolder = items.some((it) => String(it.rel_path || "").includes("/"));
-
       const res = await authedFetch("/api/intake/stream", {
         method: "POST",
         signal: ac.signal,
@@ -1634,7 +1699,7 @@ export default function Workbench() {
         // **必须带当前选中项目**：后端归属优先级是「显式指定 > 文件夹名 > 未归」，
         // 漏传这一项时，选了项目也会被文件夹名新建一个项目盖掉（2026-09-28 真机踩到：
         // 选了「示例项目 A」，拖「示例项目A发票」文件夹却又建出一个同名项目）。
-        body: JSON.stringify({ files, project: hasFolder ? "" : activeProject, reconcile }),
+        body: JSON.stringify({ files, project, reconcile }),
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -2167,6 +2232,53 @@ export default function Workbench() {
                 </div>
               ))}
             </div>
+            {/* 导入前先问「这批账归哪个项目」（2026-10-20 David 要求）：
+                没有项目时导入会闷头进「未归项目」，之后按项目算成本就分不出来。
+                三个出口：写个名字建项目 / 用默认项目（自动建）/ 就先放未归。 */}
+            {intakeAsk && (
+              <section className="pending-inbox intake-ask">
+                <div className="sect-head">
+                  <h3>这批文件还没有归属项目</h3>
+                </div>
+                <div className="pd-summary">
+                  <span>共 <b>{intakeAsk.length}</b> 个文件</span>
+                  <span className="pd-summary-note">还没导入</span>
+                </div>
+                <p className="ia-lead">
+                  现在导入会记到「<b>未归项目</b>」—— 之后按项目算成本就分不出来了。
+                  给它建一个项目，或者让我用默认项目。
+                </p>
+                <div className="proj-edit">
+                  <input
+                    value={intakeAskName}
+                    onChange={(e) => setIntakeAskName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") resolveIntakeAsk("new"); }}
+                    placeholder="项目全名，如「示例项目 A」"
+                    aria-label="这批账归入的项目名称"
+                    disabled={intakeAskBusy}
+                  />
+                  <button className="btn-mini ok" disabled={intakeAskBusy}
+                          onClick={() => resolveIntakeAsk("new")}>
+                    {intakeAskBusy ? "处理中…" : "建好并导入"}
+                  </button>
+                </div>
+                <div className="proj-edit">
+                  <button className="btn-mini" disabled={intakeAskBusy}
+                          onClick={() => resolveIntakeAsk("default")}>
+                    用默认项目「{defaultProjectName()}」
+                  </button>
+                  <button className="btn-mini" disabled={intakeAskBusy}
+                          onClick={() => resolveIntakeAsk("unassigned")}>
+                    就先放「未归项目」
+                  </button>
+                  <button className="btn-mini" disabled={intakeAskBusy}
+                          onClick={() => { setIntakeAsk(null); setIntakeAskMsg(""); }}>
+                    取消
+                  </button>
+                </div>
+                {intakeAskMsg && <p className="ia-msg">{intakeAskMsg}</p>}
+              </section>
+            )}
             {/* 待确认草稿：「识别 → 确认 → 入账」里的确认环节。
                 导入（拍票 / 拖表）产生的草稿不会出现在对话气泡里，这里是它们唯一的常驻入口；
                 归属可以在确认那一刻改（沿用 2026-09-26 定的规则）。2026-09-28 补。 */}

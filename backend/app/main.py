@@ -1029,10 +1029,15 @@ def tax_quarterly(quarter: str | None = None, recent: int = 4):
 
 
 class ProjectIn(BaseModel):
-    """建项目 / 改项目名。id 留空 = 新建；带 id（或显示名）+ name = 重命名。"""
+    """建项目 / 改项目名。id 留空 = 新建；带 id（或显示名）+ name = 重命名。
+
+    `reuse`：同名项目已存在时**直接返回那一个**，不再新建（默认 false，保持"新建就是新建"）。
+    只给「导入前替他建默认项目」这条路用 —— 否则同一天导两批就会出现两个「默认项目 10-20」。
+    """
 
     name: str = ""
     id: str = ""
+    reuse: bool = False
 
 
 @app.get("/api/projects")
@@ -1060,6 +1065,11 @@ def projects_upsert(body: ProjectIn):
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         return {"ok": True, "action": "renamed", "project": row}
+    if body.reuse:
+        wanted = str(body.name or "").strip()
+        for r in projects.visible_rows(data_dir()):
+            if str(r.get("name") or "").strip() == wanted:
+                return {"ok": True, "action": "reused", "project": r}
     return {"ok": True, "action": "created", "project": projects.create(data_dir(), body.name)}
 
 
