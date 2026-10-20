@@ -532,3 +532,32 @@ def test_forecast_divider_matches_what_it_labels():
     """
     src = _page_src()
     assert 'fc && fc.extrapolated === false ? "还推不出 30 天后" : "30 天后"' in src
+
+
+def test_account_aggregate_appears_once_and_projects_are_projects_only():
+    """「总账户」那一行不许回到项目选择器里（2026-10-20 David 真机反馈）。
+
+    原话：「这里的总账和上面的总账其实是一样的功能，而下面的那个总账是多余的。
+    不需要这个总账。放在这里反而会容易点错。**把信息计入到这个总账里，而没有计入到项目里**」——
+    两个同口径入口并排摆着，他两次都点错。此后口径：
+    **聚合数字只在上面那块（`.acct-hero`）出现一次；项目区只决定"新账记到哪个项目"。**
+    """
+    src = _page_src()
+    panel = src[src.index("项目（分开算）"):
+                src.index("最近记的账", src.index("项目（分开算）"))]
+    assert "总账户（全部项目）" not in panel, "项目选择器里不许再有「总账户（全部项目）」这一行"
+    assert "proj-sel" not in panel, "那一行的样式类也不许回来（回潮即变红）"
+    # 聚合数字不许在项目区再渲染一遍（yuan(acct.*) 只属于 `.acct-hero`）
+    for call in ("yuan(acct.income)", "yuan(acct.expense)", "acct.count"):
+        assert call not in panel, f"项目区不该再显示总账户的数（{call}）"
+    # 反过来：上面那块还在（别把聚合也删了）
+    hero = src[src.index("acct-hero"): src.index("项目（分开算）")]
+    assert "yuan(acct.income)" in hero and "yuan(acct.expense)" in hero
+
+
+def test_clicking_the_selected_project_again_clears_it():
+    """取消选中＝再点一次同一个项目（新账回到「未归项目」）—— 少了这条路，用户就没法不选项目。"""
+    src = _page_src()
+    assert "setActiveProject(activeProject === p.id ? \"\" : p.id)" in src
+    assert "再点一次取消" in src, "要把这个动作写在提示里，否则没人知道能取消"
+    assert "未归项目（还没选项目）" in src, "没选项目时那行要如实说清，别叫「总账户」"

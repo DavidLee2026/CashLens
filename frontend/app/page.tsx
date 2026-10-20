@@ -955,11 +955,21 @@ export default function Workbench() {
     }
   }
 
+  /** 确认入账时这一笔默认归哪个项目（2026-10-20 加，起因是一次真实的错归属）：
+   *  下拉选过 > **草稿自带的项目** > **当前选中的项目** > 未归项目。
+   *
+   *  为什么补「当前选中」这一级：客户先识别出一批草稿（那时项目还没建），几十分钟后建好项目、
+   *  选中它、再点「全部确认」—— 草稿自带的项目是空，于是 12 笔全落进了未归项目，
+   *  他建的那个项目一笔都没有（他自己的话：「把信息计入到这个总账里，而没有计入到项目里」）。
+   *  草稿自带项目时仍以草稿为准：识别那一刻说的项目，比他后来手点的更具体。 */
+  const defaultDraftProject = (p: PendingDraft) =>
+    draftProject[p.id] ?? (p.project || activeProject || "");
+
   async function act(p: PendingDraft, acceptIt: boolean) {
     if (actingIds.has(p.id)) return; // 防连点：处理中不可重复提交
     setActingIds((prev) => new Set(prev).add(p.id));
-    // 确认时把"这一笔归哪个项目"一起提交（下拉里选的；没动过就是草稿原来的项目）
-    const proj = draftProject[p.id] ?? p.project ?? "";
+    // 确认时把"这一笔归哪个项目"一起提交（下拉里选的 > 草稿自带 > 当前选中 > 未归）
+    const proj = defaultDraftProject(p);
     // 分类同理：只对「待确认」的行提供下拉。**没选过就不要带这个字段** ——
     // 空字符串在后端会被当成"用户指定了空分类"，把草稿识别出来的分类冲成「其他」
     // （2026-09-28 真机：18 笔全变「其他」，就是这么来的）。
@@ -1037,7 +1047,7 @@ export default function Workbench() {
     const consumedIds: string[] = [];
     try {
       for (const p of targets) {
-        const proj = draftProject[p.id] ?? p.project ?? "";
+        const proj = defaultDraftProject(p);
         const r = await j<{ appended?: boolean }>(`/api/pending/${p.id}/accept`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           // 同单笔那条：没选过分类就不带这个字段（带了空串会把草稿分类冲成「其他」）
@@ -1752,7 +1762,7 @@ export default function Workbench() {
   const fcTooWide = fcBandWidthYuan >= FC_WIDE_YUAN;
   const acct = accountTotals(projView);
   const activeProjectName = activeProject === ""
-    ? "未归项目（总账户）"
+    ? "未归项目（还没选项目）"
     : (projView?.projects.find((x) => x.id === activeProject)?.name ?? activeProject);
 
   // 会话还没问完：先不渲染工作台，避免登录页闪一下再跳到工作台。
@@ -2034,12 +2044,12 @@ export default function Workbench() {
                           {/* 归属在确认那一刻可改：草稿上的项目是识别时定下的，而用户不一定说对 */}
                           <select
                             className="proj-pick"
-                            value={draftProject[p.id] ?? p.project ?? ""}
+                            value={defaultDraftProject(p)}
                             onChange={(e) => setDraftProject((s) => ({ ...s, [p.id]: e.target.value }))}
                             aria-label="这笔归入哪个项目"
                             disabled={actingIds.has(p.id)}
                           >
-                            <option value="">未归项目（总账户）</option>
+                            <option value="">未归项目（不归任何项目）</option>
                             {(projView?.projects ?? []).map((x) => (
                               <option key={x.id} value={x.id}>{x.name}</option>
                             ))}
@@ -2217,12 +2227,12 @@ export default function Workbench() {
                       )}
                       <select
                         className="proj-pick"
-                        value={draftProject[p.id] ?? p.project ?? ""}
+                        value={defaultDraftProject(p)}
                         onChange={(e) => setDraftProject((s) => ({ ...s, [p.id]: e.target.value }))}
                         aria-label={`「${p.category} ${yuan(p.amount_cents)}」归入哪个项目`}
                         disabled={actingIds.has(p.id)}
                       >
-                        <option value="">未归项目（总账户）</option>
+                        <option value="">未归项目（不归任何项目）</option>
                         {(projView?.projects ?? []).map((x) => (
                           <option key={x.id} value={x.id}>{x.name}</option>
                         ))}
@@ -2601,21 +2611,17 @@ export default function Workbench() {
                   </div>
                 </div>
               )}
-              {/* 当前项目（欠账 E 组 18）：选中＝新账默认记到这里，选中态高亮。
-                  它只决定"新账记到哪"；查询始终是全部项目合计（见输入区那行提示）。 */}
-              <button
-                type="button"
-                className={`proj-sel${activeProject === "" ? " on" : ""}`}
-                onClick={() => setActiveProject("")}
-                aria-pressed={activeProject === ""}
-                title="选中它：新账不指定具体项目，进「未归项目」；查询本来就是整个总账户"
-              >
-                <span className="ps-name">总账户（全部项目）</span>
-                <span className="ps-sub">
-                  支出 {yuan(acct.expense)} · 收入 {yuan(acct.income)} · {acct.count} 笔
-                </span>
-              </button>
-              <div className="proj-tip">点一个项目，之后记的账默认算它的；每一笔都能改</div>
+              {/* 项目选择列表（2026-10-20 David 定稿）：**这里只放项目**。
+                  原来这里还有一行聚合账户（全部项目），和上面那块总账户 KPI 是同一个口径、
+                  同一个数 —— 两个入口摆在一起，他两次都点错，把本该进项目的支出记进了总账户：
+                  「这里的总账和上面的总账其实是一样的功能…放在这里反而会容易点错」。
+                  所以：聚合数字只在上面那一块出现；这里只决定"新账记到哪个项目"。
+                  取消选中＝再点一次已选中的项目（新账回到「未归项目」），取消态在输入区那行写明。 */}
+              <div className="proj-tip">
+                {projView && projView.project_count > 0
+                  ? "点一个项目＝之后记的账算它；再点一次取消（新账先进「未归项目」）；双击看详情"
+                  : "点一个项目，之后记的账默认算它的；每一笔都能改"}
+              </div>
               {!projView || (projView.project_count === 0 && projView.unassigned.count === 0) ? (
                 <div className="empty">还没有项目。点上面的「新建项目」，或记账时说一句「这笔记到 示例项目 A」，就建好了</div>
               ) : (
@@ -2626,10 +2632,10 @@ export default function Workbench() {
                         <button
                           type="button"
                           className="ev-pick"
-                          onClick={() => setActiveProject(p.id)}
+                          onClick={() => setActiveProject(activeProject === p.id ? "" : p.id)}
                           onDoubleClick={() => openDetail(p.id)}
                           aria-pressed={activeProject === p.id}
-                          title="点一下＝设为当前项目；双击＝看这个项目的详情"
+                          title="点一下＝设为当前项目；再点一下＝取消（新账进「未归项目」）；双击＝看详情"
                         >
                           <b>{p.name}</b>
                           <span className="m">

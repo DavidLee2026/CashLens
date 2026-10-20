@@ -446,13 +446,8 @@ button{font-family:inherit}
 .proj-pop.row{top:calc(100% - 2px);left:0;right:0}
 .proj-pop .proj-edit,.proj-pop .proj-del{margin:0}
 /* 当前项目（欠账 E 组 18）：项目行可点选 + 选中态高亮 + 输入区口径提示。全用既有 token */
-.proj-sel{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;cursor:pointer;
-  border:1px solid var(--border);background:var(--white);border-radius:9px;padding:8px 10px;
-  font-family:inherit;color:var(--text)}
-.proj-sel:hover{border-color:var(--brand)}
-.proj-sel.on{border-color:var(--brand);background:var(--brand-bg)}
-.proj-sel .ps-name{font-size:13px;font-weight:700}
-.proj-sel .ps-sub{font-size:11px;color:var(--text-2)}
+/* ⚠️ `.proj-sel` 已于 2026-10-20 删除：那一行是「总账户（全部项目）」，与上方总账户 KPI 重复，
+   且两次被误点（本该进项目的支出记进了总账户）。聚合数字只在 `.acct-hero` 出现一次。 */
 .proj-tip{font-size:11px;color:var(--text-3);margin:6px 0 9px;line-height:1.45}
 .ev.on{background:var(--brand-bg);border-radius:8px}
 .ev-pick{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:1;min-width:0;

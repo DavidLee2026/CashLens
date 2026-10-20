@@ -314,3 +314,24 @@ def test_unassigned_has_no_project_row_but_its_bills_can_be_voided(temp_data):
     # ③ 未归项目自己还在（它是兜底账户，永远在）
     view = client.get("/api/projects").json()
     assert view["unassigned"]["count"] == 0
+
+
+# ─── 确认入账时的默认归属（2026-10-20 真机）────────────────────
+
+def test_pending_accept_defaults_to_the_selected_project():
+    """草稿自带项目 → 用它；草稿没有项目 → **当前选中的项目**；都没有才未归。
+
+    起因（真机）：客户先识别出一批草稿（那时项目还没建），过一会儿建好项目、选中它，
+    再点「全部确认」—— 草稿自带的项目是空，12 笔全进「未归项目」，他建的项目一笔都没有。
+    原话：「把信息计入到这个总账里，而没有计入到项目里」。
+
+    这条优先级是**前端**决定的（后端只收最终 project），所以断言落在页面源码上：
+    四处（单笔提交 / 批量提交 / 两处下拉默认值）必须都走同一个 helper，不许各写一份。
+    """
+    src = _page_tsx()
+    assert 'draftProject[p.id] ?? (p.project || activeProject || "")' in src
+    assert src.count("defaultDraftProject(p)") == 4, \
+        "单笔提交 / 批量提交 / 两处下拉默认值，四处都要用同一个 helper"
+    # 「未归」在确认下拉里必须仍然选得到（否则想不归项目的人没有出路），但别再叫「总账户」
+    assert '<option value="">未归项目（不归任何项目）</option>' in src
+    assert "未归项目（总账户）" not in src

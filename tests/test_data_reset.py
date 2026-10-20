@@ -245,10 +245,11 @@ def test_settings_entry_lives_in_the_account_level_corner():
     head = src[src.index('className="convo-head"'):
                src.index('className="log"', src.index('className="convo-head"'))]
     assert "openSettings" in head and "设置" in head, "设置入口要在右栏顶部（右上角）"
-    # 项目行（总账户那个选择按钮）里不许出现重置
-    proj_sel = src[src.index('className={`proj-sel'):
-                   src.index("点一个项目", src.index('className={`proj-sel'))]
-    assert "重置" not in proj_sel, "「总账户」那一行是选择器，不要在里面放重置"
+    # 项目选择区（从「项目（分开算）」到「新建项目」之后那段）里不许出现重置/设置
+    panel = src[src.index("项目（分开算）"):
+                src.index("最近记的账", src.index("项目（分开算）"))]
+    for word in ("重置", "openSettings", "清空全部"):
+        assert word not in panel, f"项目选择区是选择器，不要放「{word}」这类账户级动作"
 
 
 def test_reset_requires_two_explicit_steps():
