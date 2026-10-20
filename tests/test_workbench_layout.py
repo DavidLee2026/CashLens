@@ -462,3 +462,35 @@ def test_beta_badge_survives_phone_width():
     # 顺序：藏副标题那条必须写在 @media (max-width:980px) 之后（写在前面会被基础规则盖掉）
     assert css.index(".brandbar .brand-sub{display:none}") > css.index("@media (max-width:980px)")
     assert ".brand-beta" in _rules(".brand-beta") and "white-space:nowrap" in _rules(".brand-beta")
+
+
+def test_login_page_says_where_data_lives():
+    """门口必须交代数据在哪（2026-10-20，起因是试用者问「你们数据存哪」）。
+
+    线上版数据在服务器上、按码隔离，识别时图片会发给模型 —— 这三件是**事实**，必须写在输码之前。
+    反过来，登录页不许出现「不出本机 / 不上传 / 数据只在本机」这类承诺：
+    线上版数据就在服务器上，写了就是假话，被追问一句就崩。
+    """
+    src = _page_src()
+    start = src.index('className="login-card"')
+    block = src[start:src.index("</form>", start)]
+    assert "login-fine" in block, "说明要挂在登录卡里（输码之前就看得到）"
+    assert "数据存在服务器上" in block and "按码隔离" in block
+    assert "图片会发给模型" in block
+    for bad in ("不出本机", "不上传", "数据只在本机", "只在你自己电脑"):
+        assert bad not in block, f"登录页不许承诺「{bad}」"
+
+
+def test_local_claims_are_branched_by_deployment():
+    """「本地优先 / 数据留在磁盘」只在本地安装版成立；线上版必须换成「按码隔离」。
+
+    同一个前端产物两处部署：本机单用户（落 data/）与线上多租户（落服务端）。
+    口径要跟着 session.multi_tenant 分支，否则线上页脚会写着「数据留在磁盘」而实际在服务器上。
+    """
+    src = _page_src()
+    assert "CashLens · 一码一账 · 数据按码隔离 · 证据驱动" in src      # 线上口径
+    assert "CashLens · 本地优先 · 数据留在磁盘 · 证据驱动" in src      # 本机口径
+    assert "账本存在服务端，按邀请码隔离" in src                        # 关于页·线上
+    assert "账本与预估存在本机 data/ 目录" in src                       # 关于页·本机
+    # 三处（输入框下方提示 / 页脚 / 关于页）都得是分支写法
+    assert src.count("session?.multi_tenant") >= 3

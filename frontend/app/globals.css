@@ -616,6 +616,10 @@ button{font-family:inherit}
 .login-brand{margin-bottom:22px}
 .login-card h1{font-size:20px;margin-bottom:6px;color:var(--text)}
 .login-sub{font-size:13px;color:var(--text-2);line-height:1.6;margin-bottom:18px}
+/* 门口那句数据流向（2026-10-20）：比对说明小一档、颜色淡一档 —— 是事实交代，不是卖点。
+   刻意做成静态小字而不是折叠/弹窗：它必须在输码之前就被看到。 */
+.login-fine{font-size:11px;color:var(--text-2);line-height:1.6;margin:-10px 0 16px;
+  padding:8px 10px;background:var(--gray-50);border:1px solid var(--border);border-radius:8px}
 .login-card input{width:100%;border:1px solid var(--border);background:var(--white);border-radius:10px;
   padding:11px 12px;font-size:14px;font-family:var(--font-mono);letter-spacing:.04em;outline:none;color:var(--text)}
 .login-card input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-bg)}
@@ -624,7 +628,10 @@ button{font-family:inherit}
   background:var(--brand);color:#fff;font-size:14px;font-weight:600;font-family:inherit}
 .login-btn:hover{background:var(--indigo-600)}
 .login-btn:disabled{opacity:.6;cursor:not-allowed}
-.login-foot{margin-top:22px;font-size:12px;color:var(--text-2);text-align:center;line-height:1.6}
+/* text-wrap:balance（2026-10-20）：这句定位语在 400px 卡里会断成「…有据可 / 依。」，
+   两行长度悬殊、末尾孤字很难看。balance 让两行等长，不改一个字。 */
+.login-foot{margin-top:22px;font-size:12px;color:var(--text-2);text-align:center;line-height:1.6;
+  text-wrap:balance}
 .tenant-chip{font-size:12px;color:var(--text-2);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 设置里的「显示名」（2026-10-20）：只改称呼，不动账本 */
 .name-edit{margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed var(--gray-200)}
