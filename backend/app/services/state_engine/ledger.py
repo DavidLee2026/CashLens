@@ -37,6 +37,10 @@ def _dedupe_key_of(event: dict, extra: str = "") -> str:
     """
     ts = _parse_ts(event.get("ts"))
     day = ts.date().isoformat()
+    # ⚠️ **note（条目名）必须进键**（2026-10-20 真机）：一份成本清单里常有好几行同额
+    # （4 笔 ¥1,000、2 笔 ¥500）。不带 note 时它们金额/分类/日期/项目全一样，键就撞在一起，
+    # `load()` 会把"后来的几笔"当重复折叠掉 —— 用户看到的是"识别出 12 笔、只入账 8 笔"。
+    # 同额但条目名不同的，是两笔不同的账。
     raw = "|".join(
         [
             str(event.get("project", "") or ""),
@@ -45,6 +49,8 @@ def _dedupe_key_of(event: dict, extra: str = "") -> str:
             day,
             str(event.get("category", "")),
             str(event.get("counterparty", "") or ""),
+            # 去掉空白再比：OCR/粘贴多一个空格不该变成"另一笔"
+            "".join(str(event.get("note", "") or "").split()),
             str(extra or ""),
         ]
     )
