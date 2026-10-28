@@ -27,6 +27,44 @@ def _book(tmp_path):
     return EventLedger(tmp_path / "finance_events.jsonl")
 
 
+# ─── 项目工时（2026-10-29 · A 档）────────────────────────
+
+def test_set_hours_writes_mapping_only(tmp_path):
+    """工时只写映射表，账本一个字不动（与改名 / 关账同一纪律）。"""
+    p = projects.create(tmp_path, "详情页 80 张")
+    out = projects.set_hours(tmp_path, p["id"], 80)
+    assert out["hours"] == 80.0
+    assert not (tmp_path / "finance_events.jsonl").exists(), "记工时不许碰账本"
+    d = projects.detail(tmp_path, [], p["id"])
+    assert d["project"]["hours"] == 80.0
+
+
+def test_set_hours_zero_or_none_clears(tmp_path):
+    """填 0 / 传 None = 清掉这个数（用户填错了要能撤回）。"""
+    p = projects.create(tmp_path, "活")
+    projects.set_hours(tmp_path, p["id"], 12)
+    projects.set_hours(tmp_path, p["id"], 0)
+    assert projects.detail(tmp_path, [], p["id"])["project"]["hours"] == 0.0
+    projects.set_hours(tmp_path, p["id"], 7)
+    projects.set_hours(tmp_path, p["id"], None)
+    assert projects.detail(tmp_path, [], p["id"])["project"]["hours"] == 0.0
+
+
+def test_set_hours_rejects_negative_and_junk(tmp_path):
+    p = projects.create(tmp_path, "活")
+    for bad in (-1, "abc"):
+        try:
+            projects.set_hours(tmp_path, p["id"], bad)
+        except ValueError as e:
+            assert "工时" in str(e) or "数字" in str(e)
+        else:
+            raise AssertionError(f"{bad!r} 应该被拒")
+
+
+def test_set_hours_unknown_project_returns_none(tmp_path):
+    assert projects.set_hours(tmp_path, "project_zzz", 10) is None
+
+
 # ─── 映射表与默认命名 ───────────────────────────────────
 
 def test_create_default_names_then_rename(tmp_path):

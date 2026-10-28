@@ -434,6 +434,8 @@ def detail(data_dir: str | Path, events: list[dict] | None, ref: str) -> dict:
             "created": str(row.get("created") or ""),
             # 关账时间（2026-10-20）：空串＝没关账。关账只记一个时间戳，不动账本。
             "closed_at": str(row.get("closed_at") or ""),
+            # 这个活一共花了多少小时（2026-10-29 · A 档）：0 = 还没填。
+            "hours": float(row.get("hours") or 0),
         },
         "totals": {
             "income_cents": income,
@@ -487,6 +489,7 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
             "created": r.get("created", ""),
             "renamed_at": r.get("renamed_at", ""),
             "closed_at": r.get("closed_at", ""),
+            "hours": float(r.get("hours") or 0),
             "income_cents": s.get("income_cents", 0),
             "expense_cents": s.get("expense_cents", 0),
             "count": s.get("income_count", 0) + s.get("expense_count", 0),
@@ -515,6 +518,42 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
                         if unnamed else ""),
         "disclaimer": "项目清单由映射表与账本事件聚合得出，仅为事实陈述。",
     }
+
+
+def set_hours(data_dir: str | Path, ref: str, hours: float | None) -> dict | None:
+    """记录「这个活我一共花了多少小时」（2026-10-29 · A 档口径）。
+
+    **口径是「全部投入时间」，不是「干活的时间」**：含沟通、改稿、换素材、来回跑。
+    这是历史时薪的分母；如果这里填 2 天、实际做了 7 天，算出来的时薪就是假的
+    （起因：80 张详情页按 2 天估、实际 10 天，收 ¥800）。
+
+    和改名 / 关账同一套纪律：**只写映射表，账本一个字不动**。
+    hours 传 None 或 <= 0 表示"清掉这个数"。
+    """
+    pid = resolve(data_dir, ref)
+    if pid is None:
+        return None
+    try:
+        value = float(hours) if hours is not None else 0.0
+    except (TypeError, ValueError):
+        raise ValueError("工时得是一个数字（小时）")
+    if value < 0:
+        raise ValueError("工时不能是负数")
+    rows = _load(data_dir)
+    hit: dict | None = None
+    for r in rows:
+        if str(r.get("id")) == pid:
+            if value > 0:
+                r["hours"] = round(value, 2)
+                r["hours_set_at"] = _now()
+            else:
+                r.pop("hours", None)
+                r.pop("hours_set_at", None)
+            hit = r
+    if hit is None:
+        return None
+    _save(data_dir, rows)
+    return {"id": pid, "name": display_name(rows, pid), "hours": float(hit.get("hours") or 0)}
 
 
 def close_project(data_dir: str | Path, ref: str, closed: bool = True) -> dict | None:

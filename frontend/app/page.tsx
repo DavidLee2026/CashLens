@@ -172,7 +172,8 @@ type DetailInvoice = { invoice_no: string; amount_cents: number; date: string };
 /** 项目对账（GET /api/projects/{id}/reconcile）：账面 / 有账单凭证的收入 / 票据 + 差额，只读。 */
 type ReconcileView = {
   ok: boolean;
-  project: { id: string; name: string; closed_at: string };
+  /** hours：这个活一共花了多少小时（2026-10-29 · A 档）。0 = 还没填，历史时薪就算不出来。 */
+  project: { id: string; name: string; closed_at: string; hours?: number };
   book: { income_cents: number; expense_cents: number; net_cents: number; count: number };
   bill: { available: boolean; income_cents: number; count: number; channels: string[] };
   docs: { total: number; with_doc: number; missing: number;
@@ -659,6 +660,10 @@ export default function Workbench() {
   /* 对账（2026-10-20，A 档 ②）：与详情一起拉，只读；关账只写一个时间戳。 */
   const [recon, setRecon] = useState<ReconcileView | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
+  /* 项目工时（2026-10-29 · A 档）：历史时薪的分母。输入框用非受控 + key 重置，
+     省掉一套「recon 拉回来再同步 draft」的状态机（那是最容易写出陈旧值的地方）。 */
+  const [hoursBusy, setHoursBusy] = useState(false);
+  const hoursRef = useRef<HTMLInputElement>(null);
   /* 详情读取失败也要说清楚：错误提示必须显示在弹窗内——写进左栏 projMsg 会被遮罩挡着，用户只看到空白卡片 */
   const [detailErr, setDetailErr] = useState("");
   /* 当前项目（2026-10-20 David 定稿）：**默认就是列表最上面那个项目**，而且不再有"取消选中"。
@@ -983,6 +988,33 @@ export default function Workbench() {
       setDetailErr("详情读取失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
     } finally {
       setDetailBusy(false);
+    }
+  }
+
+  /** 保存「这个活一共花了多少小时」（2026-10-29 · A 档）。
+   *  这是历史时薪的分母：不填，决策永远只能说「算不出你的历史时薪」。
+   *  口径必须含沟通、改稿、换素材 —— 只填干活时间，时薪会虚高。 */
+  async function saveHours() {
+    if (!detailId || hoursBusy) return;
+    const raw = hoursRef.current?.value ?? "";
+    const hours = Number(raw);
+    if (!Number.isFinite(hours) || hours < 0) {
+      setDetailErr("工时得填一个不小于 0 的数字（小时）。");
+      return;
+    }
+    setHoursBusy(true);
+    try {
+      await j(`/api/projects/${encodeURIComponent(detailId)}/hours`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hours }),
+      });
+      setRecon(await j<ReconcileView>(`/api/projects/${encodeURIComponent(detailId)}/reconcile`));
+      setDetailErr("");
+      refresh();
+    } catch {
+      setDetailErr("工时没存上：请确认后端在运行后重试。");
+    } finally {
+      setHoursBusy(false);
     }
   }
 
@@ -3276,6 +3308,43 @@ export default function Workbench() {
                         {" · "}净 <b className={`num ${recon.book.net_cents < 0 ? "amt-out" : "amt-in"}`}>
                           {yuan(recon.book.net_cents)}</b>
                         <span className="rc-sub">共 {recon.book.count} 笔</span>
+                      </span>
+                    </div>
+
+                    {/* 工时（2026-10-29 · A 档）：这是历史时薪的分母。
+                        口径写死成「一共花了多少」——含沟通、改稿、换素材；
+                        只填干活时间，算出来的时薪会虚高，正好掩盖掉「改稿亏本」那个坑。 */}
+                    <div className="rc-row">
+                      <span className="rc-k">这个活一共花了</span>
+                      <span className="rc-v">
+                        <input
+                          key={`hours-${recon.project.hours || 0}`}
+                          ref={hoursRef}
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          defaultValue={recon.project.hours ? String(recon.project.hours) : ""}
+                          placeholder="0"
+                          aria-label="这个项目一共投入多少小时"
+                          style={{ width: 76, marginRight: 6 }}
+                        />
+                        小时
+                        <button
+                          className="btn-mini"
+                          style={{ marginLeft: 8 }}
+                          disabled={hoursBusy}
+                          onClick={() => { void saveHours(); }}
+                        >
+                          {hoursBusy ? "保存中…" : "保存"}
+                        </button>
+                        {recon.project.hours && recon.book.income_cents > 0
+                          ? <span className="rc-sub">
+                              收 {yuan(recon.book.income_cents)} ÷ {recon.project.hours} 小时 =
+                              <b className="num"> {yuan(Math.round(recon.book.income_cents / recon.project.hours))}</b>/时
+                            </span>
+                          : <span className="rc-sub">
+                              填了才能算「你的历史时薪」；含沟通和改稿，别只填干活的时间
+                            </span>}
                       </span>
                     </div>
                     {recon.bill.available && (

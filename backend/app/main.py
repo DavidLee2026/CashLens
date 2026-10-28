@@ -740,9 +740,12 @@ def _run_actions(parsed: dict, text: str, current_project: str = "") -> dict:
             "tax_rate": act.get("tax_rate"),
             "platform_rate": act.get("platform_rate"),
         }
-        out = decision_engine.decide(evs, order)
+        out = decision_engine.decide(evs, order, projects=projects.visible_rows(data_dir()))
         lines = [f"{out['decision']}｜{out['headline']}"]
-        lines += [f"· {r['text']}" for r in out["reasons"][:3]]
+        # reasons[0] 就是 headline 本身（引擎里第一条理由重复了结论）：这里过滤掉，
+        # 否则聊天回复会把同一句话印两遍（前端卡片早就 filter 了，聊天这条路一直没滤）。
+        seen = [r for r in out["reasons"] if r["text"] != out["headline"]][:3]
+        lines += [f"· {r['text']}" for r in seen]
         if out["min_price_cents"]:
             lines.append(f"· 报价下限 {_yuan(out['min_price_cents'])}；"
                          f"推荐 {_yuan(out['quote']['recommend_cents'])}、"
@@ -947,7 +950,7 @@ def decision(body: DecisionIn):
     - 引用预测必标注代理口径（账本里没有「当前余额」这个量）。
     """
     order = body.model_dump()
-    return decision_engine.decide(_events(), order)
+    return decision_engine.decide(_events(), order, projects=projects.visible_rows(data_dir()))
 
 
 @app.get("/api/capabilities")
@@ -1317,6 +1320,31 @@ def projects_detail(pid: str):
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("error", "项目不存在"))
     return out
+
+
+class ProjectHoursIn(BaseModel):
+    """这个活一共花了多少小时（A 档口径，2026-10-29）。
+
+    传 0 / 不传 = 清掉这个数。**含沟通、改稿、换素材的全部投入时间**，不是只算干活。
+    """
+    hours: float | None = Field(default=None, ge=0)
+
+
+@app.post("/api/projects/{pid}/hours")
+def projects_hours(pid: str, body: ProjectHoursIn):
+    """记录项目工时（历史时薪的分母）。**只写映射表，账本一个字不动**。
+
+    为什么必须有这个入口：历史时薪 = 项目收入 ÷ 项目工时，没有小时数就算不出来。
+    2026-10-29 之前只能往收入事件上挂 `hours`，界面上根本没有入口 ——
+    真机走一遍永远是「你的历史时薪：算不出」。
+    """
+    try:
+        row = projects.set_hours(data_dir(), pid, body.hours)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"找不到项目：{pid}")
+    return {"ok": True, **row}
 
 
 class ProjectCloseIn(BaseModel):

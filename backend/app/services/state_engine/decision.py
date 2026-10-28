@@ -82,14 +82,80 @@ def _income_with_hours(events, cutoff: datetime) -> list[tuple[dict, float]]:
     return out
 
 
-def historical_hourly(events, as_of=None, months: int = HISTORY_MONTHS) -> dict:
-    """从账本反推个人历史时薪 = 近 N 月收入**中位数** ÷ 近 N 月总投入工时。
+def _project_hourly(events, cutoff: datetime, projects, months: int) -> dict | None:
+    """A 档口径（2026-10-29）：**按项目**算时薪 —— 项目收入 ÷ 这个项目的工时。
+
+    为什么按项目而不是按事件：自由职业者脑子里记的是「这个活我花了多少小时」，
+    不是「这一笔收入花了多少小时」。一笔定金 + 一笔尾款属于同一个活，工时只有一个数。
+
+    窗口按**项目最后一条事件**判断（不是逐条事件过滤）：定金 3 个月前、尾款 1 个月前，
+    这个项目仍然算"在窗口内"，收入要按全额算，否则分母工时是整单的、分子只是一半。
+    """
+    hours_of = {}
+    for p in (projects or []):
+        try:
+            h = float(p.get("hours") or 0)
+        except (TypeError, ValueError):
+            h = 0.0
+        if h > 0 and not p.get("deleted"):
+            hours_of[str(p.get("id"))] = h
+    if not hours_of:
+        return None
+
+    income: dict[str, int] = {}
+    last_ts: dict[str, datetime] = {}
+    ids: dict[str, list[str]] = {}
+    for ev in events or []:
+        pid = str(ev.get("project") or "")
+        if pid not in hours_of:
+            continue
+        ts = _parse_ts(ev.get("ts"))
+        if pid not in last_ts or ts > last_ts[pid]:
+            last_ts[pid] = ts
+        if ev.get("type") in HEALTH_POSITIVE_TYPES and \
+                (ev.get("evidence") or {}).get("kind") != "self_report":
+            income[pid] = income.get(pid, 0) + int(ev.get("amount_cents") or 0)
+            ids.setdefault(pid, []).append(str(ev.get("event_id") or ""))
+
+    usable = [(pid, income.get(pid, 0), hours_of[pid]) for pid in hours_of
+              if pid in last_ts and last_ts[pid] >= cutoff]
+    if not usable:
+        return None
+
+    rates = [inc / h for _, inc, h in usable]
+    hourly = int(round(statistics.median(rates)))
+    rates_c = [int(round(r)) for r in sorted(rates)]
+    shown = (" / ".join(_yuan(r) for r in rates_c) if len(rates_c) <= 4
+             else f"区间 {_yuan(rates_c[0])}–{_yuan(rates_c[-1])}")
+    return {
+        "hourly_cents": hourly,
+        "income_total_cents": sum(inc for _, inc, _ in usable),
+        "hours_total": sum(h for _, _, h in usable),
+        "sample_orders": len(usable),
+        "basis": "projects",
+        "event_ids": [eid for pid, _, _ in usable for eid in ids.get(pid, [])],
+        "reason": (f"近 {months} 个月 {len(usable)} 个填了工时的项目，"
+                   f"逐项目时薪 {shown}，取中位数 {_yuan(hourly)}/时"),
+    }
+
+
+def historical_hourly(events, as_of=None, months: int = HISTORY_MONTHS,
+                      projects=None) -> dict:
+    """从账本反推个人历史时薪 = 近 N 月**逐单时薪**的中位数。
+
+    两条路径（2026-10-29 · A 档）：
+    - `projects` 里有填过工时的项目 → **项目口径**（项目收入 ÷ 项目工时），优先；
+    - 否则回退**事件口径**（该单收入 ÷ 该单工时），兼容老数据。
 
     取中位数而非均值：避免被一单大额拉偏（出处见设计文档 §五·5.1）。
-    没有带工时的收入记录时**不编默认时薪**，如实返回 `basis="insufficient"`。
+    一条都没有时**不编默认时薪**，如实返回 `basis="insufficient"`。
     """
     at = _as_of(as_of)
     cutoff = at - timedelta(days=30 * months)
+    by_project = _project_hourly(events, cutoff, projects, months)
+    if by_project is not None:
+        return by_project
+
     pairs = _income_with_hours(events, cutoff)
     amounts = [ev.get("amount_cents", 0) for ev, _ in pairs]
     hours_total = sum(h for _, h in pairs)
@@ -107,8 +173,21 @@ def historical_hourly(events, as_of=None, months: int = HISTORY_MONTHS) -> dict:
                        "记账时补一句这笔投入了多少小时，攒几笔就能算出来。"),
         }
 
-    median_income = int(statistics.median(amounts))
-    hourly = int(round(median_income / hours_total))
+    # 取「**逐单时薪**」的中位数，不是「各单金额的中位数 ÷ 所有单的工时之和」
+    # （2026-10-29 修：原实现把「取中位数避免被一单大额拉偏」套在了分子上，
+    #   分母却是所有单的工时**之和** —— 两个量不在同一维度：分子是「一单多少钱」，
+    #   分母是「所有单一共多少小时」。n 每多一单，分母变大、分子不变，时薪被系统性拉低。
+    #
+    #   实测三单（¥600/16h、¥800/56h、¥2000/40h）：
+    #     原式 中位数 ¥800 ÷ 112h = ¥7.14/时  ← 真实混合口径 ¥30.36/时，偏小 4.25 倍
+    #     正解 逐单 ¥37.50 / ¥14.29 / ¥50.00 取中位数 = ¥37.50/时
+    #   后果有多硬：历史时薪被算成 ¥7.14 时，报价 ¥40/时 会被判「远超基准、接」，
+    #   而那一单的真实时薪可能只有 ¥14 —— 等于产品亲手把人推回坑里。）
+    per_order = [amount / hours for (_, hours), amount in zip(pairs, amounts)]
+    hourly = int(round(statistics.median(per_order)))
+    rates = [int(round(x)) for x in sorted(per_order)]
+    shown = (" / ".join(_yuan(r) for r in rates) if len(rates) <= 4
+             else f"区间 {_yuan(rates[0])}–{_yuan(rates[-1])}")
     return {
         "hourly_cents": hourly,
         "income_total_cents": sum(amounts),
@@ -116,8 +195,8 @@ def historical_hourly(events, as_of=None, months: int = HISTORY_MONTHS) -> dict:
         "sample_orders": len(pairs),
         "basis": "ledger",
         "event_ids": event_ids,
-        "reason": (f"近 {months} 个月 {len(pairs)} 笔带工时的收入"
-                   f"（中位数 {_yuan(median_income)}）÷ {hours_total:g} 小时"),
+        "reason": (f"近 {months} 个月 {len(pairs)} 笔带工时的收入，逐单时薪 {shown}，"
+                   f"取中位数 {_yuan(hourly)}/时"),
     }
 
 
@@ -143,12 +222,13 @@ def _receivable_deviation(events) -> dict | None:
     return None
 
 
-def decision_check(events, order: dict, as_of=None, historical: dict | None = None) -> list[dict]:
+def decision_check(events, order: dict, as_of=None, historical: dict | None = None,
+                   projects=None) -> list[dict]:
     """三道闸门：`cash_runway` / `receivable_cycle` / `after_tax`，各带 status + reason + action。"""
     at = _as_of(as_of)
     amount = int(order.get("amount_cents") or 0)
     hours = _hours_of(order)
-    historical = historical if historical is not None else historical_hourly(events, at)
+    historical = historical if historical is not None else historical_hourly(events, at, projects=projects)
     hist = historical.get("hourly_cents")
     checks: list[dict] = []
 
@@ -288,14 +368,14 @@ def quote_range(order: dict, historical: dict, as_of=None) -> dict:
     }
 
 
-def decide(events: list[dict], order: dict, as_of=None) -> dict:
+def decide(events: list[dict], order: dict, as_of=None, projects=None) -> dict:
     """组合历史时薪 + 三道闸门 + 报价区间 → 对外返回体（对应设计文档 §4.2）。"""
     at = _as_of(as_of)
     amount = int(order.get("amount_cents") or 0)
     hours = _hours_of(order)
 
-    historical = historical_hourly(events, at)
-    checks = decision_check(events, order, at, historical=historical)
+    historical = historical_hourly(events, at, projects=projects)
+    checks = decision_check(events, order, at, historical=historical, projects=projects)
     quote = quote_range(order, historical, at)
     by_name = {c["name"]: c for c in checks}
     hist = historical.get("hourly_cents")
@@ -317,20 +397,27 @@ def decide(events: list[dict], order: dict, as_of=None) -> dict:
             decision = "不接"
         else:
             decision = "再考虑"
-        headline = (f"这单等效时薪 {_yuan(equivalent)}/时，你的历史时薪 {_yuan(hist)}/时"
-                    f"（{historical['reason']}）")
+        # 2026-10-29：把「口径」从 headline 里挪走 —— 卡片脚注本来就显示 basis，
+        # headline 塞一串括号后，用户第一眼读不到对比本身。
+        headline = f"这单等效时薪 {_yuan(equivalent)}/时，你平时 {_yuan(hist)}/时"
         reasons.append({"text": headline,
                         "evidence": {"kind": "ledger", "event_ids": historical["event_ids"]}})
         if decision == "不接":
+            # 文案口径（2026-10-29）：说人话，不摆门槛也不摆公式。
+            # 原来写「低于你历史时薪的 80%」—— 用户不知道这 80% 是哪来的；
+            # 原来后面还跟一串「（历史时薪 × 预估工时 × (1 + 税负率 + 平台抽成)）」——
+            # 那是给写代码的人看的，不是给出钱的人看的。用户要的只有一个数：接的话该收多少。
+            pct = int(round(equivalent / hist * 100)) if hist else 0
             reasons.append({
-                "text": (f"低于你历史时薪的 {BELOW_MARKET_RATIO:.0%}；要接的话报价下限是 "
-                         f"{_yuan(quote['floor_cents'])}（{quote['breakdown']['formula']}）"),
+                "text": (f"这单只有你平时价位的 {pct}%。按你平时的时薪算，"
+                         f"这单的报价下限是 {_yuan(quote['floor_cents'])}"),
                 "evidence": {"kind": "computed", "source": "quote_range"},
             })
         elif decision == "再考虑":
+            pct = int(round(equivalent / hist * 100)) if hist else 0
             reasons.append({
-                "text": (f"介于历史时薪的 {BELOW_MARKET_RATIO:.0%} 到 100% 之间：能接，但偏低。"
-                         f"可参考报价下限 {_yuan(quote['floor_cents'])}"),
+                "text": (f"这单是你平时价位的 {pct}%：能接，但偏低。"
+                         f"要接的话，报价下限是 {_yuan(quote['floor_cents'])}"),
                 "evidence": {"kind": "computed", "source": "quote_range"},
             })
 
