@@ -29,8 +29,16 @@ except Exception:  # noqa: BLE001 非 macOS 或缺少 PyObjC 桥，降级为纯�
 
 # ─── 模型档位：仅在未配置档位时用环境变量回退 ───────────
 _DEFAULT_BASE_URL = os.environ.get("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
-_DEFAULT_MODEL = os.environ.get("LLM_MODEL", "doubao-seed-2-0-lite-260428")
+_DEFAULT_MODEL = os.environ.get("LLM_MODEL", "doubao-seed-2-1-lite-260915")
 _DEFAULT_API_KEY = os.environ.get("LLM_API_KEY", "")
+
+# 退役模型名 → 现行模型名。与 backend/app/services/model_config.py 的 _RETIRED_MODELS 同源；
+# 本进程不 import 后端包，只能单独留一份，换模型时两处必须一起改。
+# 起因（2026-10-29）：豆包 Seed 2.0 Lite 退役。旧版本落盘的 model_config.json 里还写着旧名，
+# 平台一旦停用旧名，识图会整条失败，而界面只看到「识别失败」。
+_RETIRED_MODELS = {
+    "doubao-seed-2-0-lite-260428": "doubao-seed-2-1-lite-260915",
+}
 
 # 档位配置文件：与 backend/app/services/model_config.py 同一份，格式同源。
 # 票据识别跑在独立 MCP 进程里，不 import 后端包，所以直接读文件。
@@ -63,6 +71,9 @@ def load_runtime_config() -> dict:
                     vision = bool(slot.get("declared_vision", True))
     except (OSError, json.JSONDecodeError):
         pass  # 配置坏了就按默认云端走，不因配置问题让识别整体失败
+
+    # 旧版配置里的退役模型名换成现行名（幂等）。不换的话，平台停用旧名时识图会全挂。
+    model = _RETIRED_MODELS.get(model, model)
 
     if tier == "none":
         return {"tier": "none", "base_url": "", "model": "", "api_key": "",
@@ -534,7 +545,10 @@ def recognize_receipt(image_path: str, local_only: bool = False) -> dict:
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
+        # 120 秒（2026-10-30 由 90 秒上调）：2.1 Lite 是思考型模型，单张票据实测
+        # 常态 10 至 50 秒，偶发一次直接撞到 90 秒上限并返回空结果 —— 用户看到的就是
+        # 「识别失败」。上限放宽到 120 秒，宁可多等一会儿，也不要把跑得慢当成读不出。
+        with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         content = data["choices"][0]["message"]["content"]
         result = _extract_json(content)

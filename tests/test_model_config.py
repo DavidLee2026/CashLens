@@ -139,6 +139,39 @@ def test_broken_config_falls_back_to_defaults(isolated):
     assert act["tier"] == "cloud"  # 坏配置不应让整体崩掉
 
 
+# ─── 退役模型名升档（2026-10-29）─────────────────────────
+# 平台停用旧模型名后，识图与对话会整条失败，而界面上只剩「识别失败」四个字，
+# 用户不会想到是模型名过期。老实例的 model_config.json 里仍写着旧名，所以读配置时
+# 做一次幂等替换：只换模型名，端点与密钥一律保留。
+def test_retired_model_name_is_upgraded_on_load(isolated):
+    isolated.config_path().write_text(json.dumps({
+        "tier": "cloud",
+        "cloud": {
+            "preset_id": "doubao-lite",
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "model": "doubao-seed-2-0-lite-260428",
+            "api_key": "sk-test-not-real",
+        },
+    }), encoding="utf-8")
+    act = isolated.active()
+    assert act["model"] == "doubao-seed-2-1-lite-260915"
+    assert act["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
+    assert act["usable"] is True  # 换名不许把密钥或端点弄丢
+
+
+def test_retired_upgrade_does_not_touch_custom_model(isolated):
+    """用户自己填的模型名不能被升档吃掉。"""
+    isolated.select("cloud", base_url="https://example.com/v1", model="my-custom-vlm")
+    assert isolated.active()["model"] == "my-custom-vlm"
+
+
+def test_retired_map_matches_recognition_process():
+    """两处退役表必须同源：后端不换名、识图进程换名，会出现一半新一半旧。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine" / "mcp"))
+    import receipt_mcp  # noqa: PLC0415
+
+    assert receipt_mcp._RETIRED_MODELS == model_config._RETIRED_MODELS
+
 # ─── 密钥不外泄 ─────────────────────────────────────────
 def test_public_view_never_leaks_api_key(isolated, monkeypatch):
     secret = "sk-super-secret-value"

@@ -28,7 +28,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/services/model_co
 ENV_PATH = REPO_ROOT / ".env"
 
 _DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-_DEFAULT_MODEL = "doubao-seed-2-0-lite-260428"
+# 2026-10-29 升档：豆包 Seed 2.0 Lite 进退役名单，2.1 Lite 接替。
+# 实测差异：同一张真实发票，2.0 把 20 位票号读成 19 位（漏一位），2.1 读对。
+_DEFAULT_MODEL = "doubao-seed-2-1-lite-260915"
 
 TIERS = ("cloud", "local", "none")
 
@@ -56,12 +58,12 @@ TIER_META: dict[str, dict] = {
 CLOUD_PRESETS: list[dict] = [
     {
         "id": "doubao-lite",
-        "label": "豆包 Seed 2.0 Lite",
+        "label": "豆包 Seed 2.1 Lite",
         "vendor": "豆包",
         "base_url": _DEFAULT_BASE_URL,
         "model": _DEFAULT_MODEL,
         "vision": True,
-        "note": "默认档位。长数字串已实测会漏位，系统用格式校验与本机文本层交叉核对兜底。",
+        "note": "默认档位。20 位票号已实测读对；系统仍用格式校验与本机文本层交叉核对兜底。",
     },
 ]
 
@@ -256,6 +258,26 @@ def _load_env_file() -> None:
             os.environ[k] = v.strip().strip('"')
 
 
+# ─── 退役模型名自动升档（2026-10-29 立）──────────────────
+# 起因：豆包 Seed 2.0 Lite 进退役名单，2.1 Lite 接替。平台一旦停掉旧名，
+# 识别与对话会**整条全挂**（调用返回 ModelNotOpen / NotFound），而界面上只看到
+# 「识别失败」。旧版本落盘的 data/model_config.json 里仍写着旧名，光改默认值救不了
+# 已经装好的实例，所以读配置时做一次幂等替换：只改模型名，不动端点与密钥。
+_RETIRED_MODELS = {
+    "doubao-seed-2-0-lite-260428": _DEFAULT_MODEL,
+}
+
+
+def _upgrade_retired_model(cfg: dict) -> None:
+    """把已落盘配置里的退役模型名换成现行模型名（幂等，不改文件，只改内存里的值）。"""
+    cloud = cfg.get("cloud")
+    if not isinstance(cloud, dict):
+        return
+    replacement = _RETIRED_MODELS.get(str(cloud.get("model") or ""))
+    if replacement:
+        cloud["model"] = replacement
+
+
 def _defaults() -> dict:
     return {
         "tier": "cloud",
@@ -306,6 +328,7 @@ def load() -> dict:
                 if v is not None:
                     cfg[tier][k] = v
     cfg["updated_at"] = str(saved.get("updated_at") or "")
+    _upgrade_retired_model(cfg)
     _expand_env_key(cfg)
     return cfg
 
@@ -530,7 +553,10 @@ def probe() -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        # 15 秒（2026-10-30 由 8 秒上调）：豆包 Seed 2.1 Lite 是思考型模型，
+        # 连发一句 ping 实测 11.9 / 10.9 / 7.7 秒 —— 原来 8 秒里有两次会误报「端点不可用」。
+        # 自检是用户换模型后看的第一眼，宁可多等几秒，也不能把能用的模型报成故障。
+        with urllib.request.urlopen(req, timeout=15) as resp:
             resp.read(64)
         return {"ok": True, "tier": act["tier"], "model": act["model"],
                 "detail": "端点可用。"}

@@ -9,27 +9,36 @@
         "apiKey": "{env:LLM_API_KEY}"
       },
       "models": {
-        "doubao-seed-2-0-lite-260428": {
-          "name": "Doubao Seed 2.0 Lite"
+        "doubao-seed-2-1-lite-260915": {
+          "name": "Doubao Seed 2.1 Lite"
         }
       }
     }
   },
-  "model": "ark/doubao-seed-2-0-lite-260428",
+  "model": "ark/doubao-seed-2-1-lite-260915",
   "mcp": {
     "cashflow": {
       "type": "local",
-      "command": ["python3", "mcp/cashflow_mcp.py"],
+      "command": [
+        "python3",
+        "mcp/cashflow_mcp.py"
+      ],
       "enabled": true
     },
     "receipt": {
       "type": "local",
-      "command": ["python3", "mcp/receipt_mcp.py"],
+      "command": [
+        "python3",
+        "mcp/receipt_mcp.py"
+      ],
       "enabled": true
     },
     "bill": {
       "type": "local",
-      "command": ["python3", "mcp/bill_import_mcp.py"],
+      "command": [
+        "python3",
+        "mcp/bill_import_mcp.py"
+      ],
       "enabled": true
     }
   }
