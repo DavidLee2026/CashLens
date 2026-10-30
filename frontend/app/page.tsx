@@ -384,6 +384,26 @@ function summarizeIntake(batches: IntakeBatch[], includeErrors = true): string[]
 }
 
 const CHANNEL_CN: Record<string, string> = { wechat: "微信", alipay: "支付宝", cash: "现金", bank: "银行卡", manual: "手动", voice: "语音", receipt: "票据" };
+/** 分类 → 药丸配色（2026-10-30 David：最近记的账里标签只有灰字，看不出类别）。
+ *  色相只用设计系统里已有的几种，按语义分组，不新造色值：
+ *  吃＝琥珀、行＝青、住与购物与学＝品牌紫、房与税费＝深蓝、医＝红、经营与收入＝绿、其余＝灰。
+ *  ⚠️ 后端 CATEGORIES / INCOME_CATEGORIES 里新增分类时，这里必须同步加，
+ *  否则它会静默落到灰色（tests/test_workbench_layout.py 有断言盯着）。 */
+const CAT_TONE: Record<string, string> = {
+  餐饮: "cat-amber", 人情: "cat-amber",
+  交通: "cat-cyan", 通讯: "cat-cyan", 娱乐: "cat-cyan",
+  住宿: "cat-indigo", 购物: "cat-indigo", 教育: "cat-indigo",
+  居住: "cat-navy", 社保税费: "cat-navy", 经营: "cat-navy",
+  医疗: "cat-red",
+  /* ⚠️ 支出分类不许用绿色：绿在本产品里＝进钱（2026-10-20 定），
+     经营是支出，用绿会被读成收入。 */
+  接单: "cat-green", 工资: "cat-green", 退款: "cat-green", 其他收入: "cat-green",
+  待确认: "cat-gray",
+};
+function catTone(category?: string | null): string {
+  const key = String(category || "").trim();
+  return CAT_TONE[key] || "cat-gray";
+}
 /** 「最近事件」默认露几条（其余点「展开其余 N 笔」看，不在该区域里二次滚动）。 */
 const EV_WINDOW = 5;
 /** 会话失效时给用户看的一句人话（2026-10-20）。
@@ -649,6 +669,17 @@ export default function Workbench() {
   const [cats, setCats] = useState<CategoriesView | null>(null);
   /* 项目行的「⋯」菜单开着哪一个；项目详情弹窗（改名 / 详情 两个分支，David 2026-09-26） */
   const [projMenuId, setProjMenuId] = useState("");
+  /* 长按拖动排序（2026-10-30 David）：按住约 0.4 秒进入拖动，松手即保存。
+     用 pointer 事件而不是 HTML5 拖放：后者在手机上（触摸）根本不触发。 */
+  const [dragProjId, setDragProjId] = useState("");
+  const [dragOverId, setDragOverId] = useState("");
+  const projRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const pressTimerRef = useRef<number | null>(null);
+  const pressStartRef = useRef<{ x: number; y: number } | null>(null);
+  /* 拖动结束那一下会紧接着来一次 click，别让它顺手把项目选中了 */
+  const suppressProjClickRef = useRef(false);
+  /* 拖动期间挡住触摸滚动用的处理器（长按已经触发，就不该再滚页面了） */
+  const stopTouchRef = useRef<((ev: TouchEvent) => void) | null>(null);
   /* 导入框里被点开明细的那个文件（一次只开一个：不看就只留一行，否则十几个文件
      各四段明细能刷满一整屏 —— David 2026-09-28「太多信息了，看的头晕」）。 */
   const [openFile, setOpenFile] = useState("");
@@ -695,6 +726,13 @@ export default function Workbench() {
   const fileRef = useRef<HTMLInputElement>(null);
   const tsRef = useRef<HTMLInputElement>(null);   // 工时 / 工分表（.xlsx）
   const logRef = useRef<HTMLDivElement>(null);
+  /* 用户是不是停在聊天底部（2026-10-30 修）
+     起因：导入进行中，后端每 3 秒推一次进度、前端按身份原地更新那条消息，
+     消息数组一变就无条件滚到底，于是正在往上翻看内容的人被一次次拽回最底部，
+     看起来像「界面自己刷新了」。
+     口径：只有本来就在底部（差 80 像素以内）才跟随；往上翻过就停住不跟随，
+     等他自己回到底部再恢复。 */
+  const atBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /* 正在跑的这次导入的取消句柄（一次只允许一次导入，intakeBusy 挡着） */
   const importAbortRef = useRef<AbortController | null>(null);
@@ -960,8 +998,16 @@ export default function Workbench() {
 
   useEffect(() => {
     const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    // 只有本来就在底部才跟随；用户往上翻过后就不再拽他回去（2026-10-30）
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [msgs]);
+
+  /** 记一下用户当前的滚动位置：贴底才算「在底部」，留 80 像素容差。 */
+  function onLogScroll() {
+    const el = logRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
 
   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
   /* 「未归项目」一键收编（2026-10-20）：把未归的账一次性改到某个项目。
@@ -988,6 +1034,132 @@ export default function Workbench() {
       setDetailErr("详情读取失败：请确认后端在运行（cd backend && python3 -m uvicorn app.main:app --port 8001）。");
     } finally {
       setDetailBusy(false);
+    }
+  }
+
+  /* ─── 左侧项目长按拖动排序（2026-10-30 David）────────────────────
+     第一版的两个毛病（David 真机：拖上去松手没反应、手型还留着、要再点一下才动）：
+       1. pointerup 只挂在每一行上 —— 在行间空隙或列表外松手就收不到，拖动状态卡住；
+       2. 拖动过程中只有"落点线"在动，被拖的那一行原地不动，手感像卡帧。
+     现在：按下 0.4 秒进入抓取 → 指针捕获 + 事件挂到 window（松在哪都算数）→
+     被拖的那一行跟着手指走（直接改 transform，不走 React 重渲染，所以跟手）→
+     其它行只更新落点线；松手就提交，不再等下一次点击。 */
+  function cancelProjPress() {
+    if (pressTimerRef.current !== null) {
+      window.clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  }
+
+  function startProjPress(e: React.PointerEvent<HTMLDivElement>, pid: string) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // 只排除右侧「⋯」操作区。别写成 closest("button")：项目名本身就是 button，
+    // 那样整行都拖不动（2026-10-30 踩过）。
+    const target = e.target as HTMLElement;
+    if (target.closest(".ev-acts")) return;
+    const row = e.currentTarget;
+    const pointerId = e.pointerId;
+    const startY = e.clientY;
+    const startX = e.clientX;
+    pressStartRef.current = { x: startX, y: startY };
+    cancelProjPress();
+    pressTimerRef.current = window.setTimeout(() => {
+      pressTimerRef.current = null;
+      beginProjDrag(pid, row, pointerId, startY);
+    }, 400);
+  }
+
+  /** 按下后手指一动就放弃长按（那是在滚页面）。 */
+  function moveProjPress(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragProjId) return;             // 已经在拖了，交给 window 上的处理器
+    const s = pressStartRef.current;
+    if (s && (Math.abs(e.clientX - s.x) > 8 || Math.abs(e.clientY - s.y) > 8)) {
+      cancelProjPress();
+      pressStartRef.current = null;
+    }
+  }
+
+  function beginProjDrag(pid: string, row: HTMLDivElement, pointerId: number, startY: number) {
+    suppressProjClickRef.current = true;   // 松手后紧跟的那次 click 不算点选
+    setDragProjId(pid);
+    setDragOverId("");
+    document.body.classList.add("proj-dragging");
+    try { row.setPointerCapture(pointerId); } catch { /* 某些环境下不支持，靠 window 监听兜底 */ }
+
+    // 长按已经触发就不要再滚页面了（手机上尤其明显）
+    const stopTouch = (ev: TouchEvent) => ev.preventDefault();
+    stopTouchRef.current = stopTouch;
+    window.addEventListener("touchmove", stopTouch, { passive: false });
+
+    let targetIdx = -1;
+    let raf = 0;
+    const others = () => (projView?.projects ?? []).map((p) => p.id).filter((id) => id !== pid);
+
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      const y = ev.clientY;
+      if (raf) return;                    // 一帧只算一次，避免每次 pointermove 都重排
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        row.style.transform = `translateY(${Math.round(y - startY)}px)`;
+        const ids = others();
+        let idx = ids.length;
+        for (let i = 0; i < ids.length; i++) {
+          const node = projRowRefs.current.get(ids[i]);
+          if (!node) continue;
+          const r = node.getBoundingClientRect();
+          if (y < r.top + r.height / 2) { idx = i; break; }
+        }
+        targetIdx = idx;
+        setDragOverId(ids[idx] ?? "");
+      });
+    };
+
+    const finish = (commit: boolean) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("touchmove", stopTouch);
+      stopTouchRef.current = null;
+      if (raf) cancelAnimationFrame(raf);
+      try { row.releasePointerCapture(pointerId); } catch { /* 已释放 */ }
+      row.style.transform = "";
+      document.body.classList.remove("proj-dragging");
+      setDragProjId("");
+      setDragOverId("");
+      if (commit && targetIdx >= 0) void saveProjOrder(pid, targetIdx);
+    };
+    const up = (ev: PointerEvent) => { if (ev.pointerId === pointerId) finish(true); };
+    const cancel = (ev: PointerEvent) => { if (ev.pointerId === pointerId) finish(false); };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  }
+
+  /** 把 from 插到第 insertIdx 个位置（在"去掉自己之后"的列表里数），先本地生效再落库。 */
+  async function saveProjOrder(from: string, insertIdx: number) {
+    const list = projView?.projects ?? [];
+    const ids = list.map((p) => p.id);
+    if (!ids.includes(from)) return;
+    const rest = ids.filter((x) => x !== from);
+    const next = [...rest.slice(0, insertIdx), from, ...rest.slice(insertIdx)];
+    if (next.join("|") === ids.join("|")) return;   // 位置没变，不发请求
+    const byId = new Map(list.map((p) => [p.id, p]));
+    setProjView((v) => (v ? { ...v, projects: next.map((id) => byId.get(id)!).filter(Boolean) } : v));
+    try {
+      await j<{ ok: boolean }>("/api/projects/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: next }),
+      });
+    } catch {
+      setProjMsg("顺序没保存成功：后端可能还是旧版本。刷新后顺序会回到原来的样子。");
+    }
+    try {
+      setProjView(await j<ProjectsView>("/api/projects"));
+    } catch {
+      /* 拉不到就保留本地顺序，不把整块拖黑 */
     }
   }
 
@@ -1908,6 +2080,8 @@ export default function Workbench() {
     // override：示例 chips 点一下直接发（只用于**只读查询**那两句；记账那句只预填，等用户自己按发送）
     const t = (override ?? text).trim();
     if (!t || busy) return;
+    // 自己发消息＝主动回到对话：即使刚才在往上翻，也要让他看见自己这句（2026-10-30）
+    atBottomRef.current = true;
     setMsgs((m) => [...m, { role: "user", text: t }]);
     setText("");
     if (inputRef.current) inputRef.current.style.height = "auto"; // 发送后收回一行高
@@ -2075,7 +2249,7 @@ export default function Workbench() {
             )}
             {/* 头部（「钱的事，说给我听」+「N 笔 · 本地账本 · LLM 对话」）已按 David 要求去掉：
                 那行元信息与底部模型按钮重复，去掉后对话区顶部多出一整块可用高度。 */}
-            <div className="log" ref={logRef}>
+            <div className="log" ref={logRef} onScroll={onLogScroll}>
               {msgs.map((m, i) => (
                 <div key={i} className={`b ${m.role}${m.progress ? " progress" : ""}${m.isImport ? " import" : ""}`}>
                   {m.importTitle && (
@@ -2872,15 +3046,37 @@ export default function Workbench() {
               ) : (
                 <>
                   {projView.projects.map((p) => (
-                    <div key={p.id} className="proj-item">
+                    <div
+                      key={p.id}
+                      ref={(node) => {
+                        if (node) projRowRefs.current.set(p.id, node);
+                        else projRowRefs.current.delete(p.id);
+                      }}
+                      className={`proj-item${dragProjId === p.id ? " dragging" : ""}${dragProjId && dragOverId === p.id && dragProjId !== p.id ? " drop-target" : ""}`}
+                      onPointerDown={(e) => startProjPress(e, p.id)}
+                      onPointerMove={moveProjPress}
+                      onPointerUp={cancelProjPress}
+                      onPointerCancel={cancelProjPress}
+                      onContextMenu={(e) => {
+                        // 手机上长按会弹出系统菜单，把拖动打断；拖动期间在这一行里屏蔽
+                        if (dragProjId) e.preventDefault();
+                      }}
+                    >
                       <div className={`ev${activeProject === p.id ? " on" : ""}`}>
                         <button
                           type="button"
                           className="ev-pick"
-                          onClick={() => setActiveProject(p.id)}
+                          onClick={() => {
+                            // 拖动结束会紧跟一次 click，别让它顺手改掉「当前项目」
+                            if (suppressProjClickRef.current) {
+                              suppressProjClickRef.current = false;
+                              return;
+                            }
+                            setActiveProject(p.id);
+                          }}
                           onDoubleClick={() => openDetail(p.id)}
                           aria-pressed={activeProject === p.id}
-                          title="点一下＝之后记的账算这个项目；双击＝看它的详情"
+                          title="点一下＝之后记的账算这个项目；双击＝看它的详情；长按可拖动换位置"
                         >
                           <b>{p.name}</b>
                           <span className="m">
@@ -3226,15 +3422,18 @@ export default function Workbench() {
                         <div>
                           <b className={ev.type === "expense" ? "amt-out" : "amt-in"}>{yuan(ev.amount_cents)}</b>
                           <span className="m">
-                            {/* 空分类如实说「未分类」，别拿「其他」冒充 —— 「其他」是个
+                            {/* 分类做成彩色药丸（2026-10-30 David：「只有文字，看不出类别」）。
+                                空分类如实说「未分类」，别拿「其他」冒充 —— 「其他」是个
                                 真分类，和"根本没分类"不是一回事。后端 projects.summary()
                                 也是这么归的，两处口径一致。 */}
-                            {ev.category || "未分类"} · {CHANNEL_CN[ev.channel] ?? ev.channel} · {ev.ts.slice(0, 10)}
+                            <span className={`pill ${catTone(ev.category)}`}>{ev.category || "未分类"}</span>
+                            <span className="pill cat-ghost">{CHANNEL_CN[ev.channel] ?? ev.channel}</span>
+                            <span className="m-date num">{ev.ts.slice(0, 10)}</span>
                             {/* 来源票据（2026-10-20）：有就点名是哪张文件，没有就不写 ——
                                 对外承诺是「每一笔都能追到那张票」，那就得让人真的看见文件名。 */}
                             {ev.evidence_file && (
-                              <> · <span className="ev-src" title="这笔账来自这个文件（在原始票据目录里）">
-                                来源：{ev.evidence_file}</span></>
+                              <span className="ev-src" title="这笔账来自这个文件（在原始票据目录里）">
+                                来源：{ev.evidence_file}</span>
                             )}
                           </span>
                         </div>

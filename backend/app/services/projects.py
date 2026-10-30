@@ -69,6 +69,46 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+# ─── 拖动排序（2026-10-30 David：左侧项目可长按拖动换位置）──────────
+# 顺序存在 projects.json 的 order 字段，跟着数据走，刷新与换设备都保持。
+# 老数据没有这个字段，按原行为（新建的排最上面）垫在后面，不做迁移。
+def _has_order(row: dict) -> bool:
+    try:
+        float(row.get("order"))  # type: ignore[arg-type]
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _ordered_rows(rows: list[dict]) -> list[dict]:
+    """拖过的按 order 升序；没拖过的按创建时间倒序排在其后。"""
+    with_order = sorted([r for r in rows if _has_order(r)], key=lambda r: float(r["order"]))
+    legacy = sorted([r for r in rows if not _has_order(r)],
+                    key=lambda r: str(r.get("created") or ""), reverse=True)
+    return with_order + legacy
+
+
+def reorder(data_dir: str | Path, ids: list[str]) -> list[dict]:
+    """按传入的 id 顺序重排。没传到的项目排在后面，相互顺序不变。"""
+    rows = _load(data_dir)
+    wanted: list[str] = []
+    for raw in ids or []:
+        pid = str(raw or "").strip()
+        if pid and pid not in wanted:
+            wanted.append(pid)
+    ordered = [r for pid in wanted for r in rows if str(r.get("id")) == pid]
+    if not ordered:
+        raise ValueError("没有可用的项目 id")
+    placed = {str(r.get("id")) for r in ordered}
+    rest = [r for r in rows if str(r.get("id")) not in placed]
+    for idx, r in enumerate(ordered):
+        r["order"] = idx
+    for idx, r in enumerate(rest):
+        r["order"] = len(ordered) + idx
+    _save(data_dir, rows)
+    return ordered
+
+
 def create(data_dir: str | Path, name: str = "") -> dict:
     """新建项目。name 为空则用默认名 Project A/B/C，并在返回值里给出补全名称的提醒。"""
     rows = _load(data_dir)
@@ -76,6 +116,10 @@ def create(data_dir: str | Path, name: str = "") -> dict:
     clean = str(name or "").strip()
     display = clean or default_name(len(rows))
     row = {"id": pid, "name": display, "named": bool(clean), "created": _now()}
+    # 用户拖过顺序后，新项目仍要排在最上面（2026-10-20 David：新建完就在新项目里记）。
+    # 做法是取最小 order 再减一，而不是重排全表，老顺序一个字不动。
+    if any(_has_order(r) for r in rows):
+        row["order"] = min(float(r["order"]) for r in rows if _has_order(r)) - 1
     rows.append(row)
     _save(data_dir, rows)
     out = dict(row)
@@ -473,10 +517,10 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
     rows = _sync(data_dir, events)
     stat = {p["project"]: p for p in summary(data_dir, events)["projects"]}
 
-    # **新建的排最上面**（2026-10-20 David：「默认在最顶上的项目，新建项目了以后，
-    # 就在新建的项目里增加」）：前端默认选中第一行，所以顺序必须让新项目出现在第一行；
-    # 否则重新打开页面时默认会落回最早建的那个项目。
-    rows = sorted(rows, key=lambda r: str(r.get("created") or ""), reverse=True)
+    # 顺序：用户长按拖过就按他拖的来（order 升序）；没拖过保持原行为，新建的排最上面
+    # （2026-10-20 David：「新建项目了以后，就在新建的项目里增加」）。
+    # 前端默认选中第一行，所以顺序错了会让默认落回最早建的那个项目。
+    rows = _ordered_rows(rows)
 
     out = []
     for r in rows:
@@ -495,6 +539,9 @@ def list_projects(data_dir: str | Path, events: list[dict] | None) -> dict:
             "count": s.get("income_count", 0) + s.get("expense_count", 0),
         })
         out[-1]["id"] = r.get("id", "")
+        # 拖动排序用的顺序值：没拖过的项目不带这个字段，前端据此原样渲染
+        if _has_order(r):
+            out[-1]["order"] = float(r["order"])
         if r.get("name_hint"):
             out[-1]["name_hint"] = r["name_hint"]
 

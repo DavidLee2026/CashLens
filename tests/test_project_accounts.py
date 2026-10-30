@@ -337,15 +337,21 @@ def test_pending_accept_defaults_to_the_selected_project():
     assert "未归项目（总账户）" not in src
 
 
-def test_projects_are_listed_newest_first():
-    """项目列表按创建时间**倒序**（新建的排最上面）。
+def test_projects_are_listed_newest_first(tmp_path):
+    """用户没拖过顺序时，项目列表按创建时间**倒序**（新建的排最上面）。
 
     为什么：前端"当前项目"默认取第一行（David：「默认在最顶上的项目，新建项目了以后，
     就在新建的项目里增加」）。若列表是正序，用户新建完刷新一遍，默认又会落回最早那个项目。
+    2026-10-30 加了拖动排序：拖过就按用户拖的来，没拖过仍是新建的在最上面。
+    这里改成行为断言（原先钉的是源码里那一行 sorted，一换实现就误报）。
     """
-    src = (Path(__file__).resolve().parents[1] / "backend" / "app" / "services"
-           / "projects.py").read_text(encoding="utf-8")
-    body = src[src.index("def list_projects"):]
-    body = body[body.index("\n") :]          # 去掉函数签名那一行
-    body = body[: body.index("\ndef ")] if "\ndef " in body else body
-    assert 'sorted(rows, key=lambda r: str(r.get("created") or ""), reverse=True)' in body
+    import json
+
+    rows = [
+        {"id": "project_a", "name": "早", "named": True, "created": "2026-10-01T10:00:00"},
+        {"id": "project_b", "name": "中", "named": True, "created": "2026-10-02T10:00:00"},
+        {"id": "project_c", "name": "新", "named": True, "created": "2026-10-03T10:00:00"},
+    ]
+    (tmp_path / "projects.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    got = [p["id"] for p in projects.list_projects(tmp_path, [])["projects"]]
+    assert got == ["project_c", "project_b", "project_a"]

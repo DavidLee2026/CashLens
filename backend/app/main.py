@@ -1048,6 +1048,12 @@ class ProjectIn(BaseModel):
     reuse: bool = False
 
 
+class ReorderIn(BaseModel):
+    """项目拖动排序：按数组顺序落盘（前端松手时一次性发全量）。"""
+
+    ids: list[str] = []
+
+
 @app.get("/api/projects")
 def projects_list():
     """项目清单（含每个项目的收支汇总）+ 未归项目一行。
@@ -1055,6 +1061,23 @@ def projects_list():
     项目是账本事件的属性维度：真实项目（如 示例项目 A），不是费用类别（打车/吃饭）。
     """
     return projects.list_projects(data_dir(), _events())
+
+
+@app.post("/api/projects/reorder")
+def projects_reorder(body: ReorderIn):
+    """保存左侧项目列表的拖动顺序。
+
+    只改 projects.json 里的 order 字段，账本与项目名都不动。
+    """
+    if not body.ids:
+        raise HTTPException(status_code=422, detail="没有传项目顺序")
+    try:
+        projects.reorder(data_dir(), body.ids)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    view = projects.list_projects(data_dir(), _events())
+    return {"ok": True, "order": [p["id"] for p in view["projects"]],
+            "projects": view["projects"]}
 
 
 @app.post("/api/projects")

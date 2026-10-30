@@ -451,3 +451,49 @@ def test_purge_must_rebuild_sqlite_projection(tmp_path):
     stale = run_state(ledger_path, db_path)
     assert stale["rebuilt"] is False
     assert stale["assumptions"] == []                                  # 投影里没有 → 是缓存，不是实时视图
+
+
+# ─── 拖动排序（2026-10-30 David：左侧项目可长按拖动换位置）──────────
+# 顺序是用户的偏好，必须落盘：刷新、换设备、换浏览器都该是他拖过的样子。
+def test_reorder_persists_and_wins_over_created_at(tmp_path):
+    for name in ("甲", "乙", "丙"):
+        projects.create(tmp_path, name)
+    ids = [r["id"] for r in projects.visible_rows(tmp_path)]
+    # 拖一个和创建顺序无关的顺序：把最后一个挪到最前、第一个挪到最后
+    wanted = [ids[-1], ids[1], ids[0]]
+    projects.reorder(tmp_path, wanted)
+    assert [p["id"] for p in projects.list_projects(tmp_path, [])["projects"]] == wanted
+    # 再读一遍（等价于刷新页面 / 换个设备打开）：顺序还在
+    assert [p["id"] for p in projects.list_projects(tmp_path, [])["projects"]] == wanted
+
+
+def test_new_project_still_lands_first_after_user_sorted(tmp_path):
+    """拖过顺序以后，新建的项目仍要排最上面。
+
+    否则新建完默认选中会落回别的项目，接下来的账记到别人名下（2026-10-20 的原口径）。
+    """
+    a = projects.create(tmp_path, "甲")
+    b = projects.create(tmp_path, "乙")
+    projects.reorder(tmp_path, [a["id"], b["id"]])
+    c = projects.create(tmp_path, "丙")
+    got = [p["id"] for p in projects.list_projects(tmp_path, [])["projects"]]
+    assert got[0] == c["id"]
+
+
+def test_reorder_puts_unlisted_projects_at_tail(tmp_path):
+    a = projects.create(tmp_path, "甲")
+    b = projects.create(tmp_path, "乙")
+    c = projects.create(tmp_path, "丙")
+    projects.reorder(tmp_path, [b["id"]])
+    got = [p["id"] for p in projects.list_projects(tmp_path, [])["projects"]]
+    assert got[0] == b["id"]
+    assert set(got[1:]) == {a["id"], c["id"]}
+
+
+def test_reorder_rejects_all_unknown_ids(tmp_path):
+    projects.create(tmp_path, "甲")
+    try:
+        projects.reorder(tmp_path, ["no-such-id"])
+    except ValueError:
+        return
+    raise AssertionError("全是未知 id 时应当拒绝，不能静默改成空顺序")

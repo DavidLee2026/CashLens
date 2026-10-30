@@ -563,11 +563,12 @@ def test_current_project_defaults_to_the_topmost_and_never_clears():
     """
     src = _page_src()
     # 点一下只设项目，不再有"再点一次清空"的分支
-    assert "onClick={() => setActiveProject(p.id)}" in src
+    # （2026-10-30 起 click 里多了一层「拖动结束后吞掉这一下」的判断，所以只钉设定动作本身）
+    assert "setActiveProject(p.id);" in src
     assert 'setActiveProject(activeProject === p.id ? "" : p.id)' not in src, \
         "不许再有「再点一次取消」这条分支"
     assert "再点一次取消" not in src
-    # 默认落在列表第一行（后端按创建时间倒序，新建的排第一）
+    # 默认落在列表第一行（拖过就按用户拖的顺序；没拖过按创建时间倒序，新建的排第一）
     assert "setActiveProject(projView.projects[0]?.id ?? \"\")" in src
     # 只有"一个项目都没有"时才显示未归
     assert "未归项目（还没有项目）" in src
@@ -644,3 +645,107 @@ def test_import_asks_for_a_project_before_landing_in_unassigned():
     block = src[src.index("async function resolveIntakeAsk"):]
     block = block[: block.index("async function uploadFiles")]
     assert '"/api/projects"' in block and "setActiveProject(pid)" in block
+
+
+# ─── 自动滚到底部必须有条件（2026-10-30 真机）────────────────────────
+# 现象：导入进行中，用户往上翻看上面的内容，界面每 3 秒被拽回聊天最底部，
+# 看起来像「自己刷新了」。根因是每次消息数组变化都无条件 scrollTop = scrollHeight，
+# 而导入每 3 秒推一次进度都会改消息。修法：只有本来就在底部才跟随。
+def test_auto_scroll_only_when_user_is_at_bottom():
+    src = _page_src()
+    assert "atBottomRef" in src, "聊天自动滚动必须记住「用户是不是在底部」"
+    assert "onScroll={onLogScroll}" in src, "聊天容器必须接滚动监听，否则判断不出用户在哪"
+    # 滚动到底这一句必须被 atBottomRef 守住 —— 光加 ref 不加条件等于没修
+    i = src.index("useEffect(() => {\n    const el = logRef.current;")
+    block = src[i: i + 400]
+    assert "atBottomRef.current" in block, "滚到底之前必须判断用户是否在底部"
+    assert "if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;" in block
+
+
+def test_sending_a_message_always_returns_to_bottom():
+    """自己发言＝主动回到对话，不该因为刚才在往上翻就把自己的话藏起来。"""
+    src = _page_src()
+    i = src.index("async function send(override?: string)")
+    block = src[i: i + 700]
+    assert "atBottomRef.current = true" in block
+
+
+# ─── 左侧项目长按拖动排序（2026-10-30 David）────────────────────────
+def test_project_rows_support_long_press_drag():
+    src = _page_src()
+    assert "startProjPress" in src and "beginProjDrag" in src, "项目行要接长按拖动的按下与开始"
+    assert "pressTimerRef" in src and "400" in src, "长按要有延时门槛，否则点一下就开始拖"
+    assert "suppressProjClickRef" in src, "拖完那一下的 click 必须吞掉，否则顺手把项目选中了"
+    assert "/api/projects/reorder" in src, "松手必须落库，否则刷新就回到原顺序"
+    # 只在移动超过阈值时才判成滚动（手机上手指一动就放弃长按）
+    assert "Math.abs(e.clientY - s.y) > 8" in src
+    # 排除范围只能是右侧「⋯」操作区：项目名本身就是 button，写成 closest("button")
+    # 会让整行都拖不动（2026-10-30 真机验证时踩到，长按 0.56 秒毫无反应）
+    assert 'target.closest(".ev-acts")' in src
+
+
+def test_drag_release_is_listened_on_window():
+    """松手必须挂到 window 上，不能只挂每一行。
+
+    2026-10-30 David 真机：把下面的项目往上拖、在行间空隙松手，完全没反应，
+    手型还留着，得再点一下上面的项目才动。原因就是 pointerup 只挂在行上 ——
+    指针在空隙或列表外抬起时，谁也收不到这个事件，拖动状态就卡住了。
+    """
+    src = _page_src()
+    assert 'window.addEventListener("pointerup", up)' in src
+    assert 'window.addEventListener("pointercancel", cancel)' in src
+    # 松手前先把监听、transform、body class 全部收干净（否则手型留在 grabbing）
+    i = src.index("const finish = (commit: boolean) =>")
+    block = src[i: i + 900]
+    assert "removeEventListener" in block
+    assert "document.body.classList.remove(\"proj-dragging\")" in block
+    assert 'row.style.transform = ""' in block
+    # 拖动中那一行要真的跟着手指走（只画落点线会显得很卡）
+    assert "row.style.transform = `translateY(" in src
+    assert "requestAnimationFrame" in src, "跟手要用 rAF 节流，否则每次 pointermove 都重排"
+
+
+def test_drag_commits_on_release_not_on_next_click():
+    """松手就提交：不能再出现"要再点一下上面的项目才移动"。
+
+    提交入口必须是 finish(true)，而不是某次 click。
+    """
+    src = _page_src()
+    i = src.index("const finish = (commit: boolean) =>")
+    block = src[i: i + 900]
+    assert "if (commit && targetIdx >= 0) void saveProjOrder(pid, targetIdx);" in block
+
+
+def test_project_drag_has_visible_feedback():
+    css = _css()
+    assert ".proj-item.dragging" in css
+    assert ".proj-item.drop-target" in css, "拖动时要有一条落点线，否则不知道会插到哪"
+    assert "body.proj-dragging" in css and "touch-action:none" in css, \
+        "拖动期间必须禁掉触摸滚动，否则手机上拖不起来"
+
+
+# ─── 最近记的账：分类要有彩色药丸（2026-10-30 David）─────────────────
+def test_recent_events_render_category_pills():
+    """「最近记的账」里分类必须是药丸，不能只剩一行灰字。
+
+    原话：「里面的标签怎么没有不同颜色的药丸显示，只有文字」。
+    纯文字看不出类别，扫一眼分不清是吃饭还是打车。
+    """
+    src = _page_src()
+    assert "catTone(ev.category)" in src
+    assert 'className={`pill ${catTone(ev.category)}`}' in src
+    css = _css()
+    for cls in ("cat-amber", "cat-cyan", "cat-indigo", "cat-navy", "cat-red", "cat-green", "cat-gray"):
+        assert f".pill.{cls}" in css, f"{cls} 的药丸样式没了"
+
+
+def test_every_backend_category_has_a_pill_tone():
+    """后端分类清单里每一个都要有配色，否则新分类会静默变成灰药丸。"""
+    import sys
+    sys.path.insert(0, str(_ROOT / "backend"))
+    from app.services import categories as cats  # noqa: PLC0415
+
+    src = _page_src()
+    block = src[src.index("const CAT_TONE"): src.index("function catTone")]
+    for name in list(cats.CATEGORIES) + list(cats.INCOME_CATEGORIES):
+        assert f"{name}:" in block, f"分类「{name}」没有配色，会退成灰色"

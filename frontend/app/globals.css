@@ -37,6 +37,9 @@
   --risk-bg:rgba(224,54,75,.10);
   --warn:var(--amber-500);
   --warn-bg:rgba(209,146,11,.12);
+  /* 分类药丸用的两个底色（2026-10-30）：仍然只由既有色相派生 */
+  --cyan-bg:rgba(0,184,217,.10);
+  --navy-bg:rgba(31,58,95,.08);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font-sans);color:var(--text);background:var(--bg);line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -410,7 +413,23 @@ button{font-family:inherit}
 /* 事件列表 */
 .ev{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed var(--gray-200);font-size:13px}
 .ev:last-child{border-bottom:none}
-.ev .m{color:var(--text-2);font-size:12px;display:block}
+.ev .m{color:var(--text-2);font-size:12px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:3px}
+/* 分类药丸（2026-10-30 David：只有灰字看不出类别）。色相全部来自 token，按语义分组 */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;line-height:1;
+  padding:3px 8px;border-radius:999px;white-space:nowrap}
+.pill::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+.pill.cat-amber{color:var(--amber-500);background:var(--warn-bg)}
+.pill.cat-cyan{color:var(--cyan-500);background:var(--cyan-bg)}
+.pill.cat-indigo{color:var(--brand);background:var(--brand-bg)}
+.pill.cat-navy{color:var(--navy-700);background:var(--navy-bg)}
+.pill.cat-red{color:var(--risk);background:var(--risk-bg)}
+.pill.cat-green{color:var(--income);background:var(--income-bg)}
+.pill.cat-gray{color:var(--text-2);background:var(--gray-100)}
+/* 渠道用描边款：它是次要信息，不该和分类抢注意力 */
+.pill.cat-ghost{color:var(--text-2);background:transparent;border:1px solid var(--border);font-weight:500}
+.pill.cat-ghost::before{display:none}
+/* 日期对比度：--text-3 在白底上太淡（截图里几乎看不见），改用 --text-2 */
+.m-date{font-size:12px;color:var(--text-2);opacity:.85}
 /* 「最近事件」默认只露 5 条（EV_WINDOW），要看全部点下面的「展开其余 N 笔」。
    ⚠️ 这里**不再做局部滚动**：取消卡片之后左栏已经没有自己的滚动条了，
    再在这一块里塞第二个滚动条就是 David 说的「三处滚动、看着头晕」。 */
@@ -440,6 +459,18 @@ button{font-family:inherit}
    点开、取消、建完都不改变左栏高度，两列因此始终等高（配合上面的 min-height）。
    浮层锚在按钮或所在项目行下方，带阴影浮在内容之上，不挤压下面的卡片。 */
 .proj-item{position:relative}
+/* 长按拖动排序（2026-10-30 David）：
+   ① 被拖的那一行**跟着手指走**（JS 直接改 transform，不靠重渲染，所以跟手）；
+   ② 其它位置只更新一条落点线，松手就落位；
+   ③ 拖动期间禁文本选择与触摸滚动，否则手机上手指一动就是滚页面，拖不起来。 */
+.proj-item.dragging{z-index:8;position:relative;background:var(--card);border-radius:10px;
+  box-shadow:0 10px 24px rgba(10,37,64,.18);will-change:transform;cursor:grabbing}
+.proj-item.dragging .ev{background:var(--brand-bg);border-radius:8px}
+.proj-item.drop-target::before{content:"";position:absolute;left:0;right:0;top:-3px;height:2px;
+  background:var(--brand);border-radius:2px}
+body.proj-dragging{user-select:none;-webkit-user-select:none}
+body.proj-dragging .proj-item{touch-action:none}
+body.proj-dragging .ev-pick{cursor:grabbing}
 .proj-pop{position:absolute;z-index:30;background:var(--card);border:1px solid var(--border);
   border-radius:10px;box-shadow:0 10px 26px rgba(10,37,64,.16);padding:12px}
 .proj-pop.new{top:48px;left:16px;right:16px}
